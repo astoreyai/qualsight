@@ -10,6 +10,7 @@ Run.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -170,6 +171,33 @@ CREATE TABLE IF NOT EXISTS utility_analyses (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS utility_analyses_by_project ON utility_analyses(project_id, created_at);
+CREATE TABLE IF NOT EXISTS cross_matcher_analyses (
+    analysis_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(project_id),
+    matrix_id TEXT NOT NULL,
+    quality_job_id TEXT NOT NULL,
+    quality_measure TEXT NOT NULL,
+    pair_quality_policy TEXT NOT NULL,
+    directory TEXT NOT NULL,
+    document_sha256 TEXT NOT NULL,
+    pairs_sha256 TEXT NOT NULL,
+    summary_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS cross_matcher_by_project ON cross_matcher_analyses(project_id, created_at);
+CREATE TABLE IF NOT EXISTS annotations (
+    annotation_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(project_id),
+    subject_type TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    text TEXT NOT NULL,
+    context_json TEXT NOT NULL,
+    evidence_sha256 TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS annotations_by_subject ON annotations(subject_type, subject_id, created_at);
 CREATE TABLE IF NOT EXISTS jobs (
     job_id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL REFERENCES projects(project_id),
@@ -758,6 +786,94 @@ class RunStore:
                 self._connection.execute("ROLLBACK")
                 raise
             self._connection.execute("COMMIT")
+
+    def _record_analysis_run(self, run: CompletedRun, experiment: Experiment, details: dict[str, Any]) -> str:
+        """Insert the immutable Run, its experiment, artifacts, and RUN_COMPLETED audit event inside the caller's transaction."""
+
+        run_json = run.model_dump_json()
+        run_sha = _evidence(run_json)
+        experiment_json = experiment.model_dump_json()
+        self._insert_once("experiments", "experiment_id", experiment.experiment_id, byte_exact=False, columns={
+            "experiment_id": experiment.experiment_id, "project_id": experiment.project_id, "dataset_id": experiment.dataset_id,
+            "evidence_sha256": _evidence(experiment_json), "record_json": experiment_json})
+        self._insert_once("runs", "run_id", run.run_id, byte_exact=True, columns={
+            "run_id": run.run_id, "project_id": run.project_id, "experiment_id": run.experiment_id, "sample_id": None,
+            "run_kind": "ANALYSIS", "status": run.status.value, "engine_resource_id": run.matcher.component_id or "",
+            "engine_version": run.matcher.version or "", "start_time": run.start_time.isoformat(), "end_time": run.end_time.isoformat(),
+            "evidence_sha256": run_sha, "record_json": run_json})
+        for artifact in run.artifacts:
+            artifact_json = artifact.model_dump_json()
+            self._insert_once("artifacts", "artifact_id", artifact.artifact_id, byte_exact=True, columns={
+                "artifact_id": artifact.artifact_id, "run_id": artifact.run_id, "kind": artifact.kind.value, "uri": artifact.uri,
+                "sha256": artifact.sha256, "evidence_sha256": _evidence(artifact_json), "record_json": artifact_json})
+        event = AuditEvent(
+            audit_event_id=f"audit-event:sha256:{_evidence(run.run_id + run_sha)}", project_id=run.project_id, actor_id=run.user_id,
+            event_type=AuditEventType.RUN_COMPLETED, subject_type="Run", subject_id=run.run_id, occurred_at=run.end_time,
+            details=CanonicalJson.from_value({"kind": "ANALYSIS", **details}), current_evidence_sha256=run_sha, local_only=True)
+        event_json = event.model_dump_json()
+        self._insert_once("audit_events", "audit_event_id", event.audit_event_id, byte_exact=True, columns={
+            "audit_event_id": event.audit_event_id, "project_id": event.project_id, "subject_type": event.subject_type, "subject_id": event.subject_id,
+            "occurred_at": event.occurred_at.isoformat(), "evidence_sha256": _evidence(event_json), "record_json": event_json})
+        return run_sha
+
+    def record_cross_matcher_analysis(self, result: Any) -> None:
+        run = result.run
+        summary_text = json.dumps(result.summary, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        with self._lock:
+            self._connection.execute("BEGIN")
+            try:
+                self._record_analysis_run(run, result.experiment, {"analysis_kind": "CROSS_MATCHER", "analysis_id": result.analysis_id, "matrix_id": result.summary["matrix_id"], "quality_job_id": result.summary["quality_job_id"]})
+                self._connection.execute(
+                    "INSERT INTO cross_matcher_analyses (analysis_id, run_id, project_id, matrix_id, quality_job_id, quality_measure, pair_quality_policy, directory, document_sha256, pairs_sha256, summary_json, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (result.analysis_id, run.run_id, run.project_id, result.summary["matrix_id"], result.summary["quality_job_id"], result.summary["quality_measure"], result.summary["pair_quality_policy"],
+                     str(result.directory), hashlib.sha256(result.document_path.read_bytes()).hexdigest(), hashlib.sha256(result.pairs_path.read_bytes()).hexdigest(), summary_text, run.end_time.isoformat()),
+                )
+            except BaseException:
+                self._connection.execute("ROLLBACK")
+                raise
+            self._connection.execute("COMMIT")
+
+    def cross_matcher_analyses(self, *, project_id: str | None = None, matrix_id: str | None = None) -> list[dict[str, Any]]:
+        clauses, params = [], []
+        if project_id is not None:
+            clauses.append("project_id = ?"); params.append(project_id)
+        if matrix_id is not None:
+            clauses.append("matrix_id = ?"); params.append(matrix_id)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        cursor = self._connection.execute(f"SELECT * FROM cross_matcher_analyses{where} ORDER BY created_at", params)
+        return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
+
+    def cross_matcher_analysis(self, analysis_id: str) -> dict[str, Any] | None:
+        cursor = self._connection.execute("SELECT * FROM cross_matcher_analyses WHERE analysis_id = ? OR run_id = ?", (analysis_id, analysis_id))
+        row = cursor.fetchone()
+        return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
+
+    def record_annotation(self, *, project_id: str, subject_type: str, subject_id: str, actor_id: str, text: str, context: dict[str, Any]) -> dict[str, Any]:
+        created_at = datetime.now(timezone.utc).astimezone().isoformat()
+        context_text = json.dumps(context, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        evidence = _evidence(json.dumps({"project_id": project_id, "subject_type": subject_type, "subject_id": subject_id, "actor_id": actor_id, "created_at": created_at, "text": text, "context": context}, sort_keys=True))
+        annotation_id = f"annotation:sha256:{evidence}"
+        with self._lock:
+            self._connection.execute(
+                "INSERT INTO annotations (annotation_id, project_id, subject_type, subject_id, actor_id, created_at, text, context_json, evidence_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (annotation_id, project_id, subject_type, subject_id, actor_id, created_at, text, context_text, evidence),
+            )
+            self._connection.commit()
+        return {"annotation_id": annotation_id, "project_id": project_id, "subject_type": subject_type, "subject_id": subject_id, "actor_id": actor_id, "created_at": created_at, "text": text, "context": context, "evidence_sha256": evidence}
+
+    def annotations(self, *, subject_id: str | None = None, project_id: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
+        clauses, params = [], []
+        if subject_id is not None:
+            clauses.append("subject_id = ?"); params.append(subject_id)
+        if project_id is not None:
+            clauses.append("project_id = ?"); params.append(project_id)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        cursor = self._connection.execute(f"SELECT * FROM annotations{where} ORDER BY created_at LIMIT ?", [*params, int(limit)])
+        rows = [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
+        for row in rows:
+            row["context"] = json.loads(row.pop("context_json"))
+        return rows
 
     def utility_analyses(self, *, project_id: str | None = None, matcher_run_id: str | None = None) -> list[dict[str, Any]]:
         clauses, params = [], []

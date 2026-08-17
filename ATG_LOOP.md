@@ -2,7 +2,7 @@
 
 **Control contract:** v1.6  
 **Date:** August 17, 2026  
-**State:** Active controller; Phases 0, 1, 2, and 3 are accepted (Phase 2 under owner decision 28; QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34); current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 and QS-C25 remain BLOCKED on a real external score artifact; no whole capability is dependency-ready; execution of the registered installed OFIQ v1.1.2 runtime and of the frozen matcher runtime (registered SCRFD-10G, AdaFace, ElasticFace, TransFace bytes) on registered inputs is authorized by the owner use-permission receipt  
+**State:** Active controller; Phases 0–4 are accepted (Phase 2 under owner decision 28; QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43); current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 and QS-C25 remain BLOCKED on a real external score artifact; no whole capability is dependency-ready; execution of the registered installed OFIQ v1.1.2 runtime and of the frozen matcher runtime (registered SCRFD-10G, AdaFace, ElasticFace, TransFace bytes) on registered inputs is authorized by the owner use-permission receipt  
 **Companion graph:** [ATG_PLAN.md](./ATG_PLAN.md)  
 **Product authority:** [PRD.md](./PRD.md)
 
@@ -62,7 +62,7 @@ There is no back-edge from N4 to N0. Continual development consists of starting 
 
 ## Level 2 — Controller nodes
 
-N0–N4 preserve the cycle interface but are not all leaf invocations. ATG_PLAN.md retains the literal commands and results that produced historical evidence; under v1.6 (owner decision 28) Phase 2 is closed on QualSight-executed Runs, QS-C21 is parked before QS-H74, and after cycle C20 (Phase 3 accepted) QS-E40 is the dependency-ready whole capability. For each frozen cycle, S3 must refine every remaining parameterized controller action into literal leaves before L1 starts. Prose in this table is never sufficient authority to execute an edit or launch a process.
+N0–N4 preserve the cycle interface but are not all leaf invocations. ATG_PLAN.md retains the literal commands and results that produced historical evidence; under v1.6 (owner decision 28) Phase 2 is closed on QualSight-executed Runs, QS-C21 is parked before QS-H74, and after cycles C20–C21 (Phases 3 and 4 accepted) QS-F50 is the dependency-ready whole capability. For each frozen cycle, S3 must refine every remaining parameterized controller action into literal leaves before L1 starts. Prose in this table is never sufficient authority to execute an edit or launch a process.
 
 | Node | Input | Literal action | Output |
 |---|---|---|---|
@@ -81,13 +81,13 @@ This snapshot is routing state, not new acceptance evidence. The companion graph
 
 | Class | Count | IDs or value | Controller effect |
 |---|---:|---|---|
-| Accepted whole capabilities | 26 | QS-A00, QS-A01, QS-A02, QS-A03, QS-A04, QS-A05, QS-A06, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B13, QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D32, QS-D33, QS-D34 | Frozen accepted outputs; Phase 0, 1, 2, and 3 exits satisfied (Phase 2 under decision 28); Phase 2 executed except imported scores |
+| Accepted whole capabilities | 30 | QS-A00, QS-A01, QS-A02, QS-A03, QS-A04, QS-A05, QS-A06, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B13, QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43 | Frozen accepted outputs; Phase 0–4 exits satisfied (Phase 2 under decision 28); Phase 2 executed except imported scores |
 | Current accepted evidence children | 13 | QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-D31.R0 | Frozen child outputs |
 | Superseded historical child events | 11 | QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, QS-A06.R1M | Preserved in the ledger; not current-byte evidence |
 | Blocked parent capabilities | 1 | QS-C21 | Parked by decision 28 as a direct predecessor of QS-H74; accepts only when a real externally computed score artifact is registered (owner input) |
 | Blocked refinement parents | 0 | none | — |
 | Accepted refinement parents | 1 | QS-A02.LFW | Dataset registry consumed by QS-B11 |
-| Dependency-ready whole capabilities | 1 | QS-E40 | Phase 4 entry; owner-selected next work is Phases 4, 5, and 7 in dependency order |
+| Dependency-ready whole capabilities | 1 | QS-F50 | Phase 5 entry; owner-selected next work is Phases 5 and 7 in dependency order |
 | Authorized OFIQ process executions | registered v1.1.2 runtime only | `ofiq-v1-1-2-linux-runtime` on registered inputs or generated batch lists of recorded dataset samples under a common approved scope | Refusal before `Popen` for every other runtime, path, or scope |
 | Authorized matcher/detector executions | frozen runtime only | registered SCRFD-10G, AdaFace IR-101, ElasticFace-Arc R100, TransFace-S bytes through `qualsight.matchers` (strict, weights_only, pinned architecture sources) | Any other loader path is refused |
 | Direct backend runtime dependencies | 10 | `pydantic==2.13.4`, `fastapi==0.141.1`, `uvicorn==0.52.3`, `pyarrow==25.0.1`, `duckdb==1.5.5`, `torch==2.10.0`, `timm==1.0.28`, `onnxruntime==1.28.0`, `opencv-python-headless==5.0.0.93`, `numpy==2.4.6` | Pinned schema-validation, control-plane, analytics, and matcher-runtime dependencies |
@@ -256,4 +256,4 @@ Every cycle closes with:
 - dirty/committed/pushed state;
 - one claim most likely to be wrong when runtime coverage is incomplete.
 
-The next cycle starts from that persisted state as a new DAG execution. In v1.6, whole-capability cycles proceed from QS-E40 through Phases 4, 5, and 7 in dependency order (Phase 3 closed in cycle C20); QS-C21 stays parked until the owner registers a real external score artifact, and no substitute artifact may be generated to close it.
+The next cycle starts from that persisted state as a new DAG execution. In v1.6, whole-capability cycles proceed from QS-F50 through Phases 5 and 7 in dependency order (Phases 3 and 4 closed in cycles C20–C21); QS-C21 stays parked until the owner registers a real external score artifact, and no substitute artifact may be generated to close it.

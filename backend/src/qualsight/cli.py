@@ -73,6 +73,16 @@ def main(argv: list[str] | None = None) -> int:
     utility.add_argument("--partial-interval", type=float, default=0.2)
     utility.add_argument("--replicates", type=int, default=1000)
     utility.add_argument("--seed", type=int, default=20260817)
+    cross = sub.add_parser("cross-matcher", help="run fixed-condition matcher contrasts and fixed-matcher preprocessing contrasts over a recorded matrix")
+    cross.add_argument("--project-id", required=True)
+    cross.add_argument("--matrix-id", required=True)
+    cross.add_argument("--quality-job-id", required=True)
+    cross.add_argument("--quality-measure", default="UnifiedQualityScore")
+    cross.add_argument("--policy", default="pair.quality.min")
+    cross.add_argument("--target-fmr", type=float, default=0.001)
+    cross.add_argument("--partial-interval", type=float, default=0.2)
+    cross.add_argument("--replicates", type=int, default=1000)
+    cross.add_argument("--seed", type=int, default=20260817)
     args = parser.parse_args(argv)
 
     settings = Settings.from_environment()
@@ -236,6 +246,22 @@ def main(argv: list[str] | None = None) -> int:
             )
             job = UtilityAnalysisJob(store=store, repository_root=settings.repository_root, project=project, actor=service.actor, request=request, job_root=settings.data_dir / "analyses")
             existing = store.utility_analysis(job.analysis_id)
+            if existing is not None:
+                print(json.dumps({"analysis_id": job.analysis_id, "already_recorded": True, "summary": json.loads(existing["summary_json"])}, indent=2))
+                return 0
+            result = job.run()
+            print(json.dumps({"analysis_id": result.analysis_id, "run_id": result.run.run_id, "directory": str(result.directory), "summary": result.summary}, indent=2))
+            return 0
+        if args.command == "cross-matcher":
+            from .analysis.crossmatcher import CrossMatcherJob, CrossMatcherRequest
+            from .projects import ProjectService
+
+            engine = _engine(settings)
+            service = ProjectService(store, engine)
+            project = service.require_writable(args.project_id)
+            request = CrossMatcherRequest(matrix_id=args.matrix_id, quality_job_id=args.quality_job_id, quality_measure=args.quality_measure, pair_quality_policy=args.policy, target_fmr=args.target_fmr, partial_interval=args.partial_interval, bootstrap_replicates=args.replicates, seed=args.seed)
+            job = CrossMatcherJob(store=store, registry=engine.registry, repository_root=settings.repository_root, project=project, actor=service.actor, request=request, job_root=settings.data_dir / "analyses")
+            existing = store.cross_matcher_analysis(job.analysis_id)
             if existing is not None:
                 print(json.dumps({"analysis_id": job.analysis_id, "already_recorded": True, "summary": json.loads(existing["summary_json"])}, indent=2))
                 return 0

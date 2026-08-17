@@ -12,6 +12,7 @@ import {
 import { Workbench } from "./Workbench";
 import { Matchers } from "./Matchers";
 import { Utility } from "./Utility";
+import { CrossMatcher } from "./CrossMatcher";
 
 type AssessState =
   | { phase: "idle" }
@@ -388,6 +389,7 @@ export function App() {
         <Workbench projectId={activeProjectId} onMessage={setProjectMessage} onDataset={setActiveDatasetId} />
         <Matchers projectId={activeProjectId} datasetId={activeDatasetId} onMessage={setProjectMessage} />
         <Utility projectId={activeProjectId} onMessage={setProjectMessage} />
+        <CrossMatcher projectId={activeProjectId} onMessage={setProjectMessage} />
 
         <section className="panel runs" aria-labelledby="runs-heading">
           <h2 id="runs-heading">Recorded runs</h2>

@@ -33,6 +33,7 @@ from ..projects import ProjectLifecycleError, ProjectService, ProjectView
 from ..protocols import ProtocolError, ProtocolService
 from ..matchers.matrix import MatcherMatrixJob, MatrixError
 from ..analysis.utility import UtilityAnalysisError, UtilityAnalysisJob, UtilityRequest, pair_quality_policies
+from ..analysis.crossmatcher import CrossMatcherError, CrossMatcherJob, CrossMatcherRequest, matcher_sets
 from ..matchers.upstream import UpstreamSources
 from ..execution.contracts import ContractValidationError, ExecutionOutcomeError
 from ..provenance import artifact_identity
@@ -80,6 +81,25 @@ class UtilityAnalysisRequest(ApiModel):
     partial_interval: float = Field(default=0.2, gt=0, le=1)
     bootstrap_replicates: int = Field(default=1000, ge=0, le=100_000)
     seed: int = Field(default=20260817, ge=0)
+
+
+class CrossMatcherRequestBody(ApiModel):
+    matrix_id: str = Field(min_length=1)
+    quality_job_id: str = Field(min_length=1)
+    quality_measure: str = Field(default="UnifiedQualityScore", min_length=1)
+    pair_quality_policy: str = Field(default="pair.quality.min", min_length=1)
+    target_fmr: float = Field(default=0.001, gt=0, lt=1)
+    partial_interval: float = Field(default=0.2, gt=0, le=1)
+    bootstrap_replicates: int = Field(default=1000, ge=0, le=100_000)
+    seed: int = Field(default=20260817, ge=0)
+
+
+class AnnotationCreate(ApiModel):
+    project_id: str = Field(min_length=1)
+    subject_type: str = Field(min_length=1, max_length=64)
+    subject_id: str = Field(min_length=1, max_length=512)
+    text: str = Field(min_length=1, max_length=4000)
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProjectCreate(ApiModel):
@@ -1129,6 +1149,138 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             right = store().sample(item["right_sample_id"])
             item["links"] = {"left_sample": f"/api/samples/{item['left_sample_id']}", "right_sample": f"/api/samples/{item['right_sample_id']}", "left_image": f"/api/samples/image?path={left.source_path}" if left else None, "right_image": f"/api/samples/image?path={right.source_path}" if right else None, "left_quality": f"/api/samples/{item['left_sample_id']}/quality", "right_quality": f"/api/samples/{item['right_sample_id']}/quality", "run": f"/api/runs/{row['run_id']}"}
         return JSONResponse(content={"analysis_id": analysis_id, "run_id": row["run_id"], "total": total, "offset": offset, "rows": rows})
+
+    # -- cross-matcher contrasts and the failure workbench (QS-E40–QS-E42) --------
+
+    cross_jobs: dict[str, dict[str, Any]] = {}
+
+    @app.get("/api/matrices/{matrix_id}/sets")
+    def matrix_sets(matrix_id: str) -> JSONResponse:
+        rows = store().matcher_leaves(matrix_id=matrix_id)
+        if not rows:
+            raise HTTPException(status_code=404, detail="matrix is not recorded")
+        sets = matcher_sets(rows)
+        registry = engine().registry
+        sets["matcher_rights"] = {row["matcher_id"]: registry.raw_resource(row["matcher_id"])["state"] for row in rows}
+        return JSONResponse(content=sets)
+
+    def cross_summary(row: dict[str, Any]) -> dict[str, Any]:
+        summary = json.loads(row["summary_json"])
+        summary["links"] = {"analysis": f"/api/cross-matcher/{row['analysis_id']}", "run": f"/api/runs/{row['run_id']}", "pairs": f"/api/cross-matcher/{row['analysis_id']}/pairs", "matrix": f"/api/matrices/{row['matrix_id']}", "quality_job": f"/api/jobs/{row['quality_job_id']}"}
+        summary["created_at"] = row["created_at"]
+        return summary
+
+    @app.post("/api/projects/{project_id}/cross-matcher", status_code=202)
+    def start_cross_matcher(project_id: str, request: CrossMatcherRequestBody) -> JSONResponse:
+        try:
+            project = projects().require_writable(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        try:
+            job = CrossMatcherJob(store=store(), registry=engine().registry, repository_root=settings.repository_root, project=project, actor=projects().actor, request=CrossMatcherRequest(**request.model_dump()), job_root=settings.data_dir / "analyses")
+        except CrossMatcherError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        existing = store().cross_matcher_analysis(job.analysis_id)
+        if existing is not None:
+            return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": "COMPLETED", "already_recorded": True, "summary": cross_summary(existing)})
+        with job_lock:
+            if job.analysis_id in cross_jobs:
+                return JSONResponse(status_code=202, content={"analysis_id": job.analysis_id, "state": cross_jobs[job.analysis_id]["state"]})
+            cross_jobs[job.analysis_id] = {"state": "RUNNING", "error": None}
+
+        def _run() -> None:
+            try:
+                job.run()
+                with job_lock:
+                    cross_jobs[job.analysis_id] = {"state": "COMPLETED", "error": None}
+            except Exception as error:  # noqa: BLE001
+                with job_lock:
+                    cross_jobs[job.analysis_id] = {"state": "FAILED", "error": f"{type(error).__name__}: {error}"}
+
+        executor.submit(_run)
+        return JSONResponse(status_code=202, content={"analysis_id": job.analysis_id, "state": "RUNNING"})
+
+    @app.get("/api/projects/{project_id}/cross-matcher")
+    def project_cross_matcher(project_id: str) -> JSONResponse:
+        return JSONResponse(content=[cross_summary(row) for row in store().cross_matcher_analyses(project_id=project_id)])
+
+    @app.get("/api/cross-matcher/{analysis_id}")
+    def cross_matcher_analysis(analysis_id: str, include: Literal["summary", "full"] = Query(default="full")) -> JSONResponse:
+        row = store().cross_matcher_analysis(analysis_id)
+        with job_lock:
+            live = cross_jobs.get(analysis_id)
+        if row is None:
+            if live is None:
+                raise HTTPException(status_code=404, detail="cross-matcher analysis is not recorded")
+            return JSONResponse(content={"analysis_id": analysis_id, "state": live["state"], "error": live["error"]})
+        content: dict[str, Any] = {"analysis_id": analysis_id, "state": "COMPLETED", "error": None, "summary": cross_summary(row)}
+        if include == "full":
+            content["document"] = json.loads((Path(row["directory"]) / "crossmatcher.json").read_text(encoding="utf-8"))
+            content["artifact_sha256"] = {"crossmatcher.json": row["document_sha256"], "contrast_pairs.parquet": row["pairs_sha256"]}
+        return JSONResponse(content=content)
+
+    @app.get("/api/cross-matcher/{analysis_id}/pairs")
+    def cross_matcher_pairs(
+        analysis_id: str,
+        contrast_id: str = Query(min_length=1),
+        category: str | None = Query(default=None),
+        label: str | None = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=10_000),
+        offset: int = Query(default=0, ge=0),
+    ) -> JSONResponse:
+        import duckdb
+
+        row = store().cross_matcher_analysis(analysis_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="cross-matcher analysis is not recorded")
+        document = json.loads((Path(row["directory"]) / "crossmatcher.json").read_text(encoding="utf-8"))
+        contrast = next((c for c in document["contrasts"] if c["contrast_id"] == contrast_id), None)
+        if contrast is None:
+            raise HTTPException(status_code=404, detail="contrast is not part of this analysis")
+        parquet = str(Path(row["directory"]) / "contrast_pairs.parquet").replace("'", "''")
+        clauses, params = ["contrast_id = ?"], [contrast_id]
+        if category is not None:
+            clauses.append("category = ?"); params.append(category)
+        if label is not None:
+            clauses.append("label = ?"); params.append(label)
+        where = " AND ".join(clauses)
+        connection = duckdb.connect()
+        try:
+            total = int(connection.execute(f"SELECT COUNT(*) FROM read_parquet('{parquet}') WHERE {where}", params).fetchone()[0])
+            cursor = connection.execute(f"SELECT * FROM read_parquet('{parquet}') WHERE {where} ORDER BY pair_quality NULLS LAST, pair_id LIMIT ? OFFSET ?", [*params, int(limit), int(offset)])
+            names = [item[0] for item in cursor.description]
+            rows = [dict(zip(names, values)) for values in cursor.fetchall()]
+        finally:
+            connection.close()
+        annotations_by_pair: dict[str, list[dict[str, Any]]] = {}
+        for note in store().annotations(project_id=row["project_id"]):
+            annotations_by_pair.setdefault(note["subject_id"], []).append(note)
+        for item in rows:
+            left = store().sample(item["left_sample_id"])
+            right = store().sample(item["right_sample_id"])
+            item["annotations"] = annotations_by_pair.get(item["pair_id"], [])
+            item["links"] = {"left_sample": f"/api/samples/{item['left_sample_id']}", "right_sample": f"/api/samples/{item['right_sample_id']}", "left_image": f"/api/samples/image?path={left.source_path}" if left else None, "right_image": f"/api/samples/image?path={right.source_path}" if right else None,
+                             "left_quality": f"/api/samples/{item['left_sample_id']}/quality", "right_quality": f"/api/samples/{item['right_sample_id']}/quality", "run_a": f"/api/runs/{contrast['a']['run_id']}", "run_b": f"/api/runs/{contrast['b']['run_id']}", "analysis_run": f"/api/runs/{row['run_id']}"}
+        return JSONResponse(content={"analysis_id": analysis_id, "contrast": {"contrast_id": contrast_id, "kind": contrast["kind"], "a": contrast["a"], "b": contrast["b"], "held_fixed": contrast["held_fixed"]}, "total": total, "offset": offset, "rows": rows})
+
+    @app.post("/api/annotations", status_code=201)
+    def create_annotation(request: AnnotationCreate) -> JSONResponse:
+        try:
+            projects().require_writable(request.project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        note = store().record_annotation(project_id=request.project_id, subject_type=request.subject_type, subject_id=request.subject_id, actor_id=projects().actor, text=request.text, context=request.context)
+        return JSONResponse(status_code=201, content=note)
+
+    @app.get("/api/annotations")
+    def list_annotations(subject_id: str | None = Query(default=None), project_id: str | None = Query(default=None)) -> JSONResponse:
+        if subject_id is None and project_id is None:
+            raise HTTPException(status_code=422, detail="subject_id or project_id is required")
+        return JSONResponse(content=store().annotations(subject_id=subject_id, project_id=project_id))
 
     @app.get("/api/projects/{project_id}/versions")
     def project_versions(project_id: str) -> JSONResponse:

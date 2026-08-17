@@ -2,7 +2,7 @@
 
 **Graph version:** v1.6  
 **Date:** August 17, 2026  
-**State:** Phases 0, 1, 2, and 3 are complete (Phase 2 under owner decision 28): QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, and QS-D30 through QS-D34 are accepted whole capabilities; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 remains blocked on a real external score artifact and is parked as a direct predecessor of QS-H74; QS-E40 is dependency-ready and Phases 4, 5, and 7 are the owner-selected next work  
+**State:** Phases 0–4 are complete (Phase 2 under owner decision 28): QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, and QS-E40 through QS-E43 are accepted whole capabilities; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 remains blocked on a real external score artifact and is parked as a direct predecessor of QS-H74; QS-F50 is dependency-ready and Phases 5 and 7 are the owner-selected next work  
 **Loop controller:** [ATG_LOOP.md](./ATG_LOOP.md)  
 **Canonical product requirements:** [PRD.md](./PRD.md)  
 **Evidence-only companion:** [PLAN.md](./PLAN.md)
@@ -359,11 +359,11 @@ Statuses in this table are graph states, not claims of implementation.
 | QS-D32 | §§16, 20, 28 | Uncertainty and quality-error models | Subject-aware resampling and supported models run only when the real sample supports them; unsupported precision is flagged | QS-D31 | ACCEPTED |
 | QS-D33 | §24 | Threshold-policy analysis | Real acceptance/rejection and recognition impacts reconcile exactly to source comparisons at each chosen policy threshold | QS-D31 | ACCEPTED |
 | QS-D34 | §56 Phase 3 | Quality-to-utility accepted artifact | Real quality scores and comparisons yield traceable ERC, risk-coverage, uncertainty, error modeling, and policy analysis | QS-D32, QS-D33 | ACCEPTED |
-| QS-E40 | §§22, 53–54 | Compatible selected matcher result set | At least two of AdaFace, ElasticFace, and TransFace have rights-cleared Runs over the same real protocol and the same preprocessing condition; preprocessing effects remain a separate within-matcher contrast | QS-C22, QS-D34 | DEPENDENCY_READY |
-| QS-E41 | §22 | Cross-matcher and preprocessing metric engine | Matcher contrasts hold preprocessing fixed; preprocessing contrasts hold matcher and protocol fixed; ERC overlays, differences, error overlap, interactions, and paired uncertainty preserve both identities | QS-D32, QS-E40 | BLOCKED_BY_PREDECESSORS |
-| QS-E42 | §§22, 33–34 | Cross-matcher failure workbench | Every disagreement resolves to real comparisons, permitted images, quality values, thresholds, matcher provenance, preprocessing provenance, and annotations | QS-C24, QS-E41 | BLOCKED_BY_PREDECESSORS |
-| QS-E43 | §56 Phase 4 | Cross-matcher accepted artifact | The selected matcher set completes fixed-condition matcher comparisons and fixed-matcher preprocessing comparisons with traceable utility differences and failure evidence | QS-E41, QS-E42 | BLOCKED_BY_PREDECESSORS |
-| QS-F50 | §§35–36, 40 | Provenance-bearing figure artifacts | PNG, SVG, and PDF outputs link to source rows, Run, metric definition, thresholds, configuration, and exportable values | QS-E43 | BLOCKED_BY_QS-E43 |
+| QS-E40 | §§22, 53–54 | Compatible selected matcher result set | At least two of AdaFace, ElasticFace, and TransFace have rights-cleared Runs over the same real protocol and the same preprocessing condition; preprocessing effects remain a separate within-matcher contrast | QS-C22, QS-D34 | ACCEPTED |
+| QS-E41 | §22 | Cross-matcher and preprocessing metric engine | Matcher contrasts hold preprocessing fixed; preprocessing contrasts hold matcher and protocol fixed; ERC overlays, differences, error overlap, interactions, and paired uncertainty preserve both identities | QS-D32, QS-E40 | ACCEPTED |
+| QS-E42 | §§22, 33–34 | Cross-matcher failure workbench | Every disagreement resolves to real comparisons, permitted images, quality values, thresholds, matcher provenance, preprocessing provenance, and annotations | QS-C24, QS-E41 | ACCEPTED |
+| QS-E43 | §56 Phase 4 | Cross-matcher accepted artifact | The selected matcher set completes fixed-condition matcher comparisons and fixed-matcher preprocessing comparisons with traceable utility differences and failure evidence | QS-E41, QS-E42 | ACCEPTED |
+| QS-F50 | §§35–36, 40 | Provenance-bearing figure artifacts | PNG, SVG, and PDF outputs link to source rows, Run, metric definition, thresholds, configuration, and exportable values | QS-E43 | DEPENDENCY_READY |
 | QS-F51 | §37 | Saved dashboards | Saved layout reloads exactly and every panel retains the underlying Run and provenance references | QS-F50 | BLOCKED_BY_QS-F50 |
 | QS-F52 | §§38–40 | Reports and exports | PDF, HTML, print, CSV, JSON, Parquet, SVG, PNG, and PDF outputs enforce data classification and reconcile to source results | QS-F50 | BLOCKED_BY_QS-F50 |
 | QS-F53 | §§41–42 | Reproduction bundle and mode | Bundle checksums validate; restricted images are excluded; rerun status is EXACT, WITHIN_TOLERANCE, DIFFERENT, MISSING_DEPENDENCY, MISSING_DATA, or BLOCKED based on observed evidence | QS-A03, QS-E43 | BLOCKED_BY_PREDECESSORS |
@@ -395,7 +395,7 @@ QS-X61 never authorizes fabricated identities, labels, scores, or source samples
 
 ## Current atomic frontier
 
-Phases 0, 1, 2, and 3 are complete (Phase 2 under owner decision 28): whole capabilities QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, and QS-D30 through QS-D34 are ACCEPTED. Current accepted evidence children are QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0. The ledger preserves superseded resource, domain, and execution events as history, but their stale registry and fixture-byte claims are not reused as current evidence. Gates marked *executing* launch the registered installed OFIQ v1.1.2 runtime on registered inputs under the owner use-permission receipt; every other gate is static. Every Node command below assumes `PATH=/usr/bin:$PATH` so that Node 20.20.2 is selected.
+Phases 0–4 are complete (Phase 2 under owner decision 28): whole capabilities QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, and QS-E40 through QS-E43 are ACCEPTED. Current accepted evidence children are QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0. The ledger preserves superseded resource, domain, and execution events as history, but their stale registry and fixture-byte claims are not reused as current evidence. Gates marked *executing* launch the registered installed OFIQ v1.1.2 runtime on registered inputs under the owner use-permission receipt; every other gate is static. Every Node command below assumes `PATH=/usr/bin:$PATH` so that Node 20.20.2 is selected.
 
 ### QS-A00 — Authority and requirement registry
 
@@ -891,13 +891,61 @@ python3 -m unittest discover -s tests -q
 **Acceptance:** the console's Quality → utility panel lists the recorded analyses of the project, runs a new analysis from the picked matcher Run, quality job, measure, pair policy, target FMR, quality threshold, and bootstrap count, overlays the FNMR-ERC of every recorded analysis, and shows for the selected analysis the two thresholds by kind, the four areas with cluster-bootstrap intervals, the policy table, the quality-conditioned bins with support flags, the association and prediction statistics, the per-measure impact table, and the rejected / prevented / removed pairs with images and links to both samples' quality Runs and to the analysis Run. Observation 06 (fixture pairs, real headless Chromium) recorded one analysis row, one ERC polyline, the policy table (30 % retained at Q = 40, 7 rejected, 0 errors prevented, 7 successful comparisons removed), 10 conditioned bins, 28 per-measure rows, and six rejected pairs resolving to real LFW pairs; exit 0. Every number shown traces to `utility.json` / `policy.json` / `pair_quality.parquet` of an immutable analysis Run that binds the source matcher Run's matcher, preprocessing, and model hashes and the quality job's engine binding.
 **State:** ACCEPTED (cycle 2026-08-17-C20). Backend gate 77/77, root gate 37/37 (recorded in the ledger).
 
-Historical accepted events QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, and QS-A06.R1M retain their exact recorded counts and hashes in `atg/ledger.jsonl`; current refinements supersede them for reuse without rewriting history. The active accepted evidence set is `{QS-A00, QS-A01, QS-A02, QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03, QS-A03.R1, QS-A04, QS-A04.R1, QS-A04.R2, QS-A05, QS-A06, QS-A06.R1O, QS-A06.R2, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B12.LFW.FULL, QS-B13, QS-B14, QS-C20, QS-C22, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D31.R0, QS-D32, QS-D33, QS-D34}`. Twenty whole capabilities participate in coarse dependency readiness; none is dependency-ready while QS-C21 lacks its real input.
+### QS-E40 — Compatible selected matcher result set
+
+**Safe gate**
+
+~~~sh
+curl -s http://127.0.0.1:8480/api/matrices/matrix:sha256:3769cdafbb28645c5ceeed2abb0774a2a9e2a64921078b9b6002852241d7e3be/sets
+env PYTHONPATH=src:.. /home/aaron/.local/bin/uv run --directory backend --frozen --offline python -m unittest -v tests.api.test_matcher_api_real.RealMatcherApiTests.test_cross_matcher_contrasts_hold_identities_fixed_and_resolve_disagreements_to_pairs
+~~~
+
+**Acceptance:** `qualsight.analysis.crossmatcher.matcher_sets` groups the recorded leaves of a matrix into fixed-condition sets and fixed-matcher sets and reports whether they share one protocol; `GET /api/matrices/{id}/sets` adds each matcher's registry state. On the real matrix all three matchers (AdaFace IR-101, ElasticFace-Arc R100, TransFace-S; every one `APPROVED_LOCAL_RESEARCH_USE` under owner decisions 18/28) hold Runs over the same frozen protocol `protocol:sha256:68125d45…` under both conditions, giving 6 fixed-condition matcher contrasts and 3 fixed-matcher preprocessing contrasts; the job refuses leaves that do not share the ordered pair manifest or a usable registry state.
+**State:** ACCEPTED (cycle 2026-08-17-C21).
+
+### QS-E41 — Cross-matcher and preprocessing metric engine
+
+**Safe gate**
+
+~~~sh
+env PYTHONPATH=src:.. QUALSIGHT_INPUT_RESOURCE_IDS="ofiq-r-01-conformance-input,lfw-funneled-local-candidate" /home/aaron/.local/bin/uv run --directory backend --frozen --offline python -m qualsight.cli cross-matcher --project-id project:sha256:5564b31f9da7c3b89895a449c07a049a9bafa222d10543ff143ecc0f369b8d52 --matrix-id matrix:sha256:3769cdafbb28645c5ceeed2abb0774a2a9e2a64921078b9b6002852241d7e3be --quality-job-id job:sha256:5c6b51c8230390c7fdb2384474c2b0cc4612041fadf0ad46980fb58843dcccbf
+env PYTHONPATH=src /home/aaron/.local/bin/uv run --directory backend --frozen --offline python ../scripts/verify_cross_matcher.py <analysis directory> var/qualsight.sqlite3
+~~~
+
+**Acceptance:** `CrossMatcherJob` writes one immutable analysis Run (kind ANALYSIS / CROSS_MATCHER, binding every leaf's model bytes and the quality engine) whose `crossmatcher.json` carries, per contrast and with both Run identities: error overlap at each Run's own recorded FMR ≤ 10⁻³ threshold over units scored by both (A only / B only / both / neither, mated and non-mated separately), processing-failure overlap, failure-set Jaccard, ERC overlays on the shared units, AU-ERC and partial AU-ERC differences with paired subject-cluster bootstrap intervals (1,000 replicates, seed 20260817), a quality × matcher logistic interaction on pooled mated units (labelled approximate because rows share subjects), threshold transferability (A's threshold on B and B's on A with exact intervals next to the own-threshold rates), score agreement, and quality rank consistency; `contrast_pairs.parquet` (54,000 rows) categorises every pair of every contrast. Real evidence (analysis `analysis:sha256:cd9d0b68…`, Run `run:sha256:d2db18bd…`): within a fixed condition the three matchers fail on almost the same mated pairs (FNM Jaccard 0.93–0.97; e.g. AN~EN 2 / 0 / 74 / 2,904; AU-ERC differences ≤ 0.0003 with intervals covering 0; interaction β ≈ 0, p ≥ 0.96), while within a fixed matcher the two crops fail on almost disjoint pairs (Jaccard 0.06–0.07; AN~AS 66 / 61 / 10 / 2,843; AU-ERC difference 0.0017 [−0.0066, 0.0106]); a direct re-read of the leaf Parquets confirmed the disjointness (pairs failing under the shared crop score ≈ 0.6 under the native crop and vice-versa) — the fixed-640-canvas highest-confidence selection and the adaptive largest-face selection pick different faces on multi-face LFW images, so face selection rather than the matcher drives most false non-matches at this operating point. `scripts/verify_cross_matcher.py` re-derived every overlap count, Jaccard, transferred-threshold rate, and AU-ERC from the pair table with plain-Python loops and cross-checked every score against the leaf Parquets in the store: 234 checks, zero mismatches.
+**State:** ACCEPTED (cycle 2026-08-17-C21).
+
+### QS-E42 — Cross-matcher failure workbench
+
+**Safe gate**
+
+~~~sh
+python3 scripts/observe_console.py --screenshot-dir <outside the repository> --observation atg/evidence/2026-08-17-console-observation-07.json
+~~~
+
+**Acceptance:** `GET /api/cross-matcher/{id}/pairs?contrast_id=…&category=…` resolves every disagreement cell (A only, B only, both, neither, processing failures) to real protocol pairs with both scores, both failure kinds, both thresholds and their provenance, pair-quality values and links to both samples' quality Runs, permitted images, and links to Run A, Run B, and the analysis Run; `POST /api/annotations` records append-only annotations (actor, timestamp, text, context) that the workbench echoes per pair. The console's Cross-matcher panel (frontend/src/CrossMatcher.tsx) lists the recorded analyses, shows the nine contrasts with kind, held-fixed identity, both Runs' matcher · crop · threshold, overlap counts, Jaccard, AU-ERC difference with its paired interval, and interaction term, plus threshold transferability, score agreement, rank consistency, and provenance for the selected contrast, and opens each cell's pairs with an annotation box. Observation 07 (fixture pairs, real headless Chromium): nine contrast rows, the agreed-correct cell of the first contrast opened (the fixture has no shared false non-matches), one annotation saved and echoed (`local-user:aaron · 2026-08-17T18:33:36 — console observation 07: reviewed`); exit 0.
+**State:** ACCEPTED (cycle 2026-08-17-C21).
+
+### QS-E43 — Phase-4 gate (cross-matcher accepted artifact)
+
+**Safe gate**
+
+~~~sh
+env PYTHONPATH=src:.. /home/aaron/.local/bin/uv run --directory backend --frozen --offline python -m unittest discover -s tests -q
+python3 -m unittest discover -s tests -q
+python3 scripts/validate_atg_documents.py
+~~~
+
+**Acceptance:** the selected matcher set completed the six fixed-condition matcher comparisons and the three fixed-matcher preprocessing comparisons on the real protocol with traceable utility differences (paired AU-ERC intervals) and failure evidence (overlap cells resolving to pairs and images), recorded as an immutable analysis Run and independently verified; the API test exercises the same path on the fixture pairs, including annotation persistence and the verify script.
+**State:** ACCEPTED (cycle 2026-08-17-C21). Backend gate 78/78, root gate 37/37 (recorded in the ledger).
+
+Historical accepted events QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, and QS-A06.R1M retain their exact recorded counts and hashes in `atg/ledger.jsonl`; current refinements supersede them for reuse without rewriting history. The active accepted evidence set is `{QS-A00, QS-A01, QS-A02, QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03, QS-A03.R1, QS-A04, QS-A04.R1, QS-A04.R2, QS-A05, QS-A06, QS-A06.R1O, QS-A06.R2, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B12.LFW.FULL, QS-B13, QS-B14, QS-C20, QS-C22, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D31.R0, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43}`. Twenty whole capabilities participate in coarse dependency readiness; none is dependency-ready while QS-C21 lacks its real input.
 
 ## Dependency-ready parallel groups
 
 At the capability level:
 
-- at present: QS-E40 is dependency-ready; QS-E41–QS-E43, QS-F50–QS-F54, and QS-H70–QS-H73 follow in dependency order; QS-C21 stays parked on a registered real external score artifact (owner input) and blocks only QS-H74;
+- at present: QS-F50 is dependency-ready; QS-F51–QS-F54 and QS-H70–QS-H73 follow in dependency order; QS-C21 stays parked on a registered real external score artifact (owner input) and blocks only QS-H74;
 - in Phase 5: QS-F51, QS-F52, and QS-F53 may proceed in parallel after their predecessors;
 - in Phase 7: QS-H70, QS-H71, QS-H72, and QS-H73 may proceed in parallel when file ownership is disjoint.
 
@@ -969,7 +1017,7 @@ Known limitation: the accepted evidence children prove only their stated predica
 - **L0:** one product graph from canonical requirements to accepted beta;
 - **L1:** Phase 0 → 1 → 2 → 3 → 4 → 5 → 7 → beta, with Phase 6 post-beta;
 - **L2:** 41-node, 85-edge acyclic capability graph QS-A00 through QS-H74 (v1.6: QS-C21 rewired to feed QS-H74 directly by decision 28); post-beta nodes remain outside the beta DAG;
-- **L3 current frontier:** Phases 0–3 accepted (Phase 2 under decision 28; QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34) with current accepted evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0; QS-C21 and QS-C25 blocked; superseded resource/domain/execution slices remain in the append-only ledger;
+- **L3 current frontier:** Phases 0–4 accepted (Phase 2 under decision 28; QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43) with current accepted evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0; QS-C21 and QS-C25 blocked; superseded resource/domain/execution slices remain in the append-only ledger;
 - **future L3 refinements:** created one ready capability at a time by the bounded controller, preserving its L2 input/output interface.
 
 Only the minimal historical subgraph is replaced when a leaf fails. Accepted nodes and their evidence remain frozen.

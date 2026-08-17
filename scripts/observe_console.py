@@ -271,6 +271,38 @@ def main() -> int:
                     "detail_heading": page.inner_text("[data-testid=utility-detail] h3"),
                 }
             )
+            # QS-E40..E42: run the cross-matcher contrasts over the fixture matrix, open a contrast's disagreement list, annotate a pair.
+            page.wait_for_function("() => document.querySelectorAll('[data-testid=cross-matrix] option').length > 0 && document.querySelectorAll('[data-testid=cross-job] option').length > 0", timeout=60_000)
+            page.fill("[data-testid=cross-replicates]", "100")
+            page.click("[data-testid=cross-run]")
+            page.wait_for_selector("[data-testid=cross-detail]", timeout=600_000)
+            contrast_rows = page.evaluate("() => Array.from(document.querySelectorAll('[data-testid=contrast-row]')).map(r => r.innerText)")
+            page.click("[data-testid=contrast-row] [data-testid=pairs-BOTH]")
+            page.wait_for_selector("[data-testid=cross-pairs]", timeout=60_000)
+            cross_pairs = page.evaluate("() => Array.from(document.querySelectorAll('[data-testid=cross-pair]')).map(e => e.innerText)")
+            shown_category = "BOTH"
+            if not cross_pairs:
+                # The fixture pairs carry no shared false non-matches at these thresholds; review the agreed-correct cell instead.
+                page.click("[data-testid=contrast-row] [data-testid=pairs-NEITHER]")
+                page.wait_for_selector("[data-testid=cross-pair]", timeout=60_000)
+                cross_pairs = page.evaluate("() => Array.from(document.querySelectorAll('[data-testid=cross-pair]')).map(e => e.innerText)")
+                shown_category = "NEITHER"
+            annotation_saved = None
+            if cross_pairs:
+                page.fill("[data-testid=cross-pair] [data-testid=annotation-input]", "console observation 07: reviewed")
+                page.click("[data-testid=cross-pair] [data-testid=annotation-save]")
+                page.wait_for_selector("[data-testid=cross-pair] .annotations li", timeout=60_000)
+                annotation_saved = page.inner_text("[data-testid=cross-pair] .annotations li")
+            observation["steps"].append(
+                {
+                    "step": "cross-matcher",
+                    "contrast_rows": contrast_rows,
+                    "shown_category": shown_category,
+                    "pairs_shown": cross_pairs[:6],
+                    "annotation_saved": annotation_saved,
+                    "detail_heading": page.inner_text("[data-testid=cross-detail] h3"),
+                }
+            )
             projects_api = json.load(urllib.request.urlopen(f"http://127.0.0.1:{API_PORT}/api/projects"))  # noqa: S310
             console_project = next((p for p in projects_api if p["name"] == "Console lifecycle observation"), None)
             observation["console_project"] = (

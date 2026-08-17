@@ -351,7 +351,74 @@ export interface UtilityPairRow {
   links: { left_sample: string; right_sample: string; left_image: string | null; right_image: string | null; left_quality: string; right_quality: string; run: string };
 }
 
+
+export interface CrossContrastSummary {
+  contrast_id: string;
+  kind: string;
+  a: string;
+  b: string;
+  held_fixed: Record<string, string>;
+  fnm_overlap: { units: number; NEITHER: number; A_ONLY: number; B_ONLY: number; BOTH: number };
+  fnm_jaccard: number | null;
+  au_erc_diff_fnmr: number | null;
+  au_erc_diff_fnmr_ci: [number | null, number | null] | null;
+  interaction_status: string | null;
+}
+
+export interface CrossMatcherSummary {
+  analysis_id: string;
+  run_id: string;
+  matrix_id: string;
+  quality_job_id: string;
+  quality_measure: string;
+  pair_quality_policy: string;
+  target_fmr: number;
+  matcher_contrasts: number;
+  preprocessing_contrasts: number;
+  leaves: number;
+  contrasts: CrossContrastSummary[];
+  created_at: string;
+  links: { analysis: string; run: string; pairs: string; matrix: string; quality_job: string };
+}
+
+export interface CrossMatcherOut {
+  analysis_id: string;
+  state: "RUNNING" | "COMPLETED" | "FAILED";
+  error: string | null;
+  summary?: CrossMatcherSummary;
+  document?: any;
+}
+
+export interface CrossPairRow {
+  contrast_id: string;
+  pair_id: string;
+  label: string;
+  left_sample_id: string;
+  right_sample_id: string;
+  score_a: number | null;
+  score_b: number | null;
+  failure_a: string | null;
+  failure_b: string | null;
+  error_a: boolean;
+  error_b: boolean;
+  category: string;
+  quality_left: number | null;
+  quality_right: number | null;
+  pair_quality: number | null;
+  annotations: Array<{ annotation_id: string; actor_id: string; created_at: string; text: string }>;
+  links: { left_sample: string; right_sample: string; left_image: string | null; right_image: string | null; left_quality: string; right_quality: string; run_a: string; run_b: string; analysis_run: string };
+}
+
 export const api = {
+  matrixSets: (matrix_id: string) => fetch(`/api/matrices/${encodeURIComponent(matrix_id)}/sets`).then((r) => readJson<any>(r)),
+  crossMatcherAnalyses: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/cross-matcher`).then((r) => readJson<CrossMatcherSummary[]>(r)),
+  startCrossMatcher: (project_id: string, body: { matrix_id: string; quality_job_id: string; quality_measure?: string; pair_quality_policy?: string; target_fmr?: number; bootstrap_replicates?: number }) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/cross-matcher`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => readJson<{ analysis_id: string; state: string; already_recorded?: boolean }>(r)),
+  crossMatcher: (analysis_id: string) => fetch(`/api/cross-matcher/${encodeURIComponent(analysis_id)}`).then((r) => readJson<CrossMatcherOut>(r)),
+  crossPairs: (analysis_id: string, contrast_id: string, category?: string) =>
+    fetch(`/api/cross-matcher/${encodeURIComponent(analysis_id)}/pairs?contrast_id=${encodeURIComponent(contrast_id)}${category ? `&category=${encodeURIComponent(category)}` : ""}&limit=60`).then((r) => readJson<{ total: number; rows: CrossPairRow[]; contrast: any }>(r)),
+  annotate: (project_id: string, subject_type: string, subject_id: string, text: string, context: Record<string, unknown>) =>
+    fetch("/api/annotations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project_id, subject_type, subject_id, text, context }) }).then((r) => readJson<any>(r)),
   pairQualityPolicies: () => fetch("/api/pair-quality-policies").then((r) => readJson<{ version: string; policies: PairQualityPolicy[] }>(r)),
   utilityAnalyses: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/utility-analyses`).then((r) => readJson<UtilitySummary[]>(r)),
   startUtilityAnalysis: (project_id: string, body: UtilityRequestBody) =>

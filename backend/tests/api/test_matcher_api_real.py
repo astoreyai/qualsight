@@ -229,6 +229,81 @@ class RealMatcherApiTests(unittest.TestCase):
         listed = self.client.get(f"/api/projects/{self.project_id}/utility-analyses").json()
         self.assertEqual([item["analysis_id"] for item in listed], [analysis_id])
 
+    def test_cross_matcher_contrasts_hold_identities_fixed_and_resolve_disagreements_to_pairs(self) -> None:
+        """QS-E40–QS-E42 on the real fixture: matcher sets, nine contrasts, overlap counts verified, workbench pairs and annotations."""
+
+        import subprocess
+        import sys
+
+        sets = self.client.get(f"/api/matrices/{self.matrix_id}/sets").json()
+        self.assertTrue(sets["same_protocol"])
+        self.assertEqual(sets["matcher_contrasts_available"], 6)
+        self.assertEqual(sets["preprocessing_contrasts_available"], 3)
+        self.assertEqual(set(sets["matcher_rights"].values()), {"APPROVED_LOCAL_RESEARCH_USE"})
+        job = self._quality_job()
+        body = {"matrix_id": self.matrix_id, "quality_job_id": job["job_id"], "bootstrap_replicates": 100, "seed": 3}
+        started = self.client.post(f"/api/projects/{self.project_id}/cross-matcher", json=body)
+        self.assertEqual(started.status_code, 202, started.text)
+        analysis_id = started.json()["analysis_id"]
+        deadline = time.monotonic() + 600
+        while time.monotonic() < deadline:
+            status = self.client.get(f"/api/cross-matcher/{analysis_id}").json()
+            if status["state"] in {"COMPLETED", "FAILED"}:
+                break
+            time.sleep(0.5)
+        self.assertEqual(status["state"], "COMPLETED", status)
+        document = status["document"]
+        self.assertEqual(len(document["contrasts"]), 9)
+        kinds = [c["kind"] for c in document["contrasts"]]
+        self.assertEqual(kinds.count("MATCHER_CONTRAST_FIXED_CONDITION"), 6)
+        self.assertEqual(kinds.count("PREPROCESSING_CONTRAST_FIXED_MATCHER"), 3)
+        for contrast in document["contrasts"]:
+            if contrast["kind"] == "MATCHER_CONTRAST_FIXED_CONDITION":
+                self.assertEqual(contrast["a"]["condition_id"], contrast["b"]["condition_id"])
+                self.assertNotEqual(contrast["a"]["matcher_id"], contrast["b"]["matcher_id"])
+                self.assertEqual(contrast["held_fixed"], {"condition_id": contrast["a"]["condition_id"]})
+            else:
+                self.assertEqual(contrast["a"]["matcher_id"], contrast["b"]["matcher_id"])
+                self.assertNotEqual(contrast["a"]["condition_id"], contrast["b"]["condition_id"])
+            overlap = contrast["error_overlap"]["mated_false_non_match"]
+            self.assertEqual(overlap["units"], overlap["NEITHER"] + overlap["A_ONLY"] + overlap["B_ONLY"] + overlap["BOTH"])
+            self.assertEqual(contrast["a"]["threshold_provenance"]["kind"], "MATCHER_THRESHOLD")
+            self.assertIn(contrast["quality_matcher_interaction"]["status"], {"UNSUPPORTED_BY_SAMPLE", "ESTIMATED", "NOT_CONVERGED_OR_SEPARATED"})
+        # The analysis is a Run that binds every leaf's model bytes and the quality engine.
+        run = self.client.get(status["summary"]["links"]["run"]).json()["run"]
+        self.assertEqual(run["matcher"]["component_id"], "cross-matcher-set")
+        self.assertGreaterEqual(len(run["model_hashes"]), 4)
+        self.assertIsNotNone(run["quality_engine"])
+        # Workbench: every pair of a contrast resolves to samples, both scores, both thresholds, quality values, and run links.
+        contrast = document["contrasts"][0]
+        pairs = self.client.get(status["summary"]["links"]["pairs"], params={"contrast_id": contrast["contrast_id"], "limit": 100}).json()
+        self.assertEqual(pairs["total"], 10)
+        self.assertEqual(pairs["contrast"]["a"]["run_id"], contrast["a"]["run_id"])
+        for row in pairs["rows"]:
+            self.assertIn(row["category"], {"NEITHER", "A_ONLY", "B_ONLY", "BOTH", "FAILURE_A", "FAILURE_B", "FAILURE_BOTH"})
+            self.assertEqual(self.client.get(row["links"]["left_sample"]).status_code, 200)
+            self.assertEqual(self.client.get(row["links"]["run_a"]).status_code, 200)
+            self.assertEqual(self.client.get(row["links"]["run_b"]).status_code, 200)
+        # Annotations are append-only records attached to a pair and echoed by the workbench.
+        note = self.client.post("/api/annotations", json={"project_id": self.project_id, "subject_type": "PROTOCOL_PAIR", "subject_id": pairs["rows"][0]["pair_id"], "text": "reviewed in the QS-E42 gate", "context": {"contrast_id": contrast["contrast_id"], "analysis_id": analysis_id}})
+        self.assertEqual(note.status_code, 201, note.text)
+        listed = self.client.get("/api/annotations", params={"subject_id": pairs["rows"][0]["pair_id"]}).json()
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]["text"], "reviewed in the QS-E42 gate")
+        again = self.client.get(status["summary"]["links"]["pairs"], params={"contrast_id": contrast["contrast_id"], "limit": 100}).json()
+        self.assertEqual(len(again["rows"][0]["annotations"]), 1)
+        # Independent recomputation of overlaps, Jaccard, transferred thresholds, and areas from the recorded artifacts.
+        directory = None
+        for artifact in run["artifacts"]:
+            if artifact["uri"].endswith("crossmatcher.json"):
+                directory = Path(artifact["uri"]).parent
+        self.assertIsNotNone(directory)
+        verified = subprocess.run([sys.executable, str(ROOT / "scripts" / "verify_cross_matcher.py"), str(directory), str(self.data_dir / "qualsight.sqlite3")], capture_output=True, text=True, check=False)
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
+        self.assertIn("CROSS_MATCHER_VERIFIED", verified.stdout)
+        # Re-posting returns the recorded analysis.
+        self.assertTrue(self.client.post(f"/api/projects/{self.project_id}/cross-matcher", json=body).json()["already_recorded"])
+
 
 if __name__ == "__main__":
     unittest.main()

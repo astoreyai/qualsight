@@ -164,6 +164,75 @@ def classifier_summary(scores: np.ndarray, positives: np.ndarray, *, cutoff: flo
     }
 
 
+def logistic_regression_multi(design: np.ndarray, y: np.ndarray, names: list[str], *, min_events_per_parameter: int = 10, max_iterations: int = 100) -> dict[str, object]:
+    """Multivariable logistic regression y ~ design (an intercept column is prepended) by Newton–Raphson with Wald intervals.
+
+    Predictor columns are standardized internally for the solve; coefficients are
+    reported per original unit. Runs only when both outcome classes carry
+    ``min_events_per_parameter`` events per estimated parameter.
+    """
+
+    n, p = design.shape
+    events = int(np.sum(y))
+    non_events = n - events
+    parameters = p + 1
+    result: dict[str, object] = {"method": "LOGISTIC_REGRESSION_NEWTON_RAPHSON", "version": METHODS_VERSION, "n": n, "events": events, "non_events": non_events, "parameters": parameters, "terms": ["intercept", *names], "support_rule": f"min {min_events_per_parameter} events and non-events per parameter"}
+    if events < parameters * min_events_per_parameter or non_events < parameters * min_events_per_parameter:
+        result["status"] = "UNSUPPORTED_BY_SAMPLE"
+        return result
+    means = design.mean(axis=0)
+    sds = design.std(axis=0, ddof=1)
+    if np.any(sds == 0):
+        result["status"] = "UNSUPPORTED_BY_SAMPLE"
+        result["reason"] = "a predictor has zero variance"
+        return result
+    z = (design - means) / sds
+    x = np.column_stack((np.ones(n), z))
+    beta = np.zeros(parameters)
+    converged = False
+    iterations = 0
+    for iterations in range(1, max_iterations + 1):
+        eta = x @ beta
+        prob = 1.0 / (1.0 + np.exp(-eta))
+        w = prob * (1 - prob)
+        gradient = x.T @ (y - prob)
+        hessian = x.T @ (x * w[:, None])
+        try:
+            step = np.linalg.solve(hessian, gradient)
+        except np.linalg.LinAlgError:
+            break
+        beta = beta + step
+        if np.max(np.abs(step)) < 1e-10:
+            converged = True
+            break
+    eta = x @ beta
+    prob = 1.0 / (1.0 + np.exp(-eta))
+    w = prob * (1 - prob)
+    hessian = x.T @ (x * w[:, None])
+    try:
+        covariance = np.linalg.inv(hessian)
+    except np.linalg.LinAlgError:
+        covariance = None
+    log_likelihood = float(np.sum(y * np.log(np.clip(prob, 1e-300, 1)) + (1 - y) * np.log(np.clip(1 - prob, 1e-300, 1))))
+    estimated = converged and covariance is not None and bool(np.all(np.abs(beta) < 25))
+    result.update({"status": "ESTIMATED" if estimated else "NOT_CONVERGED_OR_SEPARATED", "converged": converged, "iterations": iterations, "log_likelihood": log_likelihood})
+    if estimated:
+        se_std = np.sqrt(np.diag(covariance))
+        half = 1.959963984540054
+        coefficients = []
+        for index, name in enumerate(names):
+            coefficient = float(beta[index + 1] / sds[index])
+            se = float(se_std[index + 1] / sds[index])
+            wald_z = coefficient / se if se > 0 else None
+            coefficients.append({"term": name, "coefficient": coefficient, "se": se, "ci": [coefficient - half * se, coefficient + half * se], "z": wald_z, "p_two_sided": _normal_two_sided_p(wald_z) if wald_z is not None else None})
+        result.update({"intercept": float(beta[0] - np.sum(beta[1:] * means / sds)), "coefficients": coefficients, "ci_method": "WALD_NORMAL", "confidence_level": CONFIDENCE_LEVEL})
+    return result
+
+
+def _normal_two_sided_p(z: float) -> float:
+    return float(math.erfc(abs(z) / math.sqrt(2.0)))
+
+
 def logistic_regression(x: np.ndarray, y: np.ndarray, *, min_events_per_parameter: int = 10, max_iterations: int = 50) -> dict[str, object]:
     """Univariate logistic regression y ~ intercept + slope·x by Newton–Raphson with Wald intervals.
 

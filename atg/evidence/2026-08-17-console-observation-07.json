@@ -1,0 +1,220 @@
+{
+  "api_log_tail": "se import via timm.layers\n  warnings.warn(f\"Importing from {__name__} is deprecated, please import via timm.layers\", FutureWarning)\n/tmp/qualsight-observe-ipyulwmh/upstream/danjun6737/vit.fb6cd56d.py:57: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n/tmp/qualsight-observe-ipyulwmh/upstream/danjun6737/vit.fb6cd56d.py:62: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(False):\n/tmp/qualsight-observe-ipyulwmh/upstream/danjun6737/vit.fb6cd56d.py:68: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n/tmp/qualsight-observe-ipyulwmh/upstream/danjun6737/vit.fb6cd56d.py:110: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n/tmp/qualsight-observe-ipyulwmh/upstream/danjun6737/vit.fb6cd56d.py:57: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n/tmp/qualsight-observe-ipyulwmh/upstream/danjun6737/vit.fb6cd56d.py:62: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(False):\n/tmp/qualsight-observe-ipyulwmh/upstream/danjun6737/vit.fb6cd56d.py:68: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n/tmp/qualsight-observe-ipyulwmh/upstream/danjun6737/vit.fb6cd56d.py:110: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n",
+  "api_url": "http://127.0.0.1:8480",
+  "browser": "chromium 145.0.7632.6",
+  "console_project": {
+    "lifecycle": "OPEN",
+    "project_id": "project:sha256:a3616cacf75e4d82ceeabd08501baa41e24607b6cc343d9727c34b6c7c65759f",
+    "run_ids": [
+      "run:sha256:7ff3225a1cb16696a2dfdafc8c40fef325ea4d3a2f0667da277962b76427698f",
+      "run:sha256:9baf2ff7d18ac59b6c3615d59af1663eca5450724249c16293c8c48aa2f5de2b",
+      "run:sha256:18555658d222d428b33f1cd1fb30960074f49ede9d4a1db3dafb35624461d67a",
+      "run:sha256:703ca7742591476004150c6b92fd1b1203ac542b2facb4258aa5738f9885842a",
+      "run:sha256:b6a067925abcd1bd39ee16a32fa05df17d14e3713a502214f07baae295ad17a6",
+      "run:sha256:66f1c4053f7ef6466967b69232b81c8fbdd2a1709e054710b3c27817ce944977",
+      "run:sha256:5d9cd05fe36f80243654fcd7a39ee3ea83c5ce86a8833251f8fb83230ce59120",
+      "run:sha256:300c228996b473b3132546153fb7bf23bf77f901a940d8af72423c0dbea91a50",
+      "run:sha256:8f4ac1dd93382b1cd5ca4ed80f83011d31cd3fbdb82125e5cdb88adae298681f",
+      "run:sha256:78d042a9d6be54319ed5bb0e06dae1d9083c7d4b94d513d1961f14d45ebf93f8"
+    ],
+    "version": 6
+  },
+  "console_url": "http://127.0.0.1:5181",
+  "exit_code": 0,
+  "health": {
+    "application_version": "0.1.0",
+    "database_path": "/tmp/qualsight-observe-ipyulwmh/qualsight.sqlite3",
+    "engine": {
+      "approved_scopes": [
+        "REPRODUCE_OFIQ_CONFORMANCE_TESTS",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ],
+      "consumers": [
+        "QS-A06",
+        "QS-A07",
+        "QS-A08",
+        "QS-A10",
+        "QS-B12"
+      ],
+      "data_classification": "RESTRICTED",
+      "kind": "ENGINE_RUNTIME",
+      "name": "OFIQ 1.1.2 installed runtime (isolated no-sudo build from the official tag)",
+      "research_use_status": "OWNER_APPROVED_LOCAL_NONCOMMERCIAL_RESEARCH_MIT_ENGINE_WITH_BUNDLED_MODEL_LICENSES",
+      "resource_id": "ofiq-v1-1-2-linux-runtime",
+      "state": "APPROVED_LOCAL_RESEARCH_USE",
+      "third_party_rights_status": "VERIFIED_LICENSE",
+      "version": "1.1.2"
+    },
+    "registry_id": "qualsight-local-resources",
+    "registry_sha256": "a07904c77fbd3ec8393f147970ca1774651def966f97f5a123fab22b480f61ce",
+    "status": "ok"
+  },
+  "kind": "QUALSIGHT_CONSOLE_RUNTIME_OBSERVATION",
+  "observed_at": "2026-08-17T18:32:53-0500",
+  "persisted_run": {
+    "UnifiedQualityScore.native": 26.390884,
+    "UnifiedQualityScore.scalar": 79,
+    "evidence_sha256": "8853af7c1555d20489c6b52c4e90336327495d40db97873085025d5c8eac16c0",
+    "metric_count": 56,
+    "run_id": "run:sha256:7ff3225a1cb16696a2dfdafc8c40fef325ea4d3a2f0667da277962b76427698f"
+  },
+  "schema_version": "1.0.0",
+  "screenshot": {
+    "note": "kept outside the repository: it shows the restricted OFIQ conformance image",
+    "path": "/tmp/claude-1000/-mnt-projects-ofiqgui/8e2f9bb1-b00a-4d9f-9a42-74b1d318c22b/scratchpad/shots/qualsight-console-observation.png",
+    "sha256": "659e4c6db33501bf7deefb8cf9bec1c4af60a11437a51bd01ef563fbf5c59b0d",
+    "size_bytes": 2081915
+  },
+  "steps": [
+    {
+      "manifest": "/manifest.webmanifest",
+      "step": "load",
+      "title": "QualSight"
+    },
+    {
+      "step": "engine-badge",
+      "text": "ENGINE\nOFIQ 1.1.2 installed runtime (isolated no-sudo build from the official tag) \u00b7 v1.1.2 \u00b7 APPROVED_LOCAL_RESEARCH_USE\nREGISTRY\nqualsight-local-resources \u00b7 a07904c77fbd\u2026"
+    },
+    {
+      "natural_size_ok": true,
+      "step": "image-rendered"
+    },
+    {
+      "message": "Created Console lifecycle observation (v1, NEW)",
+      "step": "project-created"
+    },
+    {
+      "banner": "ENGINE MEASUREMENTpolicy: none applied\nofiq-v1-1-2-linux-runtime \u00b7 v1.1.2 \u00b7 init 2854 ms \u00b7 assess 426 ms",
+      "measure_rows": 28,
+      "provenance_text": "PROVENANCE\nRun\n7ff3225a1cb16696a2df\u2026\nEvidence\n8853af7c1555d20489c6\u2026\nImage\n3c3655e6ac9f16bc6909\u2026\nScope\nREPRODUCE_OFIQ_CONFORMANCE_TESTS\nLinks\nproject\nexperiment\nsample\naudit",
+      "run_link": "/api/runs/run:sha256:7ff3225a1cb16696a2dfdafc8c40fef325ea4d3a2f0667da277962b76427698f",
+      "step": "assessment",
+      "unified_quality_score_row": [
+        "UnifiedQualityScore",
+        "26.390884",
+        "79",
+        "measured"
+      ]
+    },
+    {
+      "rows": 1,
+      "step": "run-list"
+    },
+    {
+      "messages": [
+        "save: Console lifecycle observation is now v2 SAVED",
+        "close: Console lifecycle observation is now v3 SAVED",
+        "open: Console lifecycle observation is now v4 OPEN",
+        "archive: Console lifecycle observation is now v5 ARCHIVED"
+      ],
+      "step": "project-transitions"
+    },
+    {
+      "step": "project-facts",
+      "text": "Lifecycle\nARCHIVED \u00b7 v5\nRuns\n1\nEngine\nofiq-v1-1-2-linux-runtime v1.1.2\nEvidence\n2658c06067d145c3\u2026"
+    },
+    {
+      "facts": "Name\nLocal LFW funneled image collection\nSamples\n13,233 \u00b7 5749 subjects\nRights\nNO_EXPLICIT_LICENSE_PUBLIC_RESEARCH_DATASET\nScope\nQUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1\nManifest\nf0d8e9c49ea048d6\u2026\nPairs\n3,000 mated \u00b7 3,000 non-mated\nCompleteness\nmissing 0 \u00b7 unreadable 0 \u00b7 hash mismatches 0 \u00b7 dup hashes 0",
+      "step": "dataset-imported"
+    },
+    {
+      "progress": "COMPLETED \u00b7 16/16 \u00b7 failures 0 \u00b7 not assessed 0\n\nrun 9baf2ff7d18ac59b\u2026",
+      "step": "batch"
+    },
+    {
+      "det_polylines": 6,
+      "error_pairs_at_0_9": [
+        "lfw-local-fold-01-mated-0001 \u00b7 fold 1 \u00b7 MATED\nAbel_Pacheco vs Abel_Pacheco\nscore 0.7126\nAbel_Pacheco_0001.jpg\nAbel_Pacheco_0004.jpg",
+        "lfw-local-fold-01-mated-0002 \u00b7 fold 1 \u00b7 MATED\nAkhmed_Zakayev vs Akhmed_Zakayev\nscore 0.8464\nAkhmed_Zakayev_0001.jpg\nAkhmed_Zakayev_0003.jpg",
+        "lfw-local-fold-01-mated-0003 \u00b7 fold 1 \u00b7 MATED\nAkhmed_Zakayev vs Akhmed_Zakayev\nscore 0.7822\nAkhmed_Zakayev_0002.jpg\nAkhmed_Zakayev_0003.jpg",
+        "lfw-local-fold-01-mated-0004 \u00b7 fold 1 \u00b7 MATED\nAmber_Tamblyn vs Amber_Tamblyn\nscore 0.7235\nAmber_Tamblyn_0001.jpg\nAmber_Tamblyn_0002.jpg",
+        "lfw-local-fold-01-mated-0005 \u00b7 fold 1 \u00b7 MATED\nAnders_Fogh_Rasmussen vs Anders_Fogh_Rasmussen\nscore 0.7737\nAnders_Fogh_Rasmussen_0001.jpg\nAnders_Fogh_Rasmussen_0003.jpg"
+      ],
+      "leaf_cells": [
+        "QS-C22.AS\nEER 0.00 %\nFNMR@FMR\u22640.1 % 0.00 %\n10-fold acc \u2014\n10/10 scored \u00b7 0 failed",
+        "QS-C22.AN\nEER 0.00 %\nFNMR@FMR\u22640.1 % 0.00 %\n10-fold acc \u2014\n10/10 scored \u00b7 0 failed",
+        "QS-C22.ES\nEER 0.00 %\nFNMR@FMR\u22640.1 % 0.00 %\n10-fold acc \u2014\n10/10 scored \u00b7 0 failed",
+        "QS-C22.EN\nEER 0.00 %\nFNMR@FMR\u22640.1 % 0.00 %\n10-fold acc \u2014\n10/10 scored \u00b7 0 failed",
+        "QS-C22.TS\nEER 0.00 %\nFNMR@FMR\u22640.1 % 0.00 %\n10-fold acc \u2014\n10/10 scored \u00b7 0 failed",
+        "QS-C22.TN\nEER 0.00 %\nFNMR@FMR\u22640.1 % 0.00 %\n10-fold acc \u2014\n10/10 scored \u00b7 0 failed"
+      ],
+      "matrix_progress": "matrix 194999c03617\u2026 \u00b7 completed 6 leaves \u00b7 6/6 leaves",
+      "protocol": "LFW View 2 (10-fold, 6,000 pairs) \u2014 registered local pair manifest \u00b7 6,000 pairs (3,000 mated)",
+      "step": "matchers"
+    },
+    {
+      "bins": [
+        0,
+        0,
+        36.666666666666664,
+        73.33333333333333,
+        36.666666666666664,
+        73.33333333333333,
+        36.666666666666664,
+        0,
+        0,
+        36.666666666666664,
+        36.666666666666664,
+        36.666666666666664,
+        0,
+        36.666666666666664,
+        36.666666666666664,
+        110,
+        0,
+        36.666666666666664,
+        0,
+        0
+      ],
+      "drilldown_samples_shown": 3,
+      "sample_facts": "Subject\nAkhmed_Zakayev\nSHA-256\n40ce429381dd20e6243e\u2026\nOutcome\nMEASURED\nRun\n9baf2ff7d18ac59b\u2026\nAudit\naudit trail",
+      "sample_measure_rows": 28,
+      "selected_bin": 15,
+      "step": "explorer",
+      "thumbnail_rendered": true
+    },
+    {
+      "analysis_rows": [
+        "9f91ab8db7\u2026\n\tQS-C22.AS \u00b7 shared\tUnifiedQualityScore \u00b7 min\t0.7126\t40\t0.00000\t0.00000\t0.00 % \u2192 0.00 %\t30.0 %\t0 (\u22127 good)"
+      ],
+      "conditioned_bins": 10,
+      "detail_heading": "Analysis 9f91ab8db79c5e\u2026 \u00b7 Run 8f4ac1dd93382b\u2026 \u00b7 QS-C22.AS \u00b7 UnifiedQualityScore \u00b7 pair.quality.min",
+      "erc_polylines": 1,
+      "per_measure_rows": 28,
+      "policy_table": "Retention rate\t30.00 % (3 of 10)\nRejection rate\t70.00 % (7 rejected)\nFNMR before \u2192 after\t0.00 % \u2192 0.00 % [0.00 %, 70.76 %]\nFMR before \u2192 after\t0.000 % \u2192 \u2014\nErrors prevented\t0 (0 FNM \u00b7 0 FM)\nSuccessful comparisons removed\t7 (2 mated \u00b7 5 non-mated)\nExcluded\t0 processing failures \u00b7 0 missing quality",
+      "rejected_pairs": [
+        "lfw-local-fold-01-non-mated-0002 \u00b7 fold 1 \u00b7 NON_MATED\nq 26 / 11 \u2192 pair 11 \u00b7 score -0.0381\nleft quality\nright quality\nrun",
+        "lfw-local-fold-01-mated-0004 \u00b7 fold 1 \u00b7 MATED\nq 32 / 16 \u2192 pair 16 \u00b7 score 0.7235\nleft quality\nright quality\nrun",
+        "lfw-local-fold-01-non-mated-0005 \u00b7 fold 1 \u00b7 NON_MATED\nq 78 / 17 \u2192 pair 17 \u00b7 score 0.0539\nleft quality\nright quality\nrun",
+        "lfw-local-fold-01-non-mated-0004 \u00b7 fold 1 \u00b7 NON_MATED\nq 54 / 20 \u2192 pair 20 \u00b7 score -0.0850\nleft quality\nright quality\nrun",
+        "lfw-local-fold-01-non-mated-0001 \u00b7 fold 1 \u00b7 NON_MATED\nq 26 / 78 \u2192 pair 26 \u00b7 score 0.0365\nleft quality\nright quality\nrun",
+        "lfw-local-fold-01-non-mated-0003 \u00b7 fold 1 \u00b7 NON_MATED\nq 26 / 73 \u2192 pair 26 \u00b7 score -0.1247\nleft quality\nright quality\nrun"
+      ],
+      "step": "utility"
+    },
+    {
+      "annotation_saved": "local-user:aaron \u00b7 2026-08-17T18:33:36 \u2014 console observation 07: reviewed",
+      "contrast_rows": [
+        "QS-C22.AN~QS-C22.EN\tmatcher \u00b7 crop native\tAdaFace IR-101 \u00b7 native \u00b7 T 0.7200\tElasticFace-Arc R100 \u00b7 native \u00b7 T 0.7042\t0 / 0 / 0 / 5\t\u2014\t0.00000 [0.00000, 0.00000]\tUNSUPPORTED_BY_SAMPLE\t\nfailed by A only\nfailed by B only\nfailed by both\nfailed by neither",
+        "QS-C22.AN~QS-C22.TN\tmatcher \u00b7 crop native\tAdaFace IR-101 \u00b7 native \u00b7 T 0.7200\tTransFace-S \u00b7 native \u00b7 T 0.7407\t0 / 0 / 0 / 5\t\u2014\t0.00000 [0.00000, 0.00000]\tUNSUPPORTED_BY_SAMPLE\t\nfailed by A only\nfailed by B only\nfailed by both\nfailed by neither",
+        "QS-C22.EN~QS-C22.TN\tmatcher \u00b7 crop native\tElasticFace-Arc R100 \u00b7 native \u00b7 T 0.7042\tTransFace-S \u00b7 native \u00b7 T 0.7407\t0 / 0 / 0 / 5\t\u2014\t0.00000 [0.00000, 0.00000]\tUNSUPPORTED_BY_SAMPLE\t\nfailed by A only\nfailed by B only\nfailed by both\nfailed by neither",
+        "QS-C22.AS~QS-C22.ES\tmatcher \u00b7 crop shared\tAdaFace IR-101 \u00b7 shared \u00b7 T 0.7126\tElasticFace-Arc R100 \u00b7 shared \u00b7 T 0.7021\t0 / 0 / 0 / 5\t\u2014\t0.00000 [0.00000, 0.00000]\tUNSUPPORTED_BY_SAMPLE\t\nfailed by A only\nfailed by B only\nfailed by both\nfailed by neither",
+        "QS-C22.AS~QS-C22.TS\tmatcher \u00b7 crop shared\tAdaFace IR-101 \u00b7 shared \u00b7 T 0.7126\tTransFace-S \u00b7 shared \u00b7 T 0.7290\t0 / 0 / 0 / 5\t\u2014\t0.00000 [0.00000, 0.00000]\tUNSUPPORTED_BY_SAMPLE\t\nfailed by A only\nfailed by B only\nfailed by both\nfailed by neither",
+        "QS-C22.ES~QS-C22.TS\tmatcher \u00b7 crop shared\tElasticFace-Arc R100 \u00b7 shared \u00b7 T 0.7021\tTransFace-S \u00b7 shared \u00b7 T 0.7290\t0 / 0 / 0 / 5\t\u2014\t0.00000 [0.00000, 0.00000]\tUNSUPPORTED_BY_SAMPLE\t\nfailed by A only\nfailed by B only\nfailed by both\nfailed by neither",
+        "QS-C22.AN~QS-C22.AS\tpreprocessing \u00b7 AdaFace IR-101\tAdaFace IR-101 \u00b7 native \u00b7 T 0.7200\tAdaFace IR-101 \u00b7 shared \u00b7 T 0.7126\t0 / 0 / 0 / 5\t\u2014\t0.00000 [0.00000, 0.00000]\tUNSUPPORTED_BY_SAMPLE\t\nfailed by A only\nfailed by B only\nfailed by both\nfailed by neither",
+        "QS-C22.EN~QS-C22.ES\tpreprocessing \u00b7 ElasticFace-Arc R100\tElasticFace-Arc R100 \u00b7 native \u00b7 T 0.7042\tElasticFace-Arc R100 \u00b7 shared \u00b7 T 0.7021\t0 / 0 / 0 / 5\t\u2014\t0.00000 [0.00000, 0.00000]\tUNSUPPORTED_BY_SAMPLE\t\nfailed by A only\nfailed by B only\nfailed by both\nfailed by neither",
+        "QS-C22.TN~QS-C22.TS\tpreprocessing \u00b7 TransFace-S\tTransFace-S \u00b7 native \u00b7 T 0.7407\tTransFace-S \u00b7 shared \u00b7 T 0.7290\t0 / 0 / 0 / 5\t\u2014\t0.00000 [0.00000, 0.00000]\tUNSUPPORTED_BY_SAMPLE\t\nfailed by A only\nfailed by B only\nfailed by both\nfailed by neither"
+      ],
+      "detail_heading": "Contrasts of analysis 205be24ea7fb16\u2026 \u00b7 thresholds at each Run's own FMR \u2264 0.001 operating point",
+      "pairs_shown": [
+        "lfw-local-fold-01-non-mated-0002 \u00b7 NON_MATED \u00b7 failed by neither\nA -0.0519 \u00b7 B -0.0048 \u00b7 q 26/11 \u2192 11\nleft quality\nright quality\nrun A\nrun B\nSave",
+        "lfw-local-fold-01-mated-0004 \u00b7 MATED \u00b7 failed by neither\nA 0.7200 \u00b7 B 0.7052 \u00b7 q 32/16 \u2192 16\nleft quality\nright quality\nrun A\nrun B\nSave",
+        "lfw-local-fold-01-non-mated-0005 \u00b7 NON_MATED \u00b7 failed by neither\nA 0.0596 \u00b7 B 0.0451 \u00b7 q 78/17 \u2192 17\nleft quality\nright quality\nrun A\nrun B\nSave",
+        "lfw-local-fold-01-non-mated-0004 \u00b7 NON_MATED \u00b7 failed by neither\nA -0.0761 \u00b7 B -0.0284 \u00b7 q 54/20 \u2192 20\nleft quality\nright quality\nrun A\nrun B\nSave",
+        "lfw-local-fold-01-non-mated-0001 \u00b7 NON_MATED \u00b7 failed by neither\nA 0.0328 \u00b7 B -0.0020 \u00b7 q 26/78 \u2192 26\nleft quality\nright quality\nrun A\nrun B\nSave",
+        "lfw-local-fold-01-non-mated-0003 \u00b7 NON_MATED \u00b7 failed by neither\nA -0.1304 \u00b7 B -0.0959 \u00b7 q 26/73 \u2192 26\nleft quality\nright quality\nrun A\nrun B\nSave"
+      ],
+      "shown_category": "NEITHER",
+      "step": "cross-matcher"
+    }
+  ]
+}
