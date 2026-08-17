@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.1.0",
+  "reconciliation_id": "lfw-full-v1-shared-crop-lineage-reconciliation",
+  "recorded_at": "2026-08-16T23:43:00-05:00",
+  "scope": "STATIC_LINEAGE_CLASSIFICATION_ONLY",
+  "historical_crop_manifest": {
+    "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/artifacts/local/runs/20260814-branch-b/aligned_crop_runs/lfw-full-v1/manifest.json",
+    "sha256": "b379a01f75dc9e47d2146f2c99a2d0c1b0e8a03dc9288c0f70ded1d82802f23e",
+    "size_bytes": 25294
+  },
+  "generator_source": {
+    "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/research/paper39/scripts/extract_aligned_crops.py",
+    "sha256": "6a44a96e4846a687ca44fb78e3e3592f675acd318232659b91a7049820f3c77c",
+    "size_bytes": 31363
+  },
+  "generator_source_drift": {
+    "classification": "MUTABLE_EXTERNAL_PATH_REWRITTEN_AFTER_ACCEPTANCE_HISTORICAL_BYTES_NOT_PRESERVED_CURRENT_BYTES_REVALIDATED_BY_AST",
+    "observed_mtime_ns": 1786969389620795328,
+    "current": {
+      "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/research/paper39/scripts/extract_aligned_crops.py",
+      "sha256": "4cd584ef8603f0d1a04682a9667a9240e69881c0e283ea4f53b9f7f6795dc6f8",
+      "size_bytes": 31363
+    }
+  },
+  "scrfd_execution_source": {
+    "manifest_recorded_original_path": "/mnt/projects/02_perception_biometrics/ofiq_29794/packages/openfiqa/src/openfiqa/models/scrfd.py",
+    "manifest_recorded_sha256": "48b30da81ee67360bec8bf75dcfc2f9a27f9e263f5c94110a42659144bec4aae",
+    "manifest_recorded_size_bytes": 6820,
+    "source_seal": {
+      "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/artifacts/local/runs/20260814-branch-b/source_seals/usfiqa-component-source-seal-v2/manifest.json",
+      "sha256": "782b5d7b296b646c924dfce1849f6f3ee994077de4a2d301149910a885dd7e7e",
+      "size_bytes": 92555
+    },
+    "sealed_snapshot": {
+      "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/artifacts/local/runs/20260814-branch-b/source_seals/usfiqa-component-source-seal-v2/repository/packages/openfiqa/src/openfiqa/models/scrfd.py",
+      "sha256": "48b30da81ee67360bec8bf75dcfc2f9a27f9e263f5c94110a42659144bec4aae",
+      "size_bytes": 6820
+    },
+    "mutable_original_path_excluded_from_evidence": true
+  },
+  "owner_decision": {
+    "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-local-noncommercial-research-2026-08-14.json",
+    "sha256": "48b11e76ac1d7288c40f0052fa000ae72f7edd4c930db3057751c7c7f841a3fa",
+    "size_bytes": 3381,
+    "decision_evidence": "4C: compare and display both shared-crop and matcher-native preprocessing conditions."
+  },
+  "observed_contradiction": {
+    "historical_preprocessing_text": "OpenCV BGR input, 640 by 640 detector canvas, highest-confidence face, five-point 112 by 112 norm_crop.",
+    "historical_selection_text": "largest SCRFD face by bounding-box area",
+    "historical_alignment_text": "InsightFace five-point norm_crop",
+    "historical_aligned_size": [
+      112,
+      112
+    ],
+    "historical_encoding": {
+      "format": "JPEG",
+      "quality": 95
+    }
+  },
+  "reconciled_producer": {
+    "producer_id": "SCRFD10G_ADAPTIVE_LARGEST_NORMCROP112_UNRESOLVED_MODE_JPEG95_ENCODED_HISTORICAL_V1",
+    "detector_input_sizing": {
+      "maximum_dimension_at_most_160": 128,
+      "maximum_dimension_at_most_320": 256,
+      "otherwise": 640
+    },
+    "face_selection": "LARGEST_BOUNDING_BOX_AREA",
+    "alignment": "INSIGHTFACE_FIVE_POINT_NORM_CROP_112_MODE_NOT_EXPLICIT_IN_GENERATOR",
+    "storage_boundary": "JPEG_QUALITY_95_ENCODED"
+  },
+  "target_condition_mapping": {
+    "condition_id": "SCRFD10G_ADAPTIVE_LARGEST_ARCFACE112_JPEG95_V1",
+    "status": "BLOCKED_PENDING_BYTE_BOUND_ARCFACE_TEMPLATE_AND_AUTHORIZED_BGR_DECODE_MATCHER_CONSUMPTION",
+    "missing_evidence": [
+      "BYTE_BOUND_ARCFACE_TEMPLATE_FOR_HISTORICAL_NORM_CROP",
+      "AUTHORIZED_BGR_DECODE_AND_MATCHER_CONSUMPTION"
+    ]
+  },
+  "excluded_condition_ids": [
+    "SCRFD10G_640_HIGHEST_CONFIDENCE_ARCFACE112_INMEMORY_V1"
+  ],
+  "resource_boundary": {
+    "registry": {
+      "path": "/mnt/projects/ofiqgui/resources/resource-registry.json",
+      "sha256": "a07904c77fbd3ec8393f147970ca1774651def966f97f5a123fab22b480f61ce",
+      "size_bytes": 140200
+    },
+    "scrfd_resource_id": "insightface-scrfd-10g-local-candidate",
+    "required_state": "APPROVED_LOCAL_RESEARCH_USE",
+    "required_approved_scopes": [
+      "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+      "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+    ]
+  },
+  "claims": {
+    "target_condition_mapping_complete": false,
+    "crop_consumption_authorized": false,
+    "output_validity_claimed": false,
+    "detector_or_image_execution_performed": false,
+    "third_party_rights_closed": false
+  },
+  "limitations": [
+    "This receipt corrects only the detector sizing, face selection, alignment-call shape, and JPEG-encoding classification of the historical LFW shared-crop producer without modifying that historical artifact.",
+    "The mutable original SCRFD source path is not execution evidence; only the exact source-seal snapshot is used to derive the historical behavior.",
+    "The generator does not specify the norm_crop mode, so this receipt does not claim that the historical producer used the ArcFace template.",
+    "JPEG decoding during verification or future matcher consumption is outside this producer receipt.",
+    "This receipt does not authorize or validate crop consumption, image contents, detector outputs, matcher outputs, third-party rights, or a scientific Run.",
+    "The mutable generator path was rewritten outside QualSight on 2026-08-17 after acceptance; the historical bytes were not preserved, so the classification is now re-derived from the current bytes by the same AST predicates and the historical digest is retained only as recorded history."
+  ]
+}

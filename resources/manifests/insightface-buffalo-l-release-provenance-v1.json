@@ -1,0 +1,155 @@
+{
+  "schema_version": "1.0.0",
+  "provenance_id": "insightface-buffalo-l-release-provenance-v1",
+  "recorded_at": "2026-08-17T00:36:19-05:00",
+  "scope": "STATIC_RELEASE_ASSET_PROVENANCE_ONLY",
+  "owner_authorization": {
+    "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-insightface-buffalo-l-evidence-acquisition-2026-08-17.json",
+    "sha256": "4ea9fca18ed5b1a95b55d59aff5f6995eb4f064f6374ebd45a192a2b6aadb481",
+    "size_bytes": 2109,
+    "decision": "APPROVED_EVIDENCE_ACQUISITION",
+    "scope": "ACQUIRE_INSIGHTFACE_V0_7_BUFFALO_L_FOR_STATIC_PROVENANCE_REVIEW"
+  },
+  "acquisition_tool": {
+    "path": "/usr/bin/curl",
+    "sha256": "27125f0331490b7fbf4da11f2bd913ce1b94e071367b2fa8e535ce8c5526e29c",
+    "size_bytes": 280800,
+    "version": "curl 7.88.1"
+  },
+  "release_api": {
+    "request_url": "https://api.github.com/repos/deepinsight/insightface/releases/tags/v0.7",
+    "retrieved_at_start": "2026-08-17T00:35:18-05:00",
+    "retrieved_at_end": "2026-08-17T00:35:25-05:00",
+    "response_headers": {
+      "path": "/mnt/projects/ofiqgui/resources/upstream/insightface/release-v0.7.headers",
+      "sha256": "cf7a746f39d8e94f2858c832d04dadb8e51a33fcbc85bd24ca80b3e4677d2af3",
+      "size_bytes": 1320
+    },
+    "response_json": {
+      "path": "/mnt/projects/ofiqgui/resources/upstream/insightface/release-v0.7.json",
+      "sha256": "1458ba41add0f0f022e244bbc44aaebd3b03a06fc1620b9a190725fd1de6dca0",
+      "size_bytes": 14330
+    },
+    "release_id": 97756821,
+    "tag_name": "v0.7",
+    "asset_id": 101975360,
+    "asset_name": "buffalo_l.zip",
+    "asset_size_bytes": 288621354,
+    "asset_created_at": "2023-04-02T07:42:20Z",
+    "asset_updated_at": "2023-04-02T07:43:08Z",
+    "asset_url": "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
+  },
+  "fresh_asset_transfer": {
+    "request_url": "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip",
+    "retrieved_at_start": "2026-08-17T00:35:25-05:00",
+    "retrieved_at_end": "2026-08-17T00:35:30-05:00",
+    "final_response_headers": {
+      "path": "/mnt/projects/ofiqgui/resources/upstream/insightface/buffalo_l-v0.7-final.headers",
+      "sha256": "ec2eade1010ec13f2a97b3463c13e97cf0fc0b51e8db2ca920bf6fdf5d698543",
+      "size_bytes": 804
+    },
+    "observed_size_bytes": 288621354,
+    "observed_sha256": "80ffe37d8a5940d59a7384c201a2a38d4741f2f3c51eef46ebb28218a7b0ca2f",
+    "observed_md5": "6c0e929fd3b6ab517170b732ced18c68",
+    "server_content_md5_base64": "bA6Sn9O2q1FxcLcyztGMaA==",
+    "byte_comparison_to_local_archive": "CMP_EXIT_0",
+    "raw_redirect_request_trace_preserved": false,
+    "temporary_duplicate_removed_after_comparison": true
+  },
+  "local_archive": {
+    "path": "/home/aaron/.insightface/models/buffalo_l.zip",
+    "sha256": "80ffe37d8a5940d59a7384c201a2a38d4741f2f3c51eef46ebb28218a7b0ca2f",
+    "md5": "6c0e929fd3b6ab517170b732ced18c68",
+    "size_bytes": 288621354,
+    "mtime_ns": 1760803794253235762,
+    "members": [
+      {
+        "path": "genderage.onnx",
+        "size_bytes": 1322532,
+        "compressed_size_bytes": 1216027,
+        "crc32": "5f7cd633",
+        "sha256": "4fde69b1c810857b88c64a335084f1c3fe8f01246c9a191b48c7bb756d6652fb",
+        "unix_mode": 33204
+      },
+      {
+        "path": "2d106det.onnx",
+        "size_bytes": 5030888,
+        "compressed_size_bytes": 4646511,
+        "crc32": "8664693e",
+        "sha256": "f001b856447c413801ef5c42091ed0cd516fcd21f2d6b79635b1e733a7109dbf",
+        "unix_mode": 33204
+      },
+      {
+        "path": "det_10g.onnx",
+        "size_bytes": 16923827,
+        "compressed_size_bytes": 15721951,
+        "crc32": "df529b9e",
+        "sha256": "5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91",
+        "unix_mode": 33204
+      },
+      {
+        "path": "1k3d68.onnx",
+        "size_bytes": 143607619,
+        "compressed_size_bytes": 106775201,
+        "crc32": "3d2d8cff",
+        "sha256": "df5c06b8a0c12e422b2ed8947b8869faa4105387f199c477af038aa01f9a45cc",
+        "unix_mode": 33204
+      },
+      {
+        "path": "w600k_r50.onnx",
+        "size_bytes": 174383860,
+        "compressed_size_bytes": 160260914,
+        "crc32": "707f504c",
+        "sha256": "4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43",
+        "unix_mode": 33188
+      }
+    ]
+  },
+  "registered_detector": {
+    "resource_registry": {
+      "path": "/mnt/projects/ofiqgui/resources/resource-registry.json",
+      "sha256": "a07904c77fbd3ec8393f147970ca1774651def966f97f5a123fab22b480f61ce",
+      "size_bytes": 140200
+    },
+    "resource_id": "insightface-scrfd-10g-local-candidate",
+    "archive_member_path": "det_10g.onnx",
+    "model_path": "/home/aaron/.insightface/models/buffalo_l/det_10g.onnx",
+    "model_sha256": "5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91",
+    "model_size_bytes": 16923827,
+    "model_mtime_ns": 1760803794337237754,
+    "required_state": "APPROVED_LOCAL_RESEARCH_USE",
+    "required_third_party_rights_status": "RESEARCH_NOTICE_ONLY",
+    "required_approved_scopes": [
+      "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+      "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+    ]
+  },
+  "upstream_documentation": {
+    "path": "/mnt/projects/ofiqgui/resources/upstream/insightface/python-package-README.7fadd420.md",
+    "sha256": "4d5d26d2f990845b81331dd7589ec291407847d72f13d012e19c712e620e7972",
+    "size_bytes": 10734,
+    "required_text_fragments": [
+      "The pretrained models we provided with this library are available for non-commercial research purposes only",
+      "| **buffalo_l** | SCRFD-10GF",
+      "Note that these models are available for non-commercial research purposes only."
+    ]
+  },
+  "claims": {
+    "official_release_asset_metadata_bound": true,
+    "fresh_transfer_observation_recorded": true,
+    "fresh_transfer_equals_local_archive": true,
+    "local_archive_matches_final_server_md5": true,
+    "detector_member_equals_registered_model": true,
+    "original_local_acquisition_provenance_closed": false,
+    "model_rights_closed": false,
+    "runtime_validated": false,
+    "model_execution_performed": false
+  },
+  "limitations": [
+    "The fresh official transfer was removed only after byte equality with the preserved local archive; the preserved local archive is the reproducible byte surface.",
+    "Raw redirect and request traces were not preserved because GitHub release redirects contain expiring signed query parameters; the request URL is project-recorded and only the final nonsensitive server headers are retained.",
+    "Current release-asset equivalence does not reconstruct the historical acquisition event or mtime of the existing local archive.",
+    "The upstream noncommercial-research notice is not a redistribution license or an independent legal-rights determination.",
+    "No ZIP member was extracted, no face image was decoded, and no detector, model, matcher, ONNX runtime, or OFIQ process was loaded or executed."
+  ]
+}

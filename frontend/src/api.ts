@@ -1,0 +1,351 @@
+/** Typed client for the local QualSight control plane (mirrors backend/src/qualsight/api/app.py). */
+
+export interface ResourceOut {
+  resource_id: string;
+  kind: string;
+  name: string;
+  state: string;
+  version: string | null;
+  approved_scopes: string[];
+  third_party_rights_status: string;
+  research_use_status: string;
+  data_classification: string;
+  consumers: string[];
+}
+
+export interface HealthOut {
+  status: "ok";
+  application_version: string;
+  registry_sha256: string;
+  registry_id: string;
+  engine: ResourceOut;
+  database_path: string;
+}
+
+export interface RegisteredSample {
+  resource_id: string;
+  resource_state: string;
+  approved_scopes: string[];
+  path: string;
+  sha256: string;
+  size_bytes: number;
+  media_type: string;
+}
+
+export interface MeasureOut {
+  name: string;
+  native: number | null;
+  scalar: number | null;
+  failed: boolean;
+}
+
+export interface ProvenanceLinks {
+  run: string;
+  project: string;
+  experiment: string;
+  sample: string;
+  audit_events: string;
+}
+
+export interface AssessResponse {
+  kind: "ENGINE_MEASUREMENT";
+  run_id: string;
+  evidence_sha256: string;
+  engine_resource_id: string;
+  engine_version: string;
+  engine_state: string;
+  purpose_scope: string;
+  image_path: string;
+  image_sha256: string;
+  initialization_ms: number;
+  assessment_ms: number;
+  runtime_seconds: number;
+  measures: MeasureOut[];
+  failed_measures: string[];
+  warnings: string[];
+  policy: "NONE_APPLIED";
+  provenance: ProvenanceLinks;
+}
+
+export interface AssessmentFailure {
+  error: "ASSESSMENT_FAILED";
+  image_path: string;
+  engine_version: string;
+  exit_code: number;
+  reason: string;
+  stderr: string;
+}
+
+export interface RunSummaryOut {
+  run_id: string;
+  project_id: string;
+  experiment_id: string;
+  sample_id: string;
+  status: string;
+  engine_resource_id: string;
+  engine_version: string;
+  start_time: string;
+  end_time: string;
+  evidence_sha256: string;
+}
+
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly detail: string,
+    public readonly failure: AssessmentFailure | null = null,
+  ) {
+    super(detail);
+  }
+}
+
+async function readJson<T>(response: Response): Promise<T> {
+  if (response.ok) {
+    return (await response.json()) as T;
+  }
+  let detail = `${response.status} ${response.statusText}`;
+  let failure: AssessmentFailure | null = null;
+  try {
+    const body = (await response.json()) as { detail?: unknown; error?: string };
+    if (body && body.error === "ASSESSMENT_FAILED") {
+      failure = body as unknown as AssessmentFailure;
+      detail = failure.reason;
+    } else if (typeof body.detail === "string") {
+      detail = body.detail;
+    } else if (body.detail !== undefined) {
+      detail = JSON.stringify(body.detail);
+    }
+  } catch {
+    // keep the status text
+  }
+  throw new ApiError(response.status, detail, failure);
+}
+
+export interface ProjectOut {
+  project_id: string;
+  name: string;
+  description: string;
+  lifecycle: "NEW" | "OPEN" | "SAVED" | "ARCHIVED";
+  version: number;
+  owner_user_id: string;
+  classification: string;
+  tags: string[];
+  notes: string[];
+  created_at: string;
+  updated_at: string;
+  scientific_configuration: Record<string, unknown>;
+  run_ids: string[];
+  derived_from: Record<string, unknown> | null;
+  evidence_sha256: string;
+}
+
+export interface DatasetOut {
+  dataset_id: string;
+  project_id: string;
+  name: string;
+  version: string;
+  source_uri: string;
+  rights_status: string;
+  modality: string;
+  classification: string;
+  subject_count: number | null;
+  sample_count: number;
+  manifest_sha256: string;
+  manifest: Record<string, unknown>;
+  statistics_sha256: string | null;
+  evidence_sha256: string;
+  resource_id: string | null;
+  approved_scopes: string[];
+  common_scopes_with_engine: string[];
+}
+
+export interface JobOut {
+  job_id: string;
+  state: string;
+  total: number;
+  assessed: number;
+  failed: number;
+  integrity_failures: number;
+  not_assessed: number;
+  chunks: number;
+  started_at: string | null;
+  ended_at: string | null;
+  cancellation_requested: boolean;
+  run_id: string | null;
+  error: string | null;
+  resource_use: Record<string, number>;
+  parquet_path: string | null;
+  engine_version: string | null;
+}
+
+export interface DistributionBin {
+  bin: number;
+  low: number;
+  high: number;
+  count: number;
+}
+
+export interface DistributionOut {
+  job_id: string;
+  run_id: string | null;
+  measure: string;
+  component: "scalar" | "native";
+  bins: DistributionBin[];
+  measured_rows_with_value: number;
+  measure_failures: number;
+  outcomes: Record<string, number>;
+  summary: { min: number | null; max: number | null; mean: number | null; median: number | null };
+  parquet_sha256: string | null;
+}
+
+export interface DrilldownRow {
+  job_id: string;
+  sample_id: string;
+  dataset_id: string;
+  run_id: string | null;
+  outcome: string;
+  failure_reason: string | null;
+  uqs_scalar: number | null;
+  uqs_native: number | null;
+  source_path: string;
+  sha256: string;
+  links: { sample: string; quality: string; run: string | null; image: string };
+}
+
+export interface SampleQualityOut {
+  sample: { sample_id: string; source_path: string; sha256: string; subject_id: { value?: string | null } ; metadata: Record<string, unknown> };
+  results: Array<{
+    job_id: string;
+    run_id: string | null;
+    outcome: string;
+    failure_reason: string | null;
+    uqs_scalar: number | null;
+    measures: Record<string, { native: number | null; scalar: number | null; failed: boolean }>;
+    links: { run: string | null; job: string; audit: string | null };
+  }>;
+  links: { image: string; dataset: string };
+}
+
+export interface MatcherLeaf {
+  run_id: string;
+  matrix_id: string;
+  leaf_id: string;
+  matcher_id: string;
+  condition_id: string;
+  protocol_id: string;
+  comparison_count: number;
+  scored_count: number;
+  failed_count: number;
+  created_at: string;
+  eer: Record<string, { eer: number; threshold: number; method: string }>;
+  operating_points: Record<string, Array<{ target_fmr: number; threshold: number | null; fmr?: number; fnmr?: number; reason?: string }>>;
+  view2_tenfold: Record<string, { mean_accuracy: number | null; std_accuracy: number | null; method: string }>;
+  counts: Record<string, number>;
+  metrics_sha256: string;
+  comparisons_sha256: string;
+  links: { run: string; metrics: string; comparisons: string; errors: string };
+}
+
+export interface ComparisonRow {
+  pair_id: string;
+  fold: number;
+  label: string;
+  left_sample_id: string;
+  right_sample_id: string;
+  left_subject_id: string;
+  right_subject_id: string;
+  score: number | null;
+  failure: string | null;
+  failure_side: string | null;
+  links: { left_sample: string; right_sample: string; left_image: string | null; right_image: string | null; run: string };
+}
+
+export interface MatcherErrors {
+  run_id: string;
+  leaf_id: string;
+  matcher_id: string;
+  condition_id: string;
+  transform_id: string | null;
+  threshold: number;
+  policy: string;
+  score_direction: string;
+  threshold_equality_rule: string;
+  false_matches: ComparisonRow[];
+  false_non_matches: ComparisonRow[];
+  processing_failures: ComparisonRow[];
+  counts: { false_matches: number; false_non_matches: number; processing_failures: number };
+}
+
+export interface MatrixStatus {
+  matrix_id: string;
+  progress: { phase: string; detail: string };
+  leaves: MatcherLeaf[];
+}
+
+export const api = {
+  protocols: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/protocols`).then((r) => readJson<Array<{ protocol_id: string; name: string; pair_count: number; mated_count: number; nonmated_count: number }>>(r)),
+  freezeProtocol: (project_id: string, dataset_id: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/${encodeURIComponent(dataset_id)}/protocols/freeze-lfw-view2`, { method: "POST" }).then((r) => readJson<{ protocol_id: string; pair_count: number }>(r)),
+  startMatrix: (project_id: string, protocol_id: string, fixturePairsOnly: boolean) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/protocols/${encodeURIComponent(protocol_id)}/matrix?fixture_pairs_only=${fixturePairsOnly}`, { method: "POST" }).then((r) => readJson<{ matrix_id: string; pairs: number; samples: number }>(r)),
+  matrix: (matrix_id: string) => fetch(`/api/matrices/${encodeURIComponent(matrix_id)}`).then((r) => readJson<MatrixStatus>(r)),
+  matcherLeaves: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/matcher-leaves`).then((r) => readJson<MatcherLeaf[]>(r)),
+  matcherMetrics: (run_id: string) => fetch(`/api/matcher-runs/${encodeURIComponent(run_id)}/metrics`).then((r) => readJson<{ metrics: any }>(r)),
+  matcherErrors: (run_id: string, threshold?: number) =>
+    fetch(`/api/matcher-runs/${encodeURIComponent(run_id)}/errors${threshold !== undefined ? `?threshold=${threshold}` : ""}`).then((r) => readJson<MatcherErrors>(r)),
+  datasets: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets`).then((r) => readJson<DatasetOut[]>(r)),
+  importLfw: (project_id: string, verify_hashes: boolean) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/import-registered`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ resource_id: "lfw-funneled-local-candidate", verify_hashes }),
+    }).then((r) => readJson<DatasetOut>(r)),
+  datasetStatistics: (dataset_id: string) =>
+    fetch(`/api/datasets/${encodeURIComponent(dataset_id)}/statistics`).then((r) => readJson<{ dataset_id: string; evidence_sha256: string; statistics: Record<string, any> }>(r)),
+  startBatch: (project_id: string, dataset_id: string, selection: Record<string, unknown>, chunks: number, purpose_scope: string | null) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/${encodeURIComponent(dataset_id)}/quality-batch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(purpose_scope ? { selection, chunks, purpose_scope } : { selection, chunks }),
+    }).then((r) => readJson<JobOut>(r)),
+  job: (job_id: string) => fetch(`/api/jobs/${encodeURIComponent(job_id)}`).then((r) => readJson<JobOut>(r)),
+  cancelJob: (job_id: string) => fetch(`/api/jobs/${encodeURIComponent(job_id)}/cancel`, { method: "POST" }).then((r) => readJson<JobOut>(r)),
+  projectJobs: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/jobs`).then((r) => readJson<JobOut[]>(r)),
+  distribution: (job_id: string, measure: string, component: "scalar" | "native", bins: number) =>
+    fetch(`/api/jobs/${encodeURIComponent(job_id)}/distribution?measure=${encodeURIComponent(measure)}&component=${component}&bins=${bins}`).then((r) => readJson<DistributionOut>(r)),
+  drilldown: (job_id: string, min_scalar: number, max_scalar: number, limit = 60) =>
+    fetch(`/api/jobs/${encodeURIComponent(job_id)}/drilldown?min_scalar=${min_scalar}&max_scalar=${max_scalar}&outcome=MEASURED&limit=${limit}`).then((r) => readJson<{ total: number; rows: DrilldownRow[] }>(r)),
+  drilldownFailures: (job_id: string, limit = 60) =>
+    fetch(`/api/jobs/${encodeURIComponent(job_id)}/drilldown?outcome=ENGINE_ROW_FAILURE&limit=${limit}`).then((r) => readJson<{ total: number; rows: DrilldownRow[] }>(r)),
+  sampleQuality: (sample_id: string) => fetch(`/api/samples/${encodeURIComponent(sample_id)}/quality`).then((r) => readJson<SampleQualityOut>(r)),
+  projects: () => fetch("/api/projects").then((r) => readJson<ProjectOut[]>(r)),
+  createProject: (name: string, description: string, purpose_scope: string) =>
+    fetch("/api/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, description, purpose_scope, tags: [], notes: [] }),
+    }).then((r) => readJson<ProjectOut>(r)),
+  projectAction: (project_id: string, action: "open" | "save" | "close" | "archive", body?: Record<string, unknown>) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/${action}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+    }).then((r) => readJson<ProjectOut>(r)),
+  deriveProject: (project_id: string, mode: "clone" | "save-as", name: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/${mode}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).then((r) => readJson<ProjectOut>(r)),
+  health: () => fetch("/api/health").then((r) => readJson<HealthOut>(r)),
+  resources: () => fetch("/api/resources").then((r) => readJson<ResourceOut[]>(r)),
+  registeredSamples: () => fetch("/api/samples/registered").then((r) => readJson<RegisteredSample[]>(r)),
+  runs: () => fetch("/api/runs").then((r) => readJson<RunSummaryOut[]>(r)),
+  assess: (image_path: string, purpose_scope: string, project_id: string | null) =>
+    fetch("/api/quality/assess", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(project_id ? { image_path, purpose_scope, project_id } : { image_path, purpose_scope }),
+    }).then((r) => readJson<AssessResponse>(r)),
+  imageUrl: (path: string) => `/api/samples/image?path=${encodeURIComponent(path)}`,
+};

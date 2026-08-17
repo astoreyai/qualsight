@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0.0",
+  "authorization_id": "qualsight-lfw-original-protocol-evidence-review-2026-08-17",
+  "recorded_at": "2026-08-17T00:15:34-05:00",
+  "authority": "QualSight project owner (interactive user)",
+  "decision": "APPROVED_EVIDENCE_ACQUISITION",
+  "resource_id": "lfw-funneled-local-candidate",
+  "scope": "ACQUIRE_LFW_ORIGINAL_2007_PROTOCOL_DOCUMENT_FOR_EVIDENCE_REVIEW",
+  "decision_evidence": "The project owner instructed the agent to continue the recommended beta-critical route until complete. The hostile review showed that the original 2007 UMass LFW technical report is required to anchor the protocol authority. This reversible authorization is limited to acquiring and statically reviewing that one named official PDF; it does not authorize dataset, image, detector, model, matcher, or scientific execution.",
+  "permitted_actions": [
+    "Retrieve the original 2007 UMass LFW technical-report PDF from https://people.cs.umass.edu/~elm/papers/lfw.pdf into the QualSight resource-evidence directory.",
+    "Preserve response headers and compute cryptographic hashes, sizes, and retrieval timestamps.",
+    "Use the exact pinned local pdftotext executable to extract protocol text for deterministic static validation.",
+    "Bind the original View 2 definition to the already registered real LFW pair manifest while retaining every unresolved predicate."
+  ],
+  "prohibited_actions": [
+    "Do not decode or display an LFW image.",
+    "Do not load or execute a detector, model, matcher, or OFIQ runtime.",
+    "Do not infer dataset-image rights, consent, acquisition provenance, or redistribution permission from the protocol report.",
+    "Do not claim complete official-protocol conformance without matcher-training identity-exclusion evidence and authorized resources."
+  ],
+  "redistribution_allowed": false
+}

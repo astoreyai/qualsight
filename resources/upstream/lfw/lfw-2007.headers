@@ -1,0 +1,9 @@
+HTTP/1.1 200 OK
+Date: Mon, 17 Aug 2026 05:16:07 GMT
+Server: Apache/2.4.62 (AlmaLinux) OpenSSL/3.5.5 mod_auth_gssapi/1.6.3 mod_fcgid/2.3.9 mod_perl/2.0.12 Perl/v5.32.1
+Last-Modified: Sat, 24 Nov 2007 01:52:30 GMT
+ETag: "36926-43fa2fbe23380"
+Accept-Ranges: bytes
+Content-Length: 223526
+Content-Type: application/pdf
+

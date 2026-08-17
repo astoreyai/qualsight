@@ -1,0 +1,99 @@
+{
+  "schema_version": "1.0.0",
+  "authorization_id": "qualsight-owner-use-permission-granted-2026-08-17",
+  "authority": "QualSight project owner (interactive user)",
+  "recorded_at": "2026-08-17T12:50:33-05:00",
+  "decision_evidence": [
+    "Verbatim project-owner instruction, Codex thread 019ffd39-8da5-7d81-955e-408c56b20682, user turn 01a0101c-0028-7393-8135-0b3e16cfeef3 at 2026-08-17T14:24:25Z, sent in reply to the four listed external inputs (1: LFW image-use permission; 2: matcher checkpoint rights and training-identity exclusion; 3: isolated OFIQ v1.1.2 build and conformance run; 4: external matcher-score artifact): \"use permission granted - not shipping with this - should be loadable and pull from whereever - huggingface etc? - same with ofiq - and what about #2\".",
+    "Preceding project-owner instruction in the same thread at 2026-08-17T04:39:17Z: \"continue the recommended route until complete\".",
+    "Interpretation bound by this receipt: the project owner grants local noncommercial research use of the registered LFW dataset bytes, the OFIQ v1.1.2 tagged source with its CMake-selected model bundle and ONNX Runtime 1.18.1 package, the SCRFD-10G detector, and the AdaFace IR-101, ElasticFace-Arc R100, and TransFace-S checkpoints on the Clarkson-controlled QualSight workstation; QualSight must never redistribute or bundle those bytes; the product must instead acquire them at setup time from their official or mirror sources (GitHub releases, eu-LISA, UMass, Hugging Face) with pinned SHA-256 verification; owner authorization for item 2 follows the same rule, with third-party rights recorded factually and matcher training-set identity exclusion recorded as a published-protocol claim rather than a byte-verified fact.",
+    "Owner authorization remains distinct from third-party rights: each resource keeps its factual third_party_rights_status; the owner accepts the residual rights uncertainty for local, non-redistributed research use only."
+  ],
+  "grants": [
+    {
+      "resource_id": "ofiq-v1-1-0-build-runtime",
+      "decision": "NOT_APPROVED",
+      "scopes": []
+    },
+    {
+      "resource_id": "ofiq-r-01-conformance-input",
+      "decision": "APPROVED_LIMITED_USE",
+      "scopes": [
+        "REPRODUCE_OFIQ_CONFORMANCE_TESTS"
+      ]
+    },
+    {
+      "resource_id": "ofiq-v1-1-2-cmake-runtime-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": [
+        "ACQUIRE_OFIQ_V1_1_2_FOR_EVIDENCE_REVIEW",
+        "BUILD_OFIQ_V1_1_2_ISOLATED_NO_SUDO",
+        "REPRODUCE_OFIQ_CONFORMANCE_TESTS",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ]
+    },
+    {
+      "resource_id": "ofiq-v1-1-2-linux-runtime",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": [
+        "REPRODUCE_OFIQ_CONFORMANCE_TESTS",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ]
+    },
+    {
+      "resource_id": "lfw-funneled-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ]
+    },
+    {
+      "resource_id": "adaface-ir101-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ]
+    },
+    {
+      "resource_id": "elasticface-arc-r100-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ]
+    },
+    {
+      "resource_id": "transface-s-glint360k-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ]
+    },
+    {
+      "resource_id": "insightface-scrfd-10g-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ]
+    }
+  ],
+  "permitted_actions": [
+    "Build the official OFIQ v1.1.2 tag in an isolated sibling directory without sudo, consuming the preserved CMake-selected model bundle and ONNX Runtime 1.18.1 package or byte-identical re-downloads of them, install it under a QualSight-managed prefix, and execute it on the registered conformance input and on owner-approved local research images.",
+    "Install build tooling (Conan 2.x) into user-local tool directories and let Conan fetch its recipe dependencies from ConanCenter during the setup step; record every downloaded archive identity.",
+    "Acquire the LFW funneled archive, the InsightFace buffalo_l pack, and the three matcher checkpoints at setup time from official or mirror sources (UMass, GitHub releases, Hugging Face) only when the downloaded bytes match the registered SHA-256 identities; refuse and report on mismatch.",
+    "Decode, display, detect, align, crop, and embed the registered LFW images and run the six frozen matcher-by-preprocessing conditions locally on the QualSight workstation.",
+    "Run OFIQ v1.1.2 quality assessment locally over the registered LFW images and over any owner-supplied local images."
+  ],
+  "prohibited_actions": [
+    "Do not bundle, publish, commit, or otherwise redistribute LFW images, OFIQ model payloads, ONNX Runtime binaries, SCRFD or matcher checkpoints, crops, embeddings, or restricted conformance images with QualSight; ship only pinned source URLs and SHA-256 identities.",
+    "Do not present owner authorization as third-party license or permission evidence; keep third_party_rights_status factual on every resource.",
+    "Do not use unpinned or unverified downloads, random model weights, unsafe checkpoint deserialization, or unregistered runtime bytes in a scientific Run.",
+    "Do not make network calls during scientific runtime; acquisition is a separate explicit setup step.",
+    "Do not execute the historical OFIQ 1.1.0 build-tree runtime for QualSight results."
+  ],
+  "redistribution_allowed": false
+}

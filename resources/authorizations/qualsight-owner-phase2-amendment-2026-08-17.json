@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "authorization_id": "qualsight-owner-phase2-amendment-2026-08-17",
+  "authority": "QualSight project owner (interactive user)",
+  "recorded_at": "2026-08-17T16:41:00-05:00",
+  "decision_evidence": [
+    "Interactive owner answers on 2026-08-17 (Claude session 8e2f9bb1-b00a-4d9f-9a42-74b1d318c22b), verbatim option labels: 'Amend the plan: close Phase 2 on our own runs (Recommended)'; 'Commit everything now on main (Recommended)'; 'Keep TransFace, local research only (Recommended)'; next work 'Phase 3: quality-utility (ERC/risk-coverage/threshold policy)', 'Phase 4: cross-matcher comparison + failure overlap', 'Phase 5: reports/figures/reproduction bundle', 'Phase 7 first: packaging/offline install + docs'.",
+    "Effect on the graph: QS-C21 (real external score importer) is parked as a required beta node feeding the beta terminal gate QS-H74 directly; its edges into QS-C23 and QS-C25 are removed so that Phase 2 closes on QualSight-executed Runs; QS-C21 accepts only when a real externally computed score artifact is registered, and no artifact is fabricated meanwhile.",
+    "TransFace-S stays in the six-Run matrix for owner-approved local noncommercial research; its unlicensed repository code is acquired at setup time and never bundled.",
+    "Commits on branch main are authorized from this decision onward; pushes remain unauthorized until a remote is named."
+  ],
+  "grants": [],
+  "permitted_actions": [
+    "Accept QS-C25 on the six condition-specific QualSight-executed Runs, distributions, FMR/FNMR/ROC/DET/EER, operating points, uncertainty, and traceable failures without imported-score evidence.",
+    "Freeze Phase 3, 4, 5, and 7 nodes as dependency-ready work.",
+    "Commit the working tree to branch main (excluding git-ignored evidence stores and any restricted bytes)."
+  ],
+  "prohibited_actions": [
+    "Do not fabricate or self-generate an 'external' score artifact to satisfy QS-C21.",
+    "Do not push to any remote without a further owner instruction naming it.",
+    "Do not bundle TransFace, checkpoint, dataset, or model bytes with QualSight."
+  ],
+  "redistribution_allowed": false
+}

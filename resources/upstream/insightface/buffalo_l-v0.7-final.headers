@@ -1,0 +1,24 @@
+HTTP/2 200 
+last-modified: Sun, 02 Apr 2023 07:43:13 GMT
+etag: "0x8DB334DE9ED471F"
+server: Windows-Azure-Blob/1.0 Microsoft-HTTPAPI/2.0
+x-ms-request-id: 7fb1008c-801e-0056-6278-1f10ba000000
+x-ms-version: 2018-11-09
+x-ms-creation-time: Sun, 02 Apr 2023 07:43:13 GMT
+x-ms-blob-content-md5: bA6Sn9O2q1FxcLcyztGMaA==
+x-ms-lease-status: unlocked
+x-ms-lease-state: available
+x-ms-blob-type: BlockBlob
+x-ms-server-encrypted: true
+via: 1.1 varnish, 1.1 varnish
+accept-ranges: bytes
+age: 1555
+date: Mon, 17 Aug 2026 05:35:25 GMT
+x-served-by: cache-iad-kcgs7200057-IAD, cache-iah1720140-IAH
+x-cache: HIT, HIT
+x-cache-hits: 31485, 0
+x-timer: S1786944926.607807,VS0,VE1
+content-disposition: attachment; filename=buffalo_l.zip
+content-type: application/octet-stream
+content-length: 288621354
+

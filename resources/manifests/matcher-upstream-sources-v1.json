@@ -1,0 +1,115 @@
+{
+  "schema_version": "1.0.0",
+  "manifest_id": "matcher-upstream-sources-v1",
+  "policy": "Architecture and alignment sources are acquired at setup time into the git-ignored data directory (var/upstream) from these pinned commits, verified byte-for-byte against sha256 before import, and are never bundled with QualSight; insightface pieces are ported (MIT) into qualsight/matchers.",
+  "sources": [
+    {
+      "key": "adaface_net",
+      "repository": "mk-minchul/AdaFace",
+      "commit": "d8114b3ca8c54cd81ef59ac34c19eda1c548ca17",
+      "url": "https://raw.githubusercontent.com/mk-minchul/AdaFace/d8114b3ca8c54cd81ef59ac34c19eda1c548ca17/net.py",
+      "sha256": "b4db4eb0174a385fd29e5f616391b50d443f455990c8b88dcab1f8021af8ba4c",
+      "size_bytes": 12787,
+      "response_headers_sha256": "c087369075753bdca8716bd5010917e1769fd2ff98b953420af5059cb7e373cd",
+      "etag": "18442e04b8e593884313ae3aa11c7b207cb1e1e1d10ceab3ffe8a1c63426d08d",
+      "license_note": "MIT (repository LICENSE registered as resources/upstream/adaface/LICENSE.d8114b3c.txt)",
+      "retrieved_at": "2026-08-17T15:07-05:00 (curl, TLS 1.2+, headers preserved)"
+    },
+    {
+      "key": "elasticface_iresnet",
+      "repository": "fdbtrs/ElasticFace",
+      "commit": "5496ec0643bfdcd5e6b53b885aa4e919e26ce442",
+      "url": "https://raw.githubusercontent.com/fdbtrs/ElasticFace/5496ec0643bfdcd5e6b53b885aa4e919e26ce442/backbones/iresnet.py",
+      "sha256": "7503a2b427c62bb627efa643a738dda4ff11fb178421c15a42c1c9d7b9622709",
+      "size_bytes": 8644,
+      "response_headers_sha256": "f60b2ab2c5e4b36365eae2286e84f74850615cc1be950cb6370646b7414e5a54",
+      "etag": "6cf21a17894d712cac0099b74a36e8d1997f3c1793b08a65e97e3c6d6988c535",
+      "license_note": "CC-BY-NC-SA-4.0 (repository README registered as resources/upstream/elasticface/README.5496ec06.md); backbone derives from insightface arcface_torch (MIT)",
+      "retrieved_at": "2026-08-17T15:07-05:00 (curl, TLS 1.2+, headers preserved)"
+    },
+    {
+      "key": "transface_vit",
+      "repository": "DanJun6737/TransFace",
+      "commit": "fb6cd56d04c7ea525e328219f5d5066adac03ada",
+      "url": "https://raw.githubusercontent.com/DanJun6737/TransFace/fb6cd56d04c7ea525e328219f5d5066adac03ada/backbones/vit.py",
+      "sha256": "391d55eef2b283a2ee07506c959c5d506e0dff29a435fcd0a6b3ccb998247fb2",
+      "size_bytes": 11722,
+      "response_headers_sha256": "755dd3500390447f769ffccb1531d6d622b90a69b8e0575e57830eccd9f5ba32",
+      "etag": "5aec1f19877759d778c05edf11b56cd66cfa2532263cae417c5cce650b984c71",
+      "license_note": "NO_LICENSE_FOUND in the pinned repository; the file derives from insightface arcface_torch vit.py (MIT) with an added patch-attention SE module; used locally only, never bundled",
+      "retrieved_at": "2026-08-17T15:07-05:00 (curl, TLS 1.2+, headers preserved)"
+    },
+    {
+      "key": "transface_config_vit_s",
+      "repository": "DanJun6737/TransFace",
+      "commit": "fb6cd56d04c7ea525e328219f5d5066adac03ada",
+      "url": "https://raw.githubusercontent.com/DanJun6737/TransFace/fb6cd56d04c7ea525e328219f5d5066adac03ada/configs/glint360k_vit_s.py",
+      "sha256": "4fbe334dcaea8e5cf4be860bc12f663bff74340ba4e43ac7c492f4b31cc08386",
+      "size_bytes": 726,
+      "response_headers_sha256": "e8e3c6056052c91ae86808795be09f99d9f08dabb11014477dd9ebaf5e584c4f",
+      "etag": "d932e21ae093db8bd441a85c983a7beb9cea8b6196cf258ef23c68a082f65082",
+      "license_note": "NO_LICENSE_FOUND in the pinned repository; configuration evidence only (network name vit_s_dp005_mask_0, embedding 512)",
+      "retrieved_at": "2026-08-17T15:07-05:00 (curl, TLS 1.2+, headers preserved)"
+    },
+    {
+      "key": "insightface_face_align",
+      "repository": "deepinsight/insightface",
+      "commit": "7fadd420c2351d0ffa8cac403421c1a3ed733365",
+      "url": "https://raw.githubusercontent.com/deepinsight/insightface/7fadd420c2351d0ffa8cac403421c1a3ed733365/python-package/insightface/utils/face_align.py",
+      "sha256": "a8b34ddd06716f5ca7e7501415cbd3789ccbce18db9e557b35e537695290d922",
+      "size_bytes": 3356,
+      "response_headers_sha256": "e9e492f8c15ebf0cf3c1cc02e35ac731fba9182c6e707fa71be69b025b1c35b8",
+      "etag": "11edf66c5005ec958e001a1660df6fe58c4bc94ac16eeaa01389a07c89580f68",
+      "license_note": "MIT (insightface python package); ported into qualsight/matchers/alignment.py \u2014 reference only",
+      "retrieved_at": "2026-08-17T15:07-05:00 (curl, TLS 1.2+, headers preserved)"
+    },
+    {
+      "key": "insightface_scrfd",
+      "repository": "deepinsight/insightface",
+      "commit": "7fadd420c2351d0ffa8cac403421c1a3ed733365",
+      "url": "https://raw.githubusercontent.com/deepinsight/insightface/7fadd420c2351d0ffa8cac403421c1a3ed733365/python-package/insightface/model_zoo/scrfd.py",
+      "sha256": "8898d1f90690d46bee371e1de31d1af60837988272a5eef904c5ba89e0fb8d83",
+      "size_bytes": 16065,
+      "response_headers_sha256": "2bb171c63e8a49b3752715bea9a7cf8f3b46793f96cdf7d710309a308e49261a",
+      "etag": "b89840067215f9240e013c2705d80e37c86c1b5c1b04649c480f20c921994841",
+      "license_note": "MIT (insightface python package); ported into qualsight/matchers/detection.py \u2014 reference only",
+      "retrieved_at": "2026-08-17T15:07-05:00 (curl, TLS 1.2+, headers preserved)"
+    },
+    {
+      "key": "insightface_arcface_torch_vit",
+      "repository": "deepinsight/insightface",
+      "commit": "7fadd420c2351d0ffa8cac403421c1a3ed733365",
+      "url": "https://raw.githubusercontent.com/deepinsight/insightface/7fadd420c2351d0ffa8cac403421c1a3ed733365/recognition/arcface_torch/backbones/vit.py",
+      "sha256": "860977622aa54321a3b569962cf64737db28ed4ce9b38479f6861800ccdd894f",
+      "size_bytes": 10780,
+      "response_headers_sha256": "ba03dfc24b098eea33ff66e60f63740ef5aa66539dcfffc1e9d20371c516777d",
+      "etag": "195c2887c94a8215be033110af3956a2d5cace64e122f1d9a211000e04e0fb40",
+      "license_note": "MIT; reference for the TransFace ViT lineage",
+      "retrieved_at": "2026-08-17T15:07-05:00 (curl, TLS 1.2+, headers preserved)"
+    },
+    {
+      "key": "transface_backbones_init",
+      "repository": "DanJun6737/TransFace",
+      "commit": "fb6cd56d04c7ea525e328219f5d5066adac03ada",
+      "url": "https://raw.githubusercontent.com/DanJun6737/TransFace/fb6cd56d04c7ea525e328219f5d5066adac03ada/backbones/__init__.py",
+      "sha256": "4e73bada6c4ff1c0c55ce7ac9d3d25f5b4a57b98ada2bf0bc06fc06d6c4e3b42",
+      "size_bytes": 3680,
+      "response_headers_sha256": "9416f129a57e47de20df532d70dd1ed58480845a6867aab8da339150984e74f2",
+      "etag": null,
+      "license_note": "NO_LICENSE_FOUND in the pinned repository; constructor-argument evidence for vit_s_dp005_mask_0 (img 112, patch 9, embed 512, depth 12, heads 8, drop_path 0.05, ln, mask 0.0)",
+      "retrieved_at": "2026-08-17T15:16-05:00 (curl, TLS 1.2+, headers preserved)"
+    },
+    {
+      "key": "insightface_arcface_torch_iresnet",
+      "repository": "deepinsight/insightface",
+      "commit": "7fadd420c2351d0ffa8cac403421c1a3ed733365",
+      "url": "https://raw.githubusercontent.com/deepinsight/insightface/7fadd420c2351d0ffa8cac403421c1a3ed733365/recognition/arcface_torch/backbones/iresnet.py",
+      "sha256": "fb57d145c4c26d8e55680c24fa164541a7222ccdefa3a1716c054ff4c5859753",
+      "size_bytes": 7431,
+      "response_headers_sha256": "7bbb8d751f722aabbc7258e4a8742d04788b1df74bc4b5f2f12e1a6d9b94b8e7",
+      "etag": null,
+      "license_note": "MIT; the ElasticFace-Arc R100 checkpoint loads strict=True on iresnet100(num_features=512) from this file (ElasticFace's own iresnet.py adds only an optional SE block that the checkpoint does not use)",
+      "retrieved_at": "2026-08-17T15:14-05:00 (curl, TLS 1.2+, headers preserved)"
+    }
+  ]
+}

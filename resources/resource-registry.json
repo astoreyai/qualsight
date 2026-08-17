@@ -1,0 +1,2646 @@
+{
+  "schema_version": "1.2.0",
+  "registry_id": "qualsight-local-resources",
+  "recorded_at": "2026-08-17T12:50:33-05:00",
+  "source_requirements": [
+    "QS-REQ-010",
+    "QS-REQ-048",
+    "QS-REQ-052",
+    "QS-REQ-053A",
+    "QS-REQ-053B",
+    "QS-REQ-054A",
+    "QS-REQ-054B",
+    "QS-REQ-054C"
+  ],
+  "resources": [
+    {
+      "resource_id": "ofiq-v1-1-0-build-runtime",
+      "kind": "ENGINE_RUNTIME",
+      "name": "OFIQ 1.1.0 build-tree runtime",
+      "state": "BLOCKED",
+      "version": "1.1.0",
+      "source": {
+        "uri": "https://github.com/BSI-OFIQ/OFIQ-Project.git",
+        "local_root": "/mnt/projects/02_perception_biometrics/OFIQ-Project",
+        "commit": "bb5dc91d00477e02ce53d2530d28e35021484393",
+        "tag": "v1.1.0",
+        "evidence_artifacts": [
+          "/mnt/projects/02_perception_biometrics/OFIQ-Project/Version.txt",
+          "/mnt/projects/02_perception_biometrics/OFIQ-Project/LICENSE.md",
+          "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/ofiq_config.jaxn",
+          "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/README.md"
+        ],
+        "notes": [
+          "The source commit and exact tag are verified from the local Git worktree.",
+          "Artifact identities are verified from local bytes independently of Git tracking state."
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/Version.txt",
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/build/build_linux/OFIQSampleApp",
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/build/build_linux/libofiq_lib.so",
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/ofiq_config.jaxn"
+          ]
+        },
+        {
+          "expression": "MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/extern/onnxruntime-linux-x64-1.18.1/LICENSE",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/extern/onnxruntime-linux-x64-1.18.1/lib/libonnxruntime.so.1.18.1"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/grimmer/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/grimmer/hse_1_2_C_adaboost.yml.gz"
+          ]
+        },
+        {
+          "expression": "Apache-2.0 AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/hsemotion/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/hsemotion/enet_b0_8_best_vgaf_embed_zeroed.onnx",
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/hsemotion/enet_b2_8_embed_zeroed.onnx"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_detection/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_detection/ssd_facedetect.caffemodel",
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_detection/ssd_facedetect.prototxt.txt"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_landmark_estimation/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_landmark_estimation/ADNet.onnx"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_occlusion_segmentation/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_occlusion_segmentation/face_occlusion_segmentation_ort.onnx"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_parsing/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_parsing/bisenet_400.onnx"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/head_pose_estimation/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/head_pose_estimation/mb1_120x120.onnx"
+          ]
+        },
+        {
+          "expression": "OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/no_compression_artifacts/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/no_compression_artifacts/ssim_248_model.onnx"
+          ]
+        },
+        {
+          "expression": "OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/sharpness/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/sharpness/face_sharpness_rtree.xml.gz"
+          ]
+        },
+        {
+          "expression": "Apache-2.0 AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/unified_quality_score/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/unified_quality_score/magface_iresnet50_norm.onnx"
+          ]
+        }
+      ],
+      "use_restrictions": [
+        "Use is limited to reproducing the confirmed OFIQ conformance behavior until the model-bundle provenance review is complete.",
+        "Do not describe the local model payloads as ISO edition 1 or edition 2 without additional evidence.",
+        "Do not copy the restricted conformance images into QualSight."
+      ],
+      "redistribution_status": "NOT_APPROVED_FOR_QUALSIGHT_DISTRIBUTION",
+      "research_use_status": "CONFORMANCE_REPRODUCTION_ONLY",
+      "citations": [
+        "https://github.com/BSI-OFIQ/OFIQ-Project/tree/v1.1.0",
+        "https://standards.iso.org/iso-iec/29794/-5/ed-1/en/OFIQ-MODELS.zip",
+        "https://standards.iso.org/iso-iec/29794/-5/ed-2/en/OFIQ-MODELS.zip"
+      ],
+      "installation_or_access_method": "Do not execute this blocked runtime. Retain its registered bytes in place as historical evidence only.",
+      "data_classification": "RESTRICTED",
+      "runtime_requirements": {
+        "platform": "linux-x86_64",
+        "environment": {
+          "LD_LIBRARY_PATH": "/mnt/projects/02_perception_biometrics/OFIQ-Project/extern/onnxruntime-linux-x64-1.18.1/lib"
+        },
+        "notes": [
+          "The executable has obsolete build-host RUNPATH entries.",
+          "A prior observation reported that the explicit library path resolved libonnxruntime.so.1.18.1; the current metadata gate does not invoke a loader or revalidate that observation."
+        ]
+      },
+      "owner_authorization": {
+        "decision": "NOT_APPROVED",
+        "authority": "QualSight project owner (interactive user)",
+        "recorded_at": "2026-08-14T09:51:10-05:00",
+        "scopes": [],
+        "redistribution_allowed": false,
+        "evidence_artifact_path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-local-noncommercial-research-2026-08-14.json"
+      },
+      "third_party_rights_status": "VERIFIED_LICENSE",
+      "consumers": [
+        "QS-A06",
+        "QS-A07",
+        "QS-A10"
+      ],
+      "approved_scopes": [],
+      "blocked_reasons": [
+        "The tagged CMake file names the ISO edition-1 bundle while the tracked model README names edition 2.",
+        "The local bytes do not prove the downloaded archive identity or retrieval date.",
+        "Individual model payloads generally lack a verified named model version.",
+        "The project owner selected an isolated v1.1.2 acquisition path; execution of this v1.1.0 build-tree runtime remains unapproved.",
+        "Dynamic linkage has not been revalidated without invoking the blocked runtime's loader."
+      ],
+      "artifacts": [
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-local-noncommercial-research-2026-08-14.json",
+          "sha256": "48b11e76ac1d7288c40f0052fa000ae72f7edd4c930db3057751c7c7f841a3fa",
+          "size_bytes": 3381,
+          "mtime_ns": 1786720714006247146
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/LICENSE.md",
+          "sha256": "2f71522167b564572f38ad1a22f30cbf166c031341d181edd0bf67cdcb550055",
+          "size_bytes": 36632,
+          "mtime_ns": 1768931764807127547
+        },
+        {
+          "role": "VERSION_EVIDENCE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/Version.txt",
+          "sha256": "63eec0b21a68815189b423b0bcbf8c97c0b3f1d11ecb51ed51e8b425de0c81a9",
+          "size_bytes": 287,
+          "mtime_ns": 1768931764811127641
+        },
+        {
+          "role": "BINARY",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/build/build_linux/OFIQSampleApp",
+          "sha256": "fb41aa5c819d5432aa94e29415a2e0e702a124cc2c3b4c6aca3cfb6cd0af20b9",
+          "size_bytes": 84432,
+          "mtime_ns": 1768933647652282049
+        },
+        {
+          "role": "RUNTIME_LIBRARY",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/build/build_linux/libofiq_lib.so",
+          "sha256": "5d90a2238fb8879f1eb6817ff1df705c16099f7452878189398fb091c0188664",
+          "size_bytes": 22160376,
+          "mtime_ns": 1768933646668258410
+        },
+        {
+          "role": "CONFIGURATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/ofiq_config.jaxn",
+          "sha256": "e117286706d799a1e23130db01cfdff7ef36d157b22ecf68dd196052a8a8d0b3",
+          "size_bytes": 6118,
+          "mtime_ns": 1768931764811127641
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/extern/onnxruntime-linux-x64-1.18.1/LICENSE",
+          "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+          "size_bytes": 1073,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "RUNTIME_LIBRARY",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/extern/onnxruntime-linux-x64-1.18.1/lib/libonnxruntime.so.1.18.1",
+          "sha256": "1147caa734d19f7549f90a659aa9ca444366eeb80a596900d19d242145a9f4c9",
+          "size_bytes": 15285336,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/README.md",
+          "sha256": "6b2adaa64750ab983aaa4617ce3cc740820890b9da1665f76f031e8b4729a99a",
+          "size_bytes": 4053,
+          "mtime_ns": 1710448426000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/grimmer/hse_1_2_C_adaboost.yml.gz",
+          "sha256": "6555645c47dd2d3ff290a6e881890fa8ca8adeaf31d4678a4bd2a3524d25ad87",
+          "size_bytes": 19368922,
+          "mtime_ns": 1708020628000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/hsemotion/enet_b0_8_best_vgaf_embed_zeroed.onnx",
+          "sha256": "467e6c31152cd6db94f50c5d0b8e2ce4d1280f2fbd7b826609aefb92779a9e15",
+          "size_bytes": 16052940,
+          "mtime_ns": 1708736792000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/hsemotion/enet_b2_8_embed_zeroed.onnx",
+          "sha256": "9a62be277daf63e553900ff15fe2124fb4ba9b4d759364e21f07464f351e8b44",
+          "size_bytes": 30800917,
+          "mtime_ns": 1708736076000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_detection/ssd_facedetect.caffemodel",
+          "sha256": "2a56a11a57a4a295956b0660b4a3d76bbdca2206c4961cea8efe7d95c7cb2f2d",
+          "size_bytes": 10666211,
+          "mtime_ns": 1609376866000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_detection/ssd_facedetect.prototxt.txt",
+          "sha256": "34d850436faf158ca4e690533ba27c1decf29653559299d80db9274146332ca7",
+          "size_bytes": 29881,
+          "mtime_ns": 1609378126000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_landmark_estimation/ADNet.onnx",
+          "sha256": "5aed3eb5b6ecd3504e5216078a3db064f6c93f2a420f12d0e82f2184c64c9654",
+          "size_bytes": 54747293,
+          "mtime_ns": 1680048058000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_occlusion_segmentation/face_occlusion_segmentation_ort.onnx",
+          "sha256": "e847464bd8c0c596e8921c18d303fc6bf0ddb4a127ba4d1213c19701ed8790d0",
+          "size_bytes": 57307779,
+          "mtime_ns": 1692983656000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_parsing/bisenet_400.onnx",
+          "sha256": "750ae55d5c440074a085ddd31a3fbd19a9e922ffb22d25eeb2bdf4f26eb3250a",
+          "size_bytes": 53193813,
+          "mtime_ns": 1679521724000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/head_pose_estimation/mb1_120x120.onnx",
+          "sha256": "efeb77517d067c197a314bc3d72aa04f03ceb6468f121d6c9f185dd44736e4ae",
+          "size_bytes": 13046240,
+          "mtime_ns": 1666899148000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/no_compression_artifacts/ssim_248_model.onnx",
+          "sha256": "001fe8e73803a3ffb4dbfc7794d9e20232eb925606e8efe68e54696516d04b41",
+          "size_bytes": 23382575,
+          "mtime_ns": 1700186744000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/sharpness/face_sharpness_rtree.xml.gz",
+          "sha256": "0d7decdad2b635e4d811f4de30a4bb451038d0698e72d452ba4b231de7710b02",
+          "size_bytes": 507331,
+          "mtime_ns": 1700241826000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/unified_quality_score/magface_iresnet50_norm.onnx",
+          "sha256": "bc03f082a59ccb3189c6c9aec429f376523fe6586e207c401ab8d1694888babb",
+          "size_bytes": 174394035,
+          "mtime_ns": 1709969866000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/grimmer/LICENSE.md",
+          "sha256": "5fbe40b862ee4171d7c813c0d8f08740c25bd19e4230bc7ef971114ba1fa8724",
+          "size_bytes": 1538,
+          "mtime_ns": 1723645014000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/hsemotion/LICENSE.md",
+          "sha256": "c8502e3d871cb19c570beedd9c96974fb5e3dd5ddad9c64ea50cd642cca61627",
+          "size_bytes": 1730,
+          "mtime_ns": 1710448052000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_detection/LICENSE.md",
+          "sha256": "c76d4a30a8d773eef0ad7677e6b47259241470627f7e3a0eba71b38f0e286dc6",
+          "size_bytes": 1498,
+          "mtime_ns": 1710448138000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_landmark_estimation/LICENSE.md",
+          "sha256": "a61b71ef5797df85574eb8b582a3b1a9af4238c32f69d05dc54edbd3a410edf5",
+          "size_bytes": 1509,
+          "mtime_ns": 1710448218000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_occlusion_segmentation/LICENSE.md",
+          "sha256": "b5a216197f625b0d0150526a0245319f81d9e2a9da0a1506735d98a49c332795",
+          "size_bytes": 1550,
+          "mtime_ns": 1722865988000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_parsing/LICENSE.md",
+          "sha256": "66a8761d67a1bddb6caaa987380311e846521384bc3ce539dced5a798e49a54c",
+          "size_bytes": 1475,
+          "mtime_ns": 1710448328000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/head_pose_estimation/LICENSE.md",
+          "sha256": "61e836cef5dd4ab2447ab9a07e8fa1fe33ba1e3f60bfb91065e1fb1a7108e75d",
+          "size_bytes": 1407,
+          "mtime_ns": 1710448362000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/no_compression_artifacts/LICENSE.md",
+          "sha256": "33513236c4fc0c583dbb169efe4a9331ced156c802608ddaceef93081d4ab9ff",
+          "size_bytes": 1243,
+          "mtime_ns": 1710448388000000000
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/no_compression_artifacts/README.md",
+          "sha256": "c89a660d53f0350850805fd5bec3988393f89126c889985992eb7994ef8d1687",
+          "size_bytes": 247,
+          "mtime_ns": 1723582340000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/sharpness/LICENSE.md",
+          "sha256": "c3508cf77d43db675ead73d8e68908588e97bfb4da3d6f4f8a446cc16fdfb5f9",
+          "size_bytes": 1250,
+          "mtime_ns": 1710448442000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/unified_quality_score/LICENSE.md",
+          "sha256": "225e378aae237bdb7e6614e36cc23d1655648368dd4b21d516c84966f93ddb95",
+          "size_bytes": 1572,
+          "mtime_ns": 1710448562000000000
+        }
+      ],
+      "checks": [
+        {
+          "type": "git_identity",
+          "root": "/mnt/projects/02_perception_biometrics/OFIQ-Project",
+          "commit": "bb5dc91d00477e02ce53d2530d28e35021484393",
+          "tag": "v1.1.0",
+          "remote": "https://github.com/BSI-OFIQ/OFIQ-Project.git"
+        },
+        {
+          "type": "manifest",
+          "base_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project",
+          "relative_to": "/mnt/projects/02_perception_biometrics/OFIQ-Project",
+          "expected_count": 12,
+          "sha256": "fa908247460807c7deea039c8c8bf76f0964d7bc863cd9f510766c559a80b7e7",
+          "relative_paths": [
+            "data/models/expression_neutrality/grimmer/hse_1_2_C_adaboost.yml.gz",
+            "data/models/expression_neutrality/hsemotion/enet_b0_8_best_vgaf_embed_zeroed.onnx",
+            "data/models/expression_neutrality/hsemotion/enet_b2_8_embed_zeroed.onnx",
+            "data/models/face_detection/ssd_facedetect.caffemodel",
+            "data/models/face_detection/ssd_facedetect.prototxt.txt",
+            "data/models/face_landmark_estimation/ADNet.onnx",
+            "data/models/face_occlusion_segmentation/face_occlusion_segmentation_ort.onnx",
+            "data/models/face_parsing/bisenet_400.onnx",
+            "data/models/head_pose_estimation/mb1_120x120.onnx",
+            "data/models/no_compression_artifacts/ssim_248_model.onnx",
+            "data/models/sharpness/face_sharpness_rtree.xml.gz",
+            "data/models/unified_quality_score/magface_iresnet50_norm.onnx"
+          ]
+        },
+        {
+          "type": "glob_manifest",
+          "base_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project",
+          "relative_to": "/mnt/projects/02_perception_biometrics/OFIQ-Project",
+          "expected_count": 24,
+          "sha256": "9d2ce53258af1e555724719255b30081c03e3995005e1686f6e58eb707fd3503",
+          "glob": "data/models/**/*"
+        },
+        {
+          "type": "jaxn_model_closure",
+          "config_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/ofiq_config.jaxn",
+          "data_root": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data",
+          "sha256": "fa908247460807c7deea039c8c8bf76f0964d7bc863cd9f510766c559a80b7e7",
+          "relative_paths": [
+            "models/expression_neutrality/grimmer/hse_1_2_C_adaboost.yml.gz",
+            "models/expression_neutrality/hsemotion/enet_b0_8_best_vgaf_embed_zeroed.onnx",
+            "models/expression_neutrality/hsemotion/enet_b2_8_embed_zeroed.onnx",
+            "models/face_detection/ssd_facedetect.caffemodel",
+            "models/face_detection/ssd_facedetect.prototxt.txt",
+            "models/face_landmark_estimation/ADNet.onnx",
+            "models/face_occlusion_segmentation/face_occlusion_segmentation_ort.onnx",
+            "models/face_parsing/bisenet_400.onnx",
+            "models/head_pose_estimation/mb1_120x120.onnx",
+            "models/no_compression_artifacts/ssim_248_model.onnx",
+            "models/sharpness/face_sharpness_rtree.xml.gz",
+            "models/unified_quality_score/magface_iresnet50_norm.onnx"
+          ]
+        }
+      ]
+    },
+    {
+      "resource_id": "ofiq-v1-1-2-cmake-runtime-candidate",
+      "kind": "ENGINE_RUNTIME_CANDIDATE",
+      "name": "OFIQ 1.1.2 official tagged CMake resource candidate",
+      "state": "BLOCKED",
+      "version": "1.1.2",
+      "source": {
+        "uri": "https://github.com/BSI-OFIQ/OFIQ-Project.git",
+        "local_root": "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2",
+        "commit": "d589ca27896a472446abc9eca8b62947ee47db19",
+        "tag": "v1.1.2",
+        "evidence_artifacts": [
+          "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/CMakeLists.txt",
+          "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/Version.txt",
+          "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/LICENSE.md",
+          "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/scripts/build.sh",
+          "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/conan/conan_profile_release_linux.txt",
+          "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/OFIQlib/CMakeLists.ubuntu.cmake",
+          "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/data/models/README.md",
+          "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/data/ofiq_config.jaxn",
+          "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/acquisition-receipt.json",
+          "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/OFIQ-Models.zip",
+          "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-linux-x64-1.18.1.tgz"
+        ],
+        "notes": [
+          "The source clone is the exact clean v1.1.2 tag at commit d589ca27896a472446abc9eca8b62947ee47db19.",
+          "The project-recorded receipt names the two URLs selected by tagged CMake; raw transfer logs were not preserved.",
+          "The registered current quarantine trees match the preserved archives byte-for-byte and contain no extra paths.",
+          "The 24-file model quarantine is byte-identical to the registered historical model tree and its 12 configured payloads map exactly once to 10 bundled license documents; this is bundle-internal documentary evidence, not independent upstream-rights proof.",
+          "The 19-file ONNX Runtime 1.18.1 quarantine is receipt-bound, fully byte-registered, and statically checked for package identity, bundled MIT and third-party notice presence, tagged USE_CONAN layout, and ELF-declared dependencies; these observations do not establish legal sufficiency, host loadability, or runtime compatibility."
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/CMakeLists.txt",
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/Version.txt",
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/scripts/build.sh",
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/conan/conan_profile_release_linux.txt",
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/OFIQlib/CMakeLists.ubuntu.cmake",
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/data/models/README.md",
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/data/ofiq_config.jaxn"
+          ]
+        },
+        {
+          "expression": "MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/LICENSE",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/GIT_COMMIT_ID",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/Privacy.md",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/README.md",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/VERSION_NUMBER",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/cpu_provider_factory.h",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_c_api.h",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_cxx_api.h",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_cxx_inline.h",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_float16.h",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_lite_custom_op.h",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_run_options_config_keys.h",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_session_options_config_keys.h",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_training_c_api.h",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_training_cxx_api.h",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_training_cxx_inline.h",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/provider_options.h",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/lib/libonnxruntime.so.1.18.1"
+          ]
+        },
+        {
+          "expression": "LicenseRef-ONNXRuntime-ThirdParty-Notices",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/ThirdPartyNotices.txt",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/lib/libonnxruntime.so.1.18.1"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/expression_neutrality/grimmer/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/expression_neutrality/grimmer/hse_1_2_C_adaboost.yml.gz"
+          ]
+        },
+        {
+          "expression": "Apache-2.0 AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/expression_neutrality/hsemotion/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/expression_neutrality/hsemotion/enet_b0_8_best_vgaf_embed_zeroed.onnx",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/expression_neutrality/hsemotion/enet_b2_8_embed_zeroed.onnx"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_detection/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_detection/ssd_facedetect.caffemodel",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_detection/ssd_facedetect.prototxt.txt"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_landmark_estimation/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_landmark_estimation/ADNet.onnx"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_occlusion_segmentation/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_occlusion_segmentation/face_occlusion_segmentation_ort.onnx"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_parsing/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_parsing/bisenet_400.onnx"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/head_pose_estimation/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/head_pose_estimation/mb1_120x120.onnx"
+          ]
+        },
+        {
+          "expression": "OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/no_compression_artifacts/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/no_compression_artifacts/ssim_248_model.onnx"
+          ]
+        },
+        {
+          "expression": "OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/sharpness/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/sharpness/face_sharpness_rtree.xml.gz"
+          ]
+        },
+        {
+          "expression": "Apache-2.0 AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/unified_quality_score/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/unified_quality_score/magface_iresnet50_norm.onnx"
+          ]
+        }
+      ],
+      "use_restrictions": [
+        "Acquisition authority remains limited to acquisition, hashing, archive validation, and license review; a separate registered owner decision permits only non-executing static review of the preserved ONNX Runtime archive, package text, headers, licenses, notices, hashes, and ELF structures.",
+        "Do not run the tagged build script or permit system-package installation with sudo.",
+        "Do not install, execute, or redistribute the quarantined model and runtime archives until all registry blockers clear."
+      ],
+      "redistribution_status": "NOT_APPROVED_FOR_QUALSIGHT_DISTRIBUTION",
+      "research_use_status": "OWNER_APPROVED_FOR_EVIDENCE_ACQUISITION_AND_NONEXECUTING_STATIC_REVIEW_ONLY",
+      "citations": [
+        "https://github.com/BSI-OFIQ/OFIQ-Project/tree/v1.1.2",
+        "https://resources.eulisa.europa.eu/research/OFIQ-Models.zip",
+        "https://github.com/microsoft/onnxruntime/releases/tag/v1.18.1"
+      ],
+      "installation_or_access_method": "Keep the clean tag and both raw archives isolated; install only after a no-sudo host profile and complete license closure are validated.",
+      "data_classification": "RESTRICTED",
+      "runtime_requirements": {
+        "platform": "debian-12-linux-x86_64-unbuilt",
+        "environment": {},
+        "notes": [
+          "The host compiler is GCC 12.2.0 while the tagged Linux Conan profile declares GCC 9.",
+          "The tagged profile permits package-manager install mode with sudo.",
+          "No isolated Conan environment, dependency closure, build, install tree, or process execution exists."
+        ]
+      },
+      "owner_authorization": {
+        "decision": "APPROVED_EVIDENCE_ACQUISITION",
+        "authority": "QualSight project owner (interactive user)",
+        "recorded_at": "2026-08-14T09:51:10-05:00",
+        "scopes": [
+          "ACQUIRE_OFIQ_V1_1_2_FOR_EVIDENCE_REVIEW"
+        ],
+        "redistribution_allowed": false,
+        "evidence_artifact_path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-local-noncommercial-research-2026-08-14.json"
+      },
+      "third_party_rights_status": "UNRESOLVED",
+      "consumers": [
+        "QS-A06",
+        "QS-A07",
+        "QS-A10"
+      ],
+      "approved_scopes": [],
+      "blocked_reasons": [
+        "The model archive README points to ISO/IEC 29794-5 edition 2, but the eu-LISA archive has not been independently cross-hashed with that ISO archive.",
+        "The acquisition receipt records the HTTP transfer details, but no raw transfer log or response-header artifact was preserved to independently verify those observations.",
+        "The model bundle has an exact internal payload-to-document map, and the ONNX Runtime archive contains exact MIT and third-party notice bytes; independent upstream-rights sufficiency, notice-to-component completeness, and ISO/eu-LISA model release identity remain unresolved.",
+        "The quarantined archives have not been installed into the clean source clone.",
+        "No no-sudo GCC 12 Conan profile, isolated dependency cache, or manual no-download CMake build exists.",
+        "No installed executable has reported engine version 1.1.2 or passed conformance validation."
+      ],
+      "artifacts": [
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-local-noncommercial-research-2026-08-14.json",
+          "sha256": "48b11e76ac1d7288c40f0052fa000ae72f7edd4c930db3057751c7c7f841a3fa",
+          "size_bytes": 3381,
+          "mtime_ns": 1786720714006247146
+        },
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-onnxruntime-static-review-2026-08-14.json",
+          "sha256": "2fec3814637896e325bdd04df7c6feb46ad54c1e03a0f0251bfd9f1e80f8c3ad",
+          "size_bytes": 1513,
+          "mtime_ns": 1786763875487581574
+        },
+        {
+          "role": "SOURCE_RECEIPT",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/acquisition-receipt.json",
+          "sha256": "c0c34b79c37bb4b27e1f005cab96970abd1ad99e78afcbc56697bd369272cac8",
+          "size_bytes": 4363,
+          "mtime_ns": 1786722076031704304
+        },
+        {
+          "role": "CONFIGURATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/CMakeLists.txt",
+          "sha256": "0b385eabeee13b70316ce7c204c570d6dea7edf6e610753cd61c5dda6ea88783",
+          "size_bytes": 4493,
+          "mtime_ns": 1786720257241829190
+        },
+        {
+          "role": "VERSION_EVIDENCE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/Version.txt",
+          "sha256": "9be05c702f52186e5448f6a4013a9f98956790a1a425b92f0f6f66313525351e",
+          "size_bytes": 287,
+          "mtime_ns": 1786720257245829299
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/LICENSE.md",
+          "sha256": "2f71522167b564572f38ad1a22f30cbf166c031341d181edd0bf67cdcb550055",
+          "size_bytes": 36632,
+          "mtime_ns": 1786720257241829190
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/scripts/build.sh",
+          "sha256": "92983de381e6eef20954086fa0a71b2b490d3bc2784ee926a89446e5ba376d5a",
+          "size_bytes": 4876,
+          "mtime_ns": 1786720257349832126
+        },
+        {
+          "role": "CONFIGURATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/conan/conan_profile_release_linux.txt",
+          "sha256": "3a3002c03b9c3fa2f2ea8159be9ee8fc1036da89d08c398ed178fd354a719d9b",
+          "size_bytes": 228,
+          "mtime_ns": 1786720257245829299
+        },
+        {
+          "role": "CONFIGURATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/OFIQlib/CMakeLists.ubuntu.cmake",
+          "sha256": "5671027df260e8a43ea043c4cf47a9e245401ac2550e5bbcf07340289ae0f964",
+          "size_bytes": 8837,
+          "mtime_ns": 1786720257241829190
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/data/models/README.md",
+          "sha256": "f27e7e7ae105dbb98593fd3c09caa4e71257d3c069f2db8f3dbc0e549f658530",
+          "size_bytes": 4021,
+          "mtime_ns": 1786720257245829299
+        },
+        {
+          "role": "CONFIGURATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/data/ofiq_config.jaxn",
+          "sha256": "e117286706d799a1e23130db01cfdff7ef36d157b22ecf68dd196052a8a8d0b3",
+          "size_bytes": 6118,
+          "mtime_ns": 1786720257245829299
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/README.md",
+          "sha256": "6b2adaa64750ab983aaa4617ce3cc740820890b9da1665f76f031e8b4729a99a",
+          "size_bytes": 4053,
+          "mtime_ns": 1710448426000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/expression_neutrality/grimmer/LICENSE.md",
+          "sha256": "5fbe40b862ee4171d7c813c0d8f08740c25bd19e4230bc7ef971114ba1fa8724",
+          "size_bytes": 1538,
+          "mtime_ns": 1723645014000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/expression_neutrality/grimmer/hse_1_2_C_adaboost.yml.gz",
+          "sha256": "6555645c47dd2d3ff290a6e881890fa8ca8adeaf31d4678a4bd2a3524d25ad87",
+          "size_bytes": 19368922,
+          "mtime_ns": 1708020628000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/expression_neutrality/hsemotion/LICENSE.md",
+          "sha256": "c8502e3d871cb19c570beedd9c96974fb5e3dd5ddad9c64ea50cd642cca61627",
+          "size_bytes": 1730,
+          "mtime_ns": 1710448052000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/expression_neutrality/hsemotion/enet_b0_8_best_vgaf_embed_zeroed.onnx",
+          "sha256": "467e6c31152cd6db94f50c5d0b8e2ce4d1280f2fbd7b826609aefb92779a9e15",
+          "size_bytes": 16052940,
+          "mtime_ns": 1708736792000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/expression_neutrality/hsemotion/enet_b2_8_embed_zeroed.onnx",
+          "sha256": "9a62be277daf63e553900ff15fe2124fb4ba9b4d759364e21f07464f351e8b44",
+          "size_bytes": 30800917,
+          "mtime_ns": 1708736076000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_detection/LICENSE.md",
+          "sha256": "c76d4a30a8d773eef0ad7677e6b47259241470627f7e3a0eba71b38f0e286dc6",
+          "size_bytes": 1498,
+          "mtime_ns": 1710448138000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_detection/ssd_facedetect.caffemodel",
+          "sha256": "2a56a11a57a4a295956b0660b4a3d76bbdca2206c4961cea8efe7d95c7cb2f2d",
+          "size_bytes": 10666211,
+          "mtime_ns": 1609376866000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_detection/ssd_facedetect.prototxt.txt",
+          "sha256": "34d850436faf158ca4e690533ba27c1decf29653559299d80db9274146332ca7",
+          "size_bytes": 29881,
+          "mtime_ns": 1609378126000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_landmark_estimation/ADNet.onnx",
+          "sha256": "5aed3eb5b6ecd3504e5216078a3db064f6c93f2a420f12d0e82f2184c64c9654",
+          "size_bytes": 54747293,
+          "mtime_ns": 1680048058000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_landmark_estimation/LICENSE.md",
+          "sha256": "a61b71ef5797df85574eb8b582a3b1a9af4238c32f69d05dc54edbd3a410edf5",
+          "size_bytes": 1509,
+          "mtime_ns": 1710448218000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_occlusion_segmentation/LICENSE.md",
+          "sha256": "b5a216197f625b0d0150526a0245319f81d9e2a9da0a1506735d98a49c332795",
+          "size_bytes": 1550,
+          "mtime_ns": 1722865988000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_occlusion_segmentation/face_occlusion_segmentation_ort.onnx",
+          "sha256": "e847464bd8c0c596e8921c18d303fc6bf0ddb4a127ba4d1213c19701ed8790d0",
+          "size_bytes": 57307779,
+          "mtime_ns": 1692983656000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_parsing/LICENSE.md",
+          "sha256": "66a8761d67a1bddb6caaa987380311e846521384bc3ce539dced5a798e49a54c",
+          "size_bytes": 1475,
+          "mtime_ns": 1710448328000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/face_parsing/bisenet_400.onnx",
+          "sha256": "750ae55d5c440074a085ddd31a3fbd19a9e922ffb22d25eeb2bdf4f26eb3250a",
+          "size_bytes": 53193813,
+          "mtime_ns": 1679521724000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/head_pose_estimation/LICENSE.md",
+          "sha256": "61e836cef5dd4ab2447ab9a07e8fa1fe33ba1e3f60bfb91065e1fb1a7108e75d",
+          "size_bytes": 1407,
+          "mtime_ns": 1710448362000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/head_pose_estimation/mb1_120x120.onnx",
+          "sha256": "efeb77517d067c197a314bc3d72aa04f03ceb6468f121d6c9f185dd44736e4ae",
+          "size_bytes": 13046240,
+          "mtime_ns": 1666899148000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/no_compression_artifacts/LICENSE.md",
+          "sha256": "33513236c4fc0c583dbb169efe4a9331ced156c802608ddaceef93081d4ab9ff",
+          "size_bytes": 1243,
+          "mtime_ns": 1710448388000000000
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/no_compression_artifacts/README.md",
+          "sha256": "c89a660d53f0350850805fd5bec3988393f89126c889985992eb7994ef8d1687",
+          "size_bytes": 247,
+          "mtime_ns": 1723582340000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/no_compression_artifacts/ssim_248_model.onnx",
+          "sha256": "001fe8e73803a3ffb4dbfc7794d9e20232eb925606e8efe68e54696516d04b41",
+          "size_bytes": 23382575,
+          "mtime_ns": 1700186744000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/sharpness/LICENSE.md",
+          "sha256": "c3508cf77d43db675ead73d8e68908588e97bfb4da3d6f4f8a446cc16fdfb5f9",
+          "size_bytes": 1250,
+          "mtime_ns": 1710448442000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/sharpness/face_sharpness_rtree.xml.gz",
+          "sha256": "0d7decdad2b635e4d811f4de30a4bb451038d0698e72d452ba4b231de7710b02",
+          "size_bytes": 507331,
+          "mtime_ns": 1700241826000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/unified_quality_score/LICENSE.md",
+          "sha256": "225e378aae237bdb7e6614e36cc23d1655648368dd4b21d516c84966f93ddb95",
+          "size_bytes": 1572,
+          "mtime_ns": 1710448562000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models/unified_quality_score/magface_iresnet50_norm.onnx",
+          "sha256": "bc03f082a59ccb3189c6c9aec429f376523fe6586e207c401ab8d1694888babb",
+          "size_bytes": 174394035,
+          "mtime_ns": 1709969866000000000
+        },
+        {
+          "role": "VERSION_EVIDENCE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/GIT_COMMIT_ID",
+          "sha256": "8dda7e8d177f5633fd1fd58f51e0abde90dd1400a3686e6fcf75006b84972190",
+          "size_bytes": 41,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/LICENSE",
+          "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+          "size_bytes": 1073,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/Privacy.md",
+          "sha256": "9a15f9fd9d4c7b6dfc35f237f461863f84f8f73cf6189e330818a674d3828871",
+          "size_bytes": 2469,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/README.md",
+          "sha256": "423abaabb1703251f0db88c571019b36ce4dd5fe9f6b55b8052d11f19d4e4bfb",
+          "size_bytes": 6615,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/ThirdPartyNotices.txt",
+          "sha256": "10fc98a2f4d478e981813d594e23d7e31b0430e66501a658c1ecab2a226a4b52",
+          "size_bytes": 338538,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "VERSION_EVIDENCE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/VERSION_NUMBER",
+          "sha256": "71fc7bd16b1bc9b3681085fb0be8aea0b3a37d90d1685938dc2e8a31bf8c9b94",
+          "size_bytes": 7,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/cpu_provider_factory.h",
+          "sha256": "0de52d129c718c07ee71a16b4953d8d483df019746a11caad77a0650a2f4ed47",
+          "size_bytes": 397,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_c_api.h",
+          "sha256": "1e12ca259f96f6311bc7a4f66d8c61a7c158eeb1c341dd39be9dd1ebf1ef5b75",
+          "size_bytes": 212845,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_cxx_api.h",
+          "sha256": "d9cad7709965b906989befe4ba3633d9c8998005e07179ff5a4b7aaefb907a95",
+          "size_bytes": 109008,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_cxx_inline.h",
+          "sha256": "73d09b8c547fec8bd750cfd6cdfb02926dcd379713257e170a64be6b37275abf",
+          "size_bytes": 78311,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_float16.h",
+          "sha256": "ecdcb4a53176c8b3bbcf674788fcf5ec923fb2b5c762c3f6cfb56fdb6c259aa1",
+          "size_bytes": 18154,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_lite_custom_op.h",
+          "sha256": "d8976ed39791d958ee6a5242ed12d3a8fb875f95718a489811339c1f95436279",
+          "size_bytes": 62223,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_run_options_config_keys.h",
+          "sha256": "730910e9e78af536d0a4a5a72d408ab793bbe232054a5a4596c8200e45f3c99c",
+          "size_bytes": 2806,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_session_options_config_keys.h",
+          "sha256": "8e2dacd0f5360075555f2a7b38451550c39e9b976b023fac7577c6e0be766f78",
+          "size_bytes": 17377,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_training_c_api.h",
+          "sha256": "c7d7f04669b9cfc70bc1efa8e29057744ca6943f8be6b2a9ed5cad5ea66bb306",
+          "size_bytes": 35777,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_training_cxx_api.h",
+          "sha256": "7ea1ce73b019a83075d7212f458354d1f721f3d9a7c2cadca4545a0772c4ceef",
+          "size_bytes": 19575,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/onnxruntime_training_cxx_inline.h",
+          "sha256": "4797532bc436044e9565575fc95adcc1bf6fce4961cd905a28fd013cb8e2ce14",
+          "size_bytes": 12871,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/include/provider_options.h",
+          "sha256": "cb7206ffd06ba31b9f7e5f6089a6206f0c720c10c3adcc61db7f829c86691cfc",
+          "size_bytes": 480,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "RUNTIME_LIBRARY",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1/lib/libonnxruntime.so.1.18.1",
+          "sha256": "1147caa734d19f7549f90a659aa9ca444366eeb80a596900d19d242145a9f4c9",
+          "size_bytes": 15285336,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "ARCHIVE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/OFIQ-Models.zip",
+          "sha256": "8ceb6cec30c95056044e9191bbf8aa26e3e29a639b40a7636a60e13063987f36",
+          "size_bytes": 422400019,
+          "mtime_ns": 1786720409357964654
+        },
+        {
+          "role": "ARCHIVE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-linux-x64-1.18.1.tgz",
+          "sha256": "a0994512ec1e1debc00c18bfc7a5f16249f6ebd6a6128ff2034464cc380ea211",
+          "size_bytes": 5744161,
+          "mtime_ns": 1786720421270288510
+        }
+      ],
+      "checks": [
+        {
+          "type": "git_identity",
+          "root": "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2",
+          "commit": "d589ca27896a472446abc9eca8b62947ee47db19",
+          "tag": "v1.1.2",
+          "remote": "https://github.com/BSI-OFIQ/OFIQ-Project.git"
+        },
+        {
+          "type": "archive_inventory",
+          "archive_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/OFIQ-Models.zip",
+          "format": "ZIP",
+          "expected_members": 35,
+          "expected_files": 24,
+          "expected_directories": 11,
+          "expected_symlinks": 0,
+          "expected_uncompressed_file_bytes": 453517009,
+          "listing_sha256": "619cfa5eae90a3411feed23018d5a6b6fe14637fb10f3dea293ef81bd0be1dc1",
+          "required_relative_paths": [
+            "models/README.md",
+            "models/face_detection/ssd_facedetect.caffemodel",
+            "models/unified_quality_score/magface_iresnet50_norm.onnx"
+          ]
+        },
+        {
+          "type": "archive_inventory",
+          "archive_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-linux-x64-1.18.1.tgz",
+          "format": "TAR_GZIP",
+          "expected_members": 23,
+          "expected_files": 19,
+          "expected_directories": 3,
+          "expected_symlinks": 1,
+          "expected_uncompressed_file_bytes": 16203903,
+          "listing_sha256": "e25168331b00a7106095aa80cbad2b01815d5e42c9665eedcc55c7195e0d3ff7",
+          "required_relative_paths": [
+            "onnxruntime-linux-x64-1.18.1/LICENSE",
+            "onnxruntime-linux-x64-1.18.1/VERSION_NUMBER",
+            "onnxruntime-linux-x64-1.18.1/lib/libonnxruntime.so.1.18.1"
+          ]
+        },
+        {
+          "type": "onnx_runtime_static_preflight",
+          "root": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-extracted/onnxruntime-linux-x64-1.18.1",
+          "archive_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/onnxruntime-linux-x64-1.18.1.tgz",
+          "tagged_cmake_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/OFIQlib/CMakeLists.ubuntu.cmake",
+          "static_review_authorization_path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-onnxruntime-static-review-2026-08-14.json",
+          "expected_regular_files": 19,
+          "expected_directories": 3,
+          "expected_regular_file_bytes": 16203903,
+          "sha256": "7c9039d120bfffd1cb02a92846bab9e5b618da026c12f6d1335259b197a150b4",
+          "symlinks": {
+            "lib/libonnxruntime.so": "libonnxruntime.so.1.18.1"
+          },
+          "version_path": "VERSION_NUMBER",
+          "version": "1.18.1",
+          "git_commit_path": "GIT_COMMIT_ID",
+          "git_commit": "387127404e6c1d84b3468c387d864877ed1c67fe",
+          "library_path": "lib/libonnxruntime.so.1.18.1",
+          "elf": {
+            "elf_class": "ELF64",
+            "elf_data": "LITTLE_ENDIAN",
+            "elf_type": "ET_DYN",
+            "elf_machine": "EM_X86_64",
+            "has_interpreter": false,
+            "soname": "libonnxruntime.so.1.18.1",
+            "runpath": "$ORIGIN",
+            "rpath": null,
+            "needed": [
+              "libdl.so.2",
+              "librt.so.1",
+              "libpthread.so.0",
+              "libstdc++.so.6",
+              "libm.so.6",
+              "libgcc_s.so.1",
+              "libc.so.6",
+              "ld-linux-x86-64.so.2"
+            ],
+            "build_id": "bc5995be4e80f2fcbb80ae9141067094eac52943",
+            "version_definitions": [
+              "libonnxruntime.so.1.18.1",
+              "VERS_1.18.1"
+            ],
+            "required_exports": {
+              "OrtGetApiBase": "VERS_1.18.1",
+              "OrtSessionOptionsAppendExecutionProvider_CPU": "VERS_1.18.1"
+            },
+            "required_versions": {
+              "ld-linux-x86-64.so.2": [
+                "GLIBC_2.3"
+              ],
+              "libc.so.6": [
+                "GLIBC_2.2.5",
+                "GLIBC_2.3",
+                "GLIBC_2.3.3",
+                "GLIBC_2.3.4",
+                "GLIBC_2.4",
+                "GLIBC_2.6",
+                "GLIBC_2.14"
+              ],
+              "libdl.so.2": [
+                "GLIBC_2.2.5"
+              ],
+              "libgcc_s.so.1": [
+                "GCC_3.0",
+                "GCC_3.3.1",
+                "GCC_4.0.0"
+              ],
+              "libm.so.6": [
+                "GLIBC_2.2.5",
+                "GLIBC_2.27"
+              ],
+              "libpthread.so.0": [
+                "GLIBC_2.2.5",
+                "GLIBC_2.3.4"
+              ],
+              "libstdc++.so.6": [
+                "CXXABI_1.3",
+                "CXXABI_1.3.2",
+                "CXXABI_1.3.5",
+                "CXXABI_1.3.7",
+                "CXXABI_1.3.8",
+                "CXXABI_1.3.9",
+                "CXXABI_1.3.11",
+                "GLIBCXX_3.4",
+                "GLIBCXX_3.4.9",
+                "GLIBCXX_3.4.11",
+                "GLIBCXX_3.4.14",
+                "GLIBCXX_3.4.15",
+                "GLIBCXX_3.4.17",
+                "GLIBCXX_3.4.18",
+                "GLIBCXX_3.4.19",
+                "GLIBCXX_3.4.20",
+                "GLIBCXX_3.4.21",
+                "GLIBCXX_3.4.22"
+              ]
+            },
+            "max_required_versions": {
+              "CXXABI": "1.3.11",
+              "GLIBC": "2.27",
+              "GLIBCXX": "3.4.22"
+            }
+          }
+        },
+        {
+          "type": "glob_manifest",
+          "base_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models",
+          "relative_to": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted/models",
+          "expected_count": 24,
+          "sha256": "f25e7823837a5aefabf5e75eee6a6a237c91ce4a7cb725b9d1531bc6a63093a7",
+          "glob": "**/*"
+        },
+        {
+          "type": "jaxn_model_closure",
+          "config_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project-v1.1.2/data/ofiq_config.jaxn",
+          "data_root": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-receipts/models-extracted",
+          "sha256": "c1e41d4ccc2257c92162eb729d1d3dcc326a2742a1bff17087e1a1c11da8e175",
+          "relative_paths": [
+            "models/expression_neutrality/grimmer/hse_1_2_C_adaboost.yml.gz",
+            "models/expression_neutrality/hsemotion/enet_b0_8_best_vgaf_embed_zeroed.onnx",
+            "models/expression_neutrality/hsemotion/enet_b2_8_embed_zeroed.onnx",
+            "models/face_detection/ssd_facedetect.caffemodel",
+            "models/face_detection/ssd_facedetect.prototxt.txt",
+            "models/face_landmark_estimation/ADNet.onnx",
+            "models/face_occlusion_segmentation/face_occlusion_segmentation_ort.onnx",
+            "models/face_parsing/bisenet_400.onnx",
+            "models/head_pose_estimation/mb1_120x120.onnx",
+            "models/no_compression_artifacts/ssim_248_model.onnx",
+            "models/sharpness/face_sharpness_rtree.xml.gz",
+            "models/unified_quality_score/magface_iresnet50_norm.onnx"
+          ]
+        }
+      ]
+    },
+    {
+      "resource_id": "ofiq-v1-1-2-linux-runtime",
+      "kind": "ENGINE_RUNTIME",
+      "name": "OFIQ 1.1.2 installed runtime (isolated no-sudo build from the official tag)",
+      "state": "APPROVED_LOCAL_RESEARCH_USE",
+      "version": "1.1.2",
+      "source": {
+        "uri": "https://github.com/BSI-OFIQ/OFIQ-Project.git",
+        "local_root": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src",
+        "commit": "d589ca27896a472446abc9eca8b62947ee47db19",
+        "tag": "v1.1.2",
+        "evidence_artifacts": [
+          "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/Version.txt",
+          "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/LICENSE.md",
+          "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/ofiq_config.jaxn",
+          "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/README.md"
+        ],
+        "notes": [
+          "The source is a fresh shallow clone of the official v1.1.2 tag made by scripts/ofiq_v112_build.sh at 2026-08-17T12:52:46-05:00; the tag and commit are verified from the local Git worktree.",
+          "The model bundle and ONNX Runtime archives were reused from the preserved byte-identical acquisition copies; the conformance-image archive was retrieved from eu-LISA during the build and its response headers are registered.",
+          "The build used Conan 2.18.1 with a GCC 12 no-sudo profile and installed under the build root; the installed executable resolves both libraries through RUNPATH $ORIGIN, so no environment variable is required."
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/Version.txt",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/install/Release/bin/OFIQSampleApp",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/install/Release/bin/libofiq_lib.so",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/ofiq_config.jaxn"
+          ]
+        },
+        {
+          "expression": "MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/extern/onnxruntime-linux-x64-1.18.1/LICENSE",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/install/Release/bin/libonnxruntime.so.1.18.1"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/expression_neutrality/grimmer/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/expression_neutrality/grimmer/hse_1_2_C_adaboost.yml.gz"
+          ]
+        },
+        {
+          "expression": "Apache-2.0 AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/expression_neutrality/hsemotion/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/expression_neutrality/hsemotion/enet_b0_8_best_vgaf_embed_zeroed.onnx",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/expression_neutrality/hsemotion/enet_b2_8_embed_zeroed.onnx"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_detection/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_detection/ssd_facedetect.caffemodel",
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_detection/ssd_facedetect.prototxt.txt"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_landmark_estimation/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_landmark_estimation/ADNet.onnx"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_occlusion_segmentation/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_occlusion_segmentation/face_occlusion_segmentation_ort.onnx"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_parsing/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_parsing/bisenet_400.onnx"
+          ]
+        },
+        {
+          "expression": "MIT AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/head_pose_estimation/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/head_pose_estimation/mb1_120x120.onnx"
+          ]
+        },
+        {
+          "expression": "OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/no_compression_artifacts/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/no_compression_artifacts/ssim_248_model.onnx"
+          ]
+        },
+        {
+          "expression": "OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/sharpness/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/sharpness/face_sharpness_rtree.xml.gz"
+          ]
+        },
+        {
+          "expression": "Apache-2.0 AND OFIQ-MIT",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/unified_quality_score/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/unified_quality_score/magface_iresnet50_norm.onnx"
+          ]
+        }
+      ],
+      "use_restrictions": [
+        "Owner-approved local noncommercial research use and OFIQ conformance reproduction on the QualSight workstation only; never bundle or redistribute the installed engine, ONNX Runtime, or model payloads with QualSight.",
+        "Re-create the runtime only through scripts/ofiq_v112_build.sh, which pins the tag, commit, and every archive SHA-256 and refuses on mismatch.",
+        "Respect each bundled model license document; several payloads are limited to noncommercial research."
+      ],
+      "redistribution_status": "NOT_APPROVED_FOR_QUALSIGHT_DISTRIBUTION",
+      "research_use_status": "OWNER_APPROVED_LOCAL_NONCOMMERCIAL_RESEARCH_MIT_ENGINE_WITH_BUNDLED_MODEL_LICENSES",
+      "citations": [
+        "https://github.com/BSI-OFIQ/OFIQ-Project/tree/v1.1.2",
+        "https://resources.eulisa.europa.eu/research/OFIQ-Models.zip",
+        "https://github.com/microsoft/onnxruntime/releases/tag/v1.18.1"
+      ],
+      "installation_or_access_method": "Run scripts/ofiq_v112_build.sh (QUALSIGHT_OFIQ_BUILD_ROOT selects the isolated build root); it clones the official tag, verifies pinned archive identities, builds without sudo, installs, runs the r-01 smoke, and writes build-receipt.json. Execute only the registered installed OFIQSampleApp with the registered ofiq_config.jaxn.",
+      "data_classification": "RESTRICTED",
+      "runtime_requirements": {
+        "platform": "linux-x86_64",
+        "environment": {},
+        "notes": [
+          "The installed OFIQSampleApp reports 'OFIQ library version: 1.1.2' and links libofiq_lib.so and libonnxruntime.so.1.18.1 from its own directory via RUNPATH $ORIGIN.",
+          "The 24-file model tree is byte-identical to the registered v1.1.2 quarantine tree and to the historical 1.1.0 tree; the tagged configuration selects the same 12 payloads.",
+          "The official conformance table test (787 gtest cases over 28 eu-LISA images) passed with 0 failures on 2026-08-17; the JSON and log are registered.",
+          "The r-01 smoke run reproduced UnifiedQualityScore.native 26.390884 and scalar 79, equal to the historical 1.1.0 observation."
+        ]
+      },
+      "consumers": [
+        "QS-A06",
+        "QS-A07",
+        "QS-A08",
+        "QS-A10",
+        "QS-B12"
+      ],
+      "approved_scopes": [
+        "REPRODUCE_OFIQ_CONFORMANCE_TESTS",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ],
+      "blocked_reasons": [],
+      "owner_authorization": {
+        "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+        "authority": "QualSight project owner (interactive user)",
+        "recorded_at": "2026-08-17T12:50:33-05:00",
+        "scopes": [
+          "REPRODUCE_OFIQ_CONFORMANCE_TESTS",
+          "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+        ],
+        "redistribution_allowed": false,
+        "evidence_artifact_path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-use-permission-granted-2026-08-17.json"
+      },
+      "third_party_rights_status": "VERIFIED_LICENSE",
+      "artifacts": [
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-use-permission-granted-2026-08-17.json",
+          "sha256": "42f1f02a68b1c1af3894578e3c886f5964c3c5b3042a9a899c14d1e9810c5e44",
+          "size_bytes": 6221,
+          "mtime_ns": 1786989038488586970
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/LICENSE.md",
+          "sha256": "2f71522167b564572f38ad1a22f30cbf166c031341d181edd0bf67cdcb550055",
+          "size_bytes": 36632,
+          "mtime_ns": 1786989169768236968
+        },
+        {
+          "role": "VERSION_EVIDENCE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/Version.txt",
+          "sha256": "9be05c702f52186e5448f6a4013a9f98956790a1a425b92f0f6f66313525351e",
+          "size_bytes": 287,
+          "mtime_ns": 1786989169772237080
+        },
+        {
+          "role": "BINARY",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/install/Release/bin/OFIQSampleApp",
+          "sha256": "e04864a5aa697e1297cdf78ba20d491d5fc68ecf5b3c595aa7bf0a3eb344d9e6",
+          "size_bytes": 84432,
+          "mtime_ns": 1786989397000000000
+        },
+        {
+          "role": "RUNTIME_LIBRARY",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/install/Release/bin/libofiq_lib.so",
+          "sha256": "d96f98b47f447c47c35f1d724daacd6d687545c638bb80694715e6f8c7f5e7c3",
+          "size_bytes": 22160376,
+          "mtime_ns": 1786989396000000000
+        },
+        {
+          "role": "CONFIGURATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/ofiq_config.jaxn",
+          "sha256": "e117286706d799a1e23130db01cfdff7ef36d157b22ecf68dd196052a8a8d0b3",
+          "size_bytes": 6118,
+          "mtime_ns": 1786989169772237080
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/extern/onnxruntime-linux-x64-1.18.1/LICENSE",
+          "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+          "size_bytes": 1073,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "RUNTIME_LIBRARY",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/install/Release/bin/libonnxruntime.so.1.18.1",
+          "sha256": "1147caa734d19f7549f90a659aa9ca444366eeb80a596900d19d242145a9f4c9",
+          "size_bytes": 15285336,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/README.md",
+          "sha256": "6b2adaa64750ab983aaa4617ce3cc740820890b9da1665f76f031e8b4729a99a",
+          "size_bytes": 4053,
+          "mtime_ns": 1710448426000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/expression_neutrality/grimmer/hse_1_2_C_adaboost.yml.gz",
+          "sha256": "6555645c47dd2d3ff290a6e881890fa8ca8adeaf31d4678a4bd2a3524d25ad87",
+          "size_bytes": 19368922,
+          "mtime_ns": 1708020628000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/expression_neutrality/hsemotion/enet_b0_8_best_vgaf_embed_zeroed.onnx",
+          "sha256": "467e6c31152cd6db94f50c5d0b8e2ce4d1280f2fbd7b826609aefb92779a9e15",
+          "size_bytes": 16052940,
+          "mtime_ns": 1708736792000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/expression_neutrality/hsemotion/enet_b2_8_embed_zeroed.onnx",
+          "sha256": "9a62be277daf63e553900ff15fe2124fb4ba9b4d759364e21f07464f351e8b44",
+          "size_bytes": 30800917,
+          "mtime_ns": 1708736076000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_detection/ssd_facedetect.caffemodel",
+          "sha256": "2a56a11a57a4a295956b0660b4a3d76bbdca2206c4961cea8efe7d95c7cb2f2d",
+          "size_bytes": 10666211,
+          "mtime_ns": 1609376866000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_detection/ssd_facedetect.prototxt.txt",
+          "sha256": "34d850436faf158ca4e690533ba27c1decf29653559299d80db9274146332ca7",
+          "size_bytes": 29881,
+          "mtime_ns": 1609378126000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_landmark_estimation/ADNet.onnx",
+          "sha256": "5aed3eb5b6ecd3504e5216078a3db064f6c93f2a420f12d0e82f2184c64c9654",
+          "size_bytes": 54747293,
+          "mtime_ns": 1680048058000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_occlusion_segmentation/face_occlusion_segmentation_ort.onnx",
+          "sha256": "e847464bd8c0c596e8921c18d303fc6bf0ddb4a127ba4d1213c19701ed8790d0",
+          "size_bytes": 57307779,
+          "mtime_ns": 1692983656000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_parsing/bisenet_400.onnx",
+          "sha256": "750ae55d5c440074a085ddd31a3fbd19a9e922ffb22d25eeb2bdf4f26eb3250a",
+          "size_bytes": 53193813,
+          "mtime_ns": 1679521724000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/head_pose_estimation/mb1_120x120.onnx",
+          "sha256": "efeb77517d067c197a314bc3d72aa04f03ceb6468f121d6c9f185dd44736e4ae",
+          "size_bytes": 13046240,
+          "mtime_ns": 1666899148000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/no_compression_artifacts/ssim_248_model.onnx",
+          "sha256": "001fe8e73803a3ffb4dbfc7794d9e20232eb925606e8efe68e54696516d04b41",
+          "size_bytes": 23382575,
+          "mtime_ns": 1700186744000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/sharpness/face_sharpness_rtree.xml.gz",
+          "sha256": "0d7decdad2b635e4d811f4de30a4bb451038d0698e72d452ba4b231de7710b02",
+          "size_bytes": 507331,
+          "mtime_ns": 1700241826000000000
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/unified_quality_score/magface_iresnet50_norm.onnx",
+          "sha256": "bc03f082a59ccb3189c6c9aec429f376523fe6586e207c401ab8d1694888babb",
+          "size_bytes": 174394035,
+          "mtime_ns": 1709969866000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/expression_neutrality/grimmer/LICENSE.md",
+          "sha256": "5fbe40b862ee4171d7c813c0d8f08740c25bd19e4230bc7ef971114ba1fa8724",
+          "size_bytes": 1538,
+          "mtime_ns": 1723645014000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/expression_neutrality/hsemotion/LICENSE.md",
+          "sha256": "c8502e3d871cb19c570beedd9c96974fb5e3dd5ddad9c64ea50cd642cca61627",
+          "size_bytes": 1730,
+          "mtime_ns": 1710448052000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_detection/LICENSE.md",
+          "sha256": "c76d4a30a8d773eef0ad7677e6b47259241470627f7e3a0eba71b38f0e286dc6",
+          "size_bytes": 1498,
+          "mtime_ns": 1710448138000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_landmark_estimation/LICENSE.md",
+          "sha256": "a61b71ef5797df85574eb8b582a3b1a9af4238c32f69d05dc54edbd3a410edf5",
+          "size_bytes": 1509,
+          "mtime_ns": 1710448218000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_occlusion_segmentation/LICENSE.md",
+          "sha256": "b5a216197f625b0d0150526a0245319f81d9e2a9da0a1506735d98a49c332795",
+          "size_bytes": 1550,
+          "mtime_ns": 1722865988000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/face_parsing/LICENSE.md",
+          "sha256": "66a8761d67a1bddb6caaa987380311e846521384bc3ce539dced5a798e49a54c",
+          "size_bytes": 1475,
+          "mtime_ns": 1710448328000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/head_pose_estimation/LICENSE.md",
+          "sha256": "61e836cef5dd4ab2447ab9a07e8fa1fe33ba1e3f60bfb91065e1fb1a7108e75d",
+          "size_bytes": 1407,
+          "mtime_ns": 1710448362000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/no_compression_artifacts/LICENSE.md",
+          "sha256": "33513236c4fc0c583dbb169efe4a9331ced156c802608ddaceef93081d4ab9ff",
+          "size_bytes": 1243,
+          "mtime_ns": 1710448388000000000
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/no_compression_artifacts/README.md",
+          "sha256": "c89a660d53f0350850805fd5bec3988393f89126c889985992eb7994ef8d1687",
+          "size_bytes": 247,
+          "mtime_ns": 1723582340000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/sharpness/LICENSE.md",
+          "sha256": "c3508cf77d43db675ead73d8e68908588e97bfb4da3d6f4f8a446cc16fdfb5f9",
+          "size_bytes": 1250,
+          "mtime_ns": 1710448442000000000
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/models/unified_quality_score/LICENSE.md",
+          "sha256": "225e378aae237bdb7e6614e36cc23d1655648368dd4b21d516c84966f93ddb95",
+          "size_bytes": 1572,
+          "mtime_ns": 1710448562000000000
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/build-receipt.json",
+          "sha256": "31ecd59eb773863a021ace7101fff6eae0efa5bc8530f848f9e7e197a9208e32",
+          "size_bytes": 11203,
+          "mtime_ns": 1786989427171383288
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/conformance/gtest-conformance.json",
+          "sha256": "d94af4d0894c0454b1841009c3764a19a285f12ae21700ac28c5f1dec8e58a6d",
+          "size_bytes": 443708,
+          "mtime_ns": 1786990069540635511
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/conformance/gtest-conformance.log",
+          "sha256": "94fb7603085346fa7f3273808cdac2ddbfab0a2d6bf7e8cd52c93b73942542d5",
+          "size_bytes": 161440,
+          "mtime_ns": 1786990069540635511
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/conan_profile_release_linux_gcc12.txt",
+          "sha256": "f2801b992f08220a4eaa8f7847dd8c1d676a19e9cde34c6311417500540bdfb8",
+          "size_bytes": 229,
+          "mtime_ns": 1786989423131271203
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/archives/OFIQ-ImagesConformanceTest+TargetValues.zip.headers",
+          "sha256": "a2c46450243287a65773ee8664da5f8b91090b2644af5e3fe1cba80ebebe54ee",
+          "size_bytes": 664,
+          "mtime_ns": 1786989172492312662
+        },
+        {
+          "role": "ARCHIVE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/archives/OFIQ-Models.zip",
+          "sha256": "8ceb6cec30c95056044e9191bbf8aa26e3e29a639b40a7636a60e13063987f36",
+          "size_bytes": 422400019,
+          "mtime_ns": 1786720409357964654
+        },
+        {
+          "role": "ARCHIVE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/archives/onnxruntime-linux-x64-1.18.1.tgz",
+          "sha256": "a0994512ec1e1debc00c18bfc7a5f16249f6ebd6a6128ff2034464cc380ea211",
+          "size_bytes": 5744161,
+          "mtime_ns": 1786720421270288510
+        },
+        {
+          "role": "ARCHIVE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/archives/OFIQ-ImagesConformanceTest+TargetValues.zip",
+          "sha256": "11aaebeb180810e0b2b42a5dafb356938c92ddf01592411d1d8f219988448399",
+          "size_bytes": 374153032,
+          "mtime_ns": 1786989178044466935
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/extern/onnxruntime-linux-x64-1.18.1/ThirdPartyNotices.txt",
+          "sha256": "10fc98a2f4d478e981813d594e23d7e31b0430e66501a658c1ecab2a226a4b52",
+          "size_bytes": 338538,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/tests/expected_results/expected_results.csv",
+          "sha256": "1c2859a9e20d32cf3495dfe20c5473adaa1cb7cf2e742aa80ce0c38e9a0f11e1",
+          "size_bytes": 11401,
+          "mtime_ns": 1786989169772237080
+        }
+      ],
+      "checks": [
+        {
+          "type": "git_identity",
+          "root": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src",
+          "commit": "d589ca27896a472446abc9eca8b62947ee47db19",
+          "tag": "v1.1.2",
+          "remote": "https://github.com/BSI-OFIQ/OFIQ-Project.git"
+        },
+        {
+          "type": "manifest",
+          "base_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src",
+          "relative_to": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src",
+          "expected_count": 12,
+          "sha256": "fa908247460807c7deea039c8c8bf76f0964d7bc863cd9f510766c559a80b7e7",
+          "relative_paths": [
+            "data/models/expression_neutrality/grimmer/hse_1_2_C_adaboost.yml.gz",
+            "data/models/expression_neutrality/hsemotion/enet_b0_8_best_vgaf_embed_zeroed.onnx",
+            "data/models/expression_neutrality/hsemotion/enet_b2_8_embed_zeroed.onnx",
+            "data/models/face_detection/ssd_facedetect.caffemodel",
+            "data/models/face_detection/ssd_facedetect.prototxt.txt",
+            "data/models/face_landmark_estimation/ADNet.onnx",
+            "data/models/face_occlusion_segmentation/face_occlusion_segmentation_ort.onnx",
+            "data/models/face_parsing/bisenet_400.onnx",
+            "data/models/head_pose_estimation/mb1_120x120.onnx",
+            "data/models/no_compression_artifacts/ssim_248_model.onnx",
+            "data/models/sharpness/face_sharpness_rtree.xml.gz",
+            "data/models/unified_quality_score/magface_iresnet50_norm.onnx"
+          ]
+        },
+        {
+          "type": "glob_manifest",
+          "base_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src",
+          "relative_to": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src",
+          "expected_count": 24,
+          "sha256": "9d2ce53258af1e555724719255b30081c03e3995005e1686f6e58eb707fd3503",
+          "glob": "data/models/**/*"
+        },
+        {
+          "type": "jaxn_model_closure",
+          "config_path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data/ofiq_config.jaxn",
+          "data_root": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/src/data",
+          "sha256": "fa908247460807c7deea039c8c8bf76f0964d7bc863cd9f510766c559a80b7e7",
+          "relative_paths": [
+            "models/expression_neutrality/grimmer/hse_1_2_C_adaboost.yml.gz",
+            "models/expression_neutrality/hsemotion/enet_b0_8_best_vgaf_embed_zeroed.onnx",
+            "models/expression_neutrality/hsemotion/enet_b2_8_embed_zeroed.onnx",
+            "models/face_detection/ssd_facedetect.caffemodel",
+            "models/face_detection/ssd_facedetect.prototxt.txt",
+            "models/face_landmark_estimation/ADNet.onnx",
+            "models/face_occlusion_segmentation/face_occlusion_segmentation_ort.onnx",
+            "models/face_parsing/bisenet_400.onnx",
+            "models/head_pose_estimation/mb1_120x120.onnx",
+            "models/no_compression_artifacts/ssim_248_model.onnx",
+            "models/sharpness/face_sharpness_rtree.xml.gz",
+            "models/unified_quality_score/magface_iresnet50_norm.onnx"
+          ]
+        }
+      ]
+    },
+    {
+      "resource_id": "ofiq-r-01-conformance-input",
+      "kind": "CONFORMANCE_INPUT",
+      "name": "OFIQ r-01 frontal conformance image",
+      "state": "VERIFIED_LIMITED_USE",
+      "version": "sha256:3c3655e6ac9f16bc6909b6f71d7c5ec385008aa6d2352167bdb77acd61d8c947",
+      "source": {
+        "uri": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images",
+        "local_root": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images",
+        "evidence_artifacts": [
+          "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/LICENSE.md",
+          "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/r-01-frontal.png"
+        ],
+        "notes": [
+          "The registered version is the exact local image content hash.",
+          "No upstream bundle edition or retrieval date is claimed."
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "LicenseRef-OFIQ-Conformance-Images",
+          "artifact_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/LICENSE.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/r-01-frontal.png"
+          ]
+        }
+      ],
+      "use_restrictions": [
+        "Use only to reproduce OFIQ conformance tests.",
+        "Do not modify or republish without explicit consent from the depicted subjects.",
+        "Read the image in place and do not copy it into QualSight fixtures or outputs."
+      ],
+      "redistribution_status": "PROHIBITED_WITHOUT_EXPLICIT_SUBJECT_CONSENT",
+      "research_use_status": "OFIQ_CONFORMANCE_REPRODUCTION_ONLY",
+      "citations": [
+        "https://github.com/BSI-OFIQ/OFIQ-Project/tree/v1.1.0"
+      ],
+      "installation_or_access_method": "Read the registered image at its existing absolute path without copying it.",
+      "data_classification": "RESTRICTED",
+      "runtime_requirements": {
+        "platform": "local-filesystem",
+        "environment": {},
+        "notes": [
+          "The complete local image directory contains 28 PNG files.",
+          "The manifest uses C-locale byte ordering and paths relative to the OFIQ repository root."
+        ]
+      },
+      "owner_authorization": {
+        "decision": "APPROVED_LIMITED_USE",
+        "authority": "QualSight project owner (interactive user)",
+        "recorded_at": "2026-08-14T09:51:10-05:00",
+        "scopes": [
+          "REPRODUCE_OFIQ_CONFORMANCE_TESTS"
+        ],
+        "redistribution_allowed": false,
+        "evidence_artifact_path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-local-noncommercial-research-2026-08-14.json"
+      },
+      "third_party_rights_status": "VERIFIED_LICENSE",
+      "consumers": [
+        "QS-A04",
+        "QS-A06",
+        "QS-A07"
+      ],
+      "approved_scopes": [
+        "REPRODUCE_OFIQ_CONFORMANCE_TESTS"
+      ],
+      "blocked_reasons": [],
+      "artifacts": [
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-local-noncommercial-research-2026-08-14.json",
+          "sha256": "48b11e76ac1d7288c40f0052fa000ae72f7edd4c930db3057751c7c7f841a3fa",
+          "size_bytes": 3381,
+          "mtime_ns": 1786720714006247146
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/LICENSE.md",
+          "sha256": "f2457086d49ff0dc0faab72cddc214a5119d321bb46e81e6ad19319063b635bc",
+          "size_bytes": 369,
+          "mtime_ns": 1710426938000000000
+        },
+        {
+          "role": "DATA",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/r-01-frontal.png",
+          "sha256": "3c3655e6ac9f16bc6909b6f71d7c5ec385008aa6d2352167bdb77acd61d8c947",
+          "size_bytes": 13436071,
+          "mtime_ns": 1681821094000000000
+        }
+      ],
+      "checks": [
+        {
+          "type": "manifest",
+          "base_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project",
+          "relative_to": "/mnt/projects/02_perception_biometrics/OFIQ-Project",
+          "expected_count": 1,
+          "sha256": "8d7a99ebf31cd0895b5a21d939e117d630a3045444456bee558457b5cb0c3663",
+          "relative_paths": [
+            "data/tests/images/r-01-frontal.png"
+          ]
+        }
+      ]
+    },
+    {
+      "resource_id": "lfw-funneled-local-candidate",
+      "kind": "IDENTITY_LABELED_DATASET_CANDIDATE",
+      "name": "Local LFW funneled image collection",
+      "state": "APPROVED_LOCAL_RESEARCH_USE",
+      "version": "tree-sha256:9017b665db8c7d1397ace11db160dc7ef6f82d7a5e92bd9851d101a6f164591e",
+      "source": {
+        "uri": "http://vis-www.cs.umass.edu/lfw/lfw-funneled.tgz",
+        "local_root": "/mnt/projects/datasets/lfw",
+        "evidence_artifacts": [
+          "/mnt/projects/datasets/lfw/pairs.txt",
+          "/mnt/projects/datasets/lfw/lfw-funneled.tgz",
+          "/mnt/projects/ofiqgui/resources/manifests/lfw-funneled-images-v1.jsonl",
+          "/mnt/projects/ofiqgui/resources/manifests/lfw-local-pairs-v1.jsonl",
+          "/mnt/projects/ofiqgui/resources/upstream/lfw/lfw-2007.pdf",
+          "/mnt/projects/ofiqgui/resources/upstream/lfw/lfw-2007.headers",
+          "/mnt/projects/ofiqgui/resources/upstream/lfw/Huang_eccv2008-lfw.pdf",
+          "/mnt/projects/ofiqgui/resources/upstream/lfw/Huang_eccv2008-lfw.headers",
+          "/mnt/projects/ofiqgui/resources/upstream/lfw/UM-CS-2014-003.pdf",
+          "/mnt/projects/ofiqgui/resources/upstream/lfw/UM-CS-2014-003.headers",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/data/manifests/lfw_verified.json"
+        ],
+        "notes": [
+          "The exact current tree contains 13233 JPEG images in 5749 identity directories and is bound by a complete QualSight byte manifest.",
+          "The registered local archive, extracted tree, root pairs file, and ten expanded fold files reconcile byte-for-byte without decoding an image.",
+          "Three exact official UMass documents define View 2 as 6000 pairs in ten folds and support the conservative UNRESTRICTED_WITH_LABELED_OUTSIDE_DATA classification for the planned pretrained-matcher study.",
+          "The older supporting manifest describes original_aligned/lfw.tgz and a third-party pairs source rather than the current funneled archive-native bytes, so it is retained only as a conflicting historical lead.",
+          "No acquisition receipt or official terms bytes accompany the local archive."
+        ]
+      },
+      "licenses": [],
+      "use_restrictions": [
+        "Owner-approved local noncommercial research use on the QualSight workstation only; never bundle, publish, commit, or redistribute these bytes with QualSight.",
+        "Acquire only through the QualSight setup step from the recorded official or mirror source, and only when the downloaded bytes match the registered SHA-256; refuse on mismatch.",
+        "Do not treat owner authorization as third-party license or permission evidence; third_party_rights_status records the factual rights position.",
+        "Do not redistribute source images, derived crops, thumbnails, or embeddings.",
+        "Report every LFW result under the official View 2 protocol as UNRESTRICTED_WITH_LABELED_OUTSIDE_DATA and state that matcher training-set identity exclusion rests on the matchers' published training-set claims, not on QualSight verification."
+      ],
+      "redistribution_status": "NOT_APPROVED_FOR_QUALSIGHT_DISTRIBUTION",
+      "research_use_status": "OWNER_APPROVED_LOCAL_NONCOMMERCIAL_RESEARCH_PUBLIC_DATASET_WITHOUT_EXPLICIT_LICENSE",
+      "citations": [
+        "http://vis-www.cs.umass.edu/lfw/",
+        "https://people.cs.umass.edu/~elm/papers/lfw.pdf",
+        "https://people.cs.umass.edu/~elm/papers/Huang_eccv2008-lfw.pdf",
+        "https://web.cs.umass.edu/publication/docs/2014/UM-CS-2014-003.pdf"
+      ],
+      "installation_or_access_method": "Setup acquires lfw-funneled.tgz (registered SHA-256) from the UMass LFW distribution or a byte-identical mirror such as Hugging Face; on this workstation the registered archive and tree already exist at /mnt/projects/datasets/lfw and are read in place. QualSight never copies the images into its own tree.",
+      "data_classification": "PRIVATE",
+      "runtime_requirements": {
+        "platform": "local-filesystem",
+        "environment": {},
+        "notes": [
+          "The candidate contains 13233 JPEG files in 5749 direct identity directories.",
+          "The current QualSight manifest binds every discovered JPEG path, size, and SHA-256 digest.",
+          "The deterministic local pair manifest preserves all 3000 mated and 3000 non-mated rows in source order and binds every referenced path to the registered image bytes.",
+          "The local pair manifest is byte-and-format evidence only; it is not an acquisition receipt, rights evidence, or a complete official-protocol conformance claim.",
+          "Historical acquisition provenance for the existing local archive is not reconstructed; the archive identity is registered and any re-acquisition must match it byte-for-byte.",
+          "The official UMass documents grant no image license; the project owner accepted local, non-redistributed research use under the recorded receipt.",
+          "Matcher training-set exclusion of LFW identities is a published-protocol claim of each matcher, recorded as such and not verified by QualSight."
+        ]
+      },
+      "owner_authorization": {
+        "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+        "authority": "QualSight project owner (interactive user)",
+        "recorded_at": "2026-08-17T12:50:33-05:00",
+        "scopes": [
+          "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+          "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+        ],
+        "redistribution_allowed": false,
+        "evidence_artifact_path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-use-permission-granted-2026-08-17.json"
+      },
+      "third_party_rights_status": "NO_EXPLICIT_LICENSE_PUBLIC_RESEARCH_DATASET",
+      "consumers": [
+        "QS-B11",
+        "QS-C20",
+        "QS-C25"
+      ],
+      "approved_scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ],
+      "blocked_reasons": [],
+      "artifacts": [
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-local-noncommercial-research-2026-08-14.json",
+          "sha256": "48b11e76ac1d7288c40f0052fa000ae72f7edd4c930db3057751c7c7f841a3fa",
+          "size_bytes": 3381,
+          "mtime_ns": 1786720714006247146
+        },
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-lfw-protocol-evidence-review-2026-08-17.json",
+          "sha256": "415497a06bffa70c8c8a209fa7064836266eebb760e76ec24ca3d62fadd3f49d",
+          "size_bytes": 1684,
+          "mtime_ns": 1786943147926271260
+        },
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-lfw-original-protocol-evidence-review-2026-08-17.json",
+          "sha256": "37dcb50842aaf1e7f7d6586bc6cf941e145ae0bffcef46fcfcf74948c28c8271",
+          "size_bytes": 1847,
+          "mtime_ns": 1786943747145995168
+        },
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-use-permission-granted-2026-08-17.json",
+          "sha256": "42f1f02a68b1c1af3894578e3c886f5964c3c5b3042a9a899c14d1e9810c5e44",
+          "size_bytes": 6221,
+          "mtime_ns": 1786989038488586970
+        },
+        {
+          "role": "MANIFEST",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/manifests/lfw_verified.json",
+          "sha256": "6acc287f4cd7bfa0af8e7c6bf549c6ad12299b8d0685d5c14bff6889e181ae8d",
+          "size_bytes": 1653,
+          "mtime_ns": 1778299326928325246
+        },
+        {
+          "role": "PROTOCOL",
+          "path": "/mnt/projects/datasets/lfw/pairs.txt",
+          "sha256": "ea42330c62c92989f9d7c03237ed5d591365e89b3e649747777b70e692dc1592",
+          "size_bytes": 155335,
+          "mtime_ns": 1773171237482202714
+        },
+        {
+          "role": "DATA",
+          "path": "/mnt/projects/datasets/lfw/lfw-funneled.tgz",
+          "sha256": "b47c8422c8cded889dc5a13418c4bc2abbda121092b3533a83306f90d900100a",
+          "size_bytes": 243346528,
+          "mtime_ns": 1773171260182773583
+        },
+        {
+          "role": "MANIFEST",
+          "path": "/mnt/projects/ofiqgui/resources/manifests/lfw-funneled-images-v1.jsonl",
+          "sha256": "9aeb2356b03ebc1a20b276a16251b1a9e33d39f707ddec3cdeba1977c2ddc178",
+          "size_bytes": 1906875,
+          "mtime_ns": 1786719331908677818
+        },
+        {
+          "role": "PROTOCOL",
+          "path": "/mnt/projects/ofiqgui/resources/manifests/lfw-local-pairs-v1.jsonl",
+          "sha256": "7edd2f474307ef5bfbd6118fe7d6f2925fcf85aa1a4a5a2e029450a3d7c2c3e6",
+          "size_bytes": 2800299,
+          "mtime_ns": 1786740990752553445
+        },
+        {
+          "role": "PROTOCOL",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/lfw/lfw-2007.pdf",
+          "sha256": "87d9b19c74de1fc04c4748faec470956912ecfee39ed73213a87f5b87e516329",
+          "size_bytes": 223526,
+          "mtime_ns": 1786943767682531012
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/lfw/lfw-2007.headers",
+          "sha256": "369d11f82eaab4cdaeb50abbb52d2c160bb70c78b8fd7e240924d27af0678d6d",
+          "size_bytes": 324,
+          "mtime_ns": 1786943767458525169
+        },
+        {
+          "role": "PROTOCOL",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/lfw/Huang_eccv2008-lfw.pdf",
+          "sha256": "004a66b3930dc6aa15d54bafbc7b734b1333669a8bcc08ea5ac93d89c251ae86",
+          "size_bytes": 361179,
+          "mtime_ns": 1786943166858771929
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/lfw/Huang_eccv2008-lfw.headers",
+          "sha256": "3bed0d2ba44127d922abc2c252b54c6d98f814eb23a161e8eede8be4cc5f1538",
+          "size_bytes": 324,
+          "mtime_ns": 1786943166574764420
+        },
+        {
+          "role": "PROTOCOL",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/lfw/UM-CS-2014-003.pdf",
+          "sha256": "cceb20f7902b7c8094df3e14f711f7e7454e0e52cf1a4b6e1abbf70dc000b944",
+          "size_bytes": 135174,
+          "mtime_ns": 1786943167210781233
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/lfw/UM-CS-2014-003.headers",
+          "sha256": "eb45195cbeb022b20f684d8001268da81e59d45a4e3a0c0e5fb6e3f1f4bab4b1",
+          "size_bytes": 324,
+          "mtime_ns": 1786943167046776897
+        }
+      ],
+      "checks": [
+        {
+          "type": "directory_inventory",
+          "root": "/mnt/projects/datasets/lfw/lfw_funneled",
+          "file_glob": "*.jpg",
+          "file_count": 13233,
+          "identity_directory_count": 5749
+        },
+        {
+          "type": "tree_manifest",
+          "root": "/mnt/projects/datasets/lfw/lfw_funneled",
+          "manifest_path": "/mnt/projects/ofiqgui/resources/manifests/lfw-funneled-images-v1.jsonl",
+          "file_glob": "*.jpg",
+          "expected_count": 13233,
+          "sha256": "9017b665db8c7d1397ace11db160dc7ef6f82d7a5e92bd9851d101a6f164591e"
+        }
+      ]
+    },
+    {
+      "resource_id": "adaface-ir101-local-candidate",
+      "kind": "LOCAL_MATCHER_CANDIDATE",
+      "name": "AdaFace IR-101 WebFace4M local checkpoint",
+      "state": "APPROVED_LOCAL_RESEARCH_USE",
+      "version": "sha256:0a379dbaf7d79573d1ff63f317c0296f3adfb637b9c00b6234fdcc53a77a0f61",
+      "source": {
+        "uri": "https://github.com/mk-minchul/AdaFace.git",
+        "local_root": "/mnt/projects/02_perception_biometrics/ofiq_29794",
+        "upstream_commit": "d8114b3ca8c54cd81ef59ac34c19eda1c548ca17",
+        "evidence_artifacts": [
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/configs/matchers/adaface.yaml",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/packages/ofiq-quality/src/ofiq_quality/matchers/adaface.py",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/packages/ofiq-quality/src/ofiq_quality/matchers/_adaface_arch.py",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/data/weights/adaface/adaface_ir101_webface4m.ckpt",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/archive/stale_20260316_181357/logs/weight_downloads.json",
+          "/mnt/projects/ofiqgui/resources/upstream/adaface/LICENSE.d8114b3c.txt",
+          "/mnt/projects/ofiqgui/resources/upstream/adaface/README.d8114b3c.md",
+          "/mnt/projects/ofiqgui/resources/upstream/source-receipts.json"
+        ],
+        "notes": [
+          "The local configuration identifies IR-101, WebFace4M, 112 by 112 input, InsightFace five-point alignment, and BGR tensor input.",
+          "The pinned upstream README names the exact R100 WebFace4M download while the local configuration incorrectly labels a GitHub releases page as the source.",
+          "The historical download receipt MD5 matches the current checkpoint, but its recorded byte count differs from the current file."
+        ]
+      },
+      "licenses": [],
+      "use_restrictions": [
+        "Owner-approved local noncommercial research use on the QualSight workstation only; never bundle, publish, commit, or redistribute these bytes with QualSight.",
+        "Acquire only through the QualSight setup step from the recorded official or mirror source, and only when the downloaded bytes match the registered SHA-256; refuse on mismatch.",
+        "Do not treat owner authorization as third-party license or permission evidence; third_party_rights_status records the factual rights position.",
+        "Do not redistribute the checkpoint, crops, or embeddings.",
+        "Load the exact registered checkpoint only through the frozen QualSight matcher runtime with strict state loading, weights_only deserialization, no random-weight fallback, and no implicit model-pack resolution."
+      ],
+      "redistribution_status": "NOT_APPROVED_FOR_QUALSIGHT_DISTRIBUTION",
+      "research_use_status": "OWNER_APPROVED_LOCAL_NONCOMMERCIAL_RESEARCH_MIT_REPOSITORY_LICENSE_CHECKPOINT_UNSTATED",
+      "citations": [
+        "https://github.com/mk-minchul/AdaFace"
+      ],
+      "installation_or_access_method": "Setup acquires the AdaFace IR-101 WebFace4M checkpoint (registered SHA-256) from the upstream author's published checkpoint link or a byte-identical Hugging Face mirror; on this workstation the registered bytes already exist under ofiq_29794/data/weights and are read in place.",
+      "data_classification": "SENSITIVE_BIOMETRIC_DERIVED",
+      "runtime_requirements": {
+        "platform": "UNEXECUTED_IN_QUALSIGHT",
+        "environment": {},
+        "notes": [
+          "The checkpoint is 683066959 bytes.",
+          "The current loader uses weights_only=False, non-strict state loading, random-weight fallback, and an implicitly resolved buffalo_l model pack.",
+          "A pinned QualSight runtime has not loaded or executed this checkpoint.",
+          "The upstream repository is MIT licensed; the published checkpoint carries no separate license statement, so third-party rights are recorded as REPOSITORY_LICENSE_ONLY.",
+          "The historical download receipt MD5 matches but its byte count conflicts with the current checkpoint; the current SHA-256 identity is authoritative.",
+          "The published AdaFace training sets (MS1MV2, MS1MV3, WebFace4M, WebFace12M) are stated by the authors to be evaluated against LFW as a held-out benchmark; this is a published claim, not a QualSight-verified identity exclusion."
+        ]
+      },
+      "owner_authorization": {
+        "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+        "authority": "QualSight project owner (interactive user)",
+        "recorded_at": "2026-08-17T12:50:33-05:00",
+        "scopes": [
+          "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+          "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+        ],
+        "redistribution_allowed": false,
+        "evidence_artifact_path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-use-permission-granted-2026-08-17.json"
+      },
+      "third_party_rights_status": "REPOSITORY_LICENSE_ONLY",
+      "consumers": [
+        "QS-C22",
+        "QS-C23",
+        "QS-E40"
+      ],
+      "approved_scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ],
+      "blocked_reasons": [],
+      "artifacts": [
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-local-noncommercial-research-2026-08-14.json",
+          "sha256": "48b11e76ac1d7288c40f0052fa000ae72f7edd4c930db3057751c7c7f841a3fa",
+          "size_bytes": 3381,
+          "mtime_ns": 1786720714006247146
+        },
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-use-permission-granted-2026-08-17.json",
+          "sha256": "42f1f02a68b1c1af3894578e3c886f5964c3c5b3042a9a899c14d1e9810c5e44",
+          "size_bytes": 6221,
+          "mtime_ns": 1786989038488586970
+        },
+        {
+          "role": "SOURCE_RECEIPT",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/source-receipts.json",
+          "sha256": "83f3dbff9ac45eff5bc0e26cdc0c81c3761fea8d365bcbb10b1d0b6391acd849",
+          "size_bytes": 2362,
+          "mtime_ns": 1786720722618481290
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/adaface/LICENSE.d8114b3c.txt",
+          "sha256": "95b6e493eb9dba27f2150304e790ae254bab18d1611f4d6e2ade28fa3a271583",
+          "size_bytes": 1067,
+          "mtime_ns": 1786719274063106097
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/adaface/README.d8114b3c.md",
+          "sha256": "4c9a6bcb3eeed1b4850002538ac9712c4b1c0e3383c3c2828984f97d618911b1",
+          "size_bytes": 14972,
+          "mtime_ns": 1786719274095106967
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/archive/stale_20260316_181357/logs/weight_downloads.json",
+          "sha256": "e7a4e3a85cbb2b0291d5cbcbcdc603b0284def164f45156a2bd7d78a251064b5",
+          "size_bytes": 2774,
+          "mtime_ns": 1773171991921156580
+        },
+        {
+          "role": "CONFIGURATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/configs/matchers/adaface.yaml",
+          "sha256": "26e257b0451c6cd6e044576a5024933544bbf806f516a649c674ce4a44143290",
+          "size_bytes": 810,
+          "mtime_ns": 1786597063054304968
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/weights/adaface/adaface_ir101_webface4m.ckpt",
+          "sha256": "0a379dbaf7d79573d1ff63f317c0296f3adfb637b9c00b6234fdcc53a77a0f61",
+          "size_bytes": 683066959,
+          "mtime_ns": 1644027276000000000
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/packages/ofiq-quality/src/ofiq_quality/matchers/adaface.py",
+          "sha256": "47ce317eeaaab837614fefc7ccc08c0b53f3b63fc9b27a7a9d2b6a1ebf4ebc14",
+          "size_bytes": 5428,
+          "mtime_ns": 1786594505200741038
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/packages/ofiq-quality/src/ofiq_quality/matchers/_adaface_arch.py",
+          "sha256": "f3c547b809239093f30bf455202e1c93f9a9440dd88e157c7504912c3ff647eb",
+          "size_bytes": 6748,
+          "mtime_ns": 1778299327012327434
+        }
+      ],
+      "checks": []
+    },
+    {
+      "resource_id": "elasticface-arc-r100-local-candidate",
+      "kind": "LOCAL_MATCHER_CANDIDATE",
+      "name": "ElasticFace-Arc R100 MS1MV2 local checkpoint",
+      "state": "APPROVED_LOCAL_RESEARCH_USE",
+      "version": "sha256:8ea1772a9dc0e95b77c171a1713f667f353d86ad66f2e3d418e7973360d2fb28",
+      "source": {
+        "uri": "https://github.com/fdbtrs/ElasticFace.git",
+        "local_root": "/mnt/projects/02_perception_biometrics/ofiq_29794",
+        "upstream_commit": "5496ec0643bfdcd5e6b53b885aa4e919e26ce442",
+        "evidence_artifacts": [
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/configs/matchers/elasticface.yaml",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/packages/ofiq-quality/src/ofiq_quality/matchers/elasticface.py",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/packages/ofiq-quality/src/ofiq_quality/matchers/_iresnet.py",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/data/weights/elasticface/elasticface_arc.pth",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/archive/stale_20260316_181357/logs/weight_downloads.json",
+          "/mnt/projects/ofiqgui/resources/upstream/elasticface/README.5496ec06.md",
+          "/mnt/projects/ofiqgui/resources/upstream/source-receipts.json"
+        ],
+        "notes": [
+          "The pinned upstream README links the ElasticFace-Arc pretrained model folder and names checkpoint 295672backbone.pth.",
+          "The official README states that the project is licensed under CC BY-NC-SA 4.0.",
+          "The historical receipt MD5 matches the current checkpoint, but its recorded byte count differs from the current file."
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "CC-BY-NC-SA-4.0",
+          "artifact_path": "/mnt/projects/ofiqgui/resources/upstream/elasticface/README.5496ec06.md",
+          "applies_to": [
+            "/mnt/projects/02_perception_biometrics/ofiq_29794/data/weights/elasticface/elasticface_arc.pth"
+          ]
+        }
+      ],
+      "use_restrictions": [
+        "Owner-approved local noncommercial research use on the QualSight workstation only; never bundle, publish, commit, or redistribute these bytes with QualSight.",
+        "Acquire only through the QualSight setup step from the recorded official or mirror source, and only when the downloaded bytes match the registered SHA-256; refuse on mismatch.",
+        "Do not treat owner authorization as third-party license or permission evidence; third_party_rights_status records the factual rights position.",
+        "Do not redistribute the checkpoint, crops, or embeddings; CC-BY-NC-SA-4.0 also forbids commercial use.",
+        "Load the exact registered checkpoint only through the frozen QualSight matcher runtime with strict state loading, weights_only deserialization, no random-weight fallback, and no implicit model-pack resolution."
+      ],
+      "redistribution_status": "PROHIBITED_BY_PROJECT_POLICY",
+      "research_use_status": "OWNER_APPROVED_LOCAL_NONCOMMERCIAL_RESEARCH_CC_BY_NC_SA_4_0",
+      "citations": [
+        "https://github.com/fdbtrs/ElasticFace/tree/5496ec0643bfdcd5e6b53b885aa4e919e26ce442"
+      ],
+      "installation_or_access_method": "Setup acquires the ElasticFace-Arc R100 MS1MV2 checkpoint (registered SHA-256) from the upstream author's published checkpoint link or a byte-identical mirror; on this workstation the registered bytes already exist under ofiq_29794/data/weights and are read in place.",
+      "data_classification": "SENSITIVE_BIOMETRIC_DERIVED",
+      "runtime_requirements": {
+        "platform": "UNEXECUTED_IN_QUALSIGHT",
+        "environment": {},
+        "notes": [
+          "The checkpoint is 261216371 bytes and its MD5 matches the historical download receipt.",
+          "The current loader uses strict state loading and weights_only=True but still permits random weights and implicit buffalo_l resolution.",
+          "No frozen QualSight runtime has loaded or executed this checkpoint.",
+          "The historical download receipt MD5 matches but its byte count conflicts with the current checkpoint; the current SHA-256 identity is authoritative.",
+          "ElasticFace is published as trained on MS1MV2 and evaluated on LFW as a held-out benchmark; this is a published claim, not a QualSight-verified identity exclusion."
+        ]
+      },
+      "owner_authorization": {
+        "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+        "authority": "QualSight project owner (interactive user)",
+        "recorded_at": "2026-08-17T12:50:33-05:00",
+        "scopes": [
+          "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+          "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+        ],
+        "redistribution_allowed": false,
+        "evidence_artifact_path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-use-permission-granted-2026-08-17.json"
+      },
+      "third_party_rights_status": "VERIFIED_LICENSE",
+      "consumers": [
+        "QS-C22",
+        "QS-C23",
+        "QS-E40"
+      ],
+      "approved_scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ],
+      "blocked_reasons": [],
+      "artifacts": [
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-local-noncommercial-research-2026-08-14.json",
+          "sha256": "48b11e76ac1d7288c40f0052fa000ae72f7edd4c930db3057751c7c7f841a3fa",
+          "size_bytes": 3381,
+          "mtime_ns": 1786720714006247146
+        },
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-use-permission-granted-2026-08-17.json",
+          "sha256": "42f1f02a68b1c1af3894578e3c886f5964c3c5b3042a9a899c14d1e9810c5e44",
+          "size_bytes": 6221,
+          "mtime_ns": 1786989038488586970
+        },
+        {
+          "role": "SOURCE_RECEIPT",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/source-receipts.json",
+          "sha256": "83f3dbff9ac45eff5bc0e26cdc0c81c3761fea8d365bcbb10b1d0b6391acd849",
+          "size_bytes": 2362,
+          "mtime_ns": 1786720722618481290
+        },
+        {
+          "role": "LICENSE",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/elasticface/README.5496ec06.md",
+          "sha256": "fd62dd980cf03f47da32382f2a3604b814b274e6a5ab3f2f6b615da9e3751405",
+          "size_bytes": 3440,
+          "mtime_ns": 1786719273959103272
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/archive/stale_20260316_181357/logs/weight_downloads.json",
+          "sha256": "e7a4e3a85cbb2b0291d5cbcbcdc603b0284def164f45156a2bd7d78a251064b5",
+          "size_bytes": 2774,
+          "mtime_ns": 1773171991921156580
+        },
+        {
+          "role": "CONFIGURATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/configs/matchers/elasticface.yaml",
+          "sha256": "aafc387f34a4c757d87b9f578af5e76b98c5037fbc1ad28471337561bf33dd58",
+          "size_bytes": 628,
+          "mtime_ns": 1786597063054304968
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/weights/elasticface/elasticface_arc.pth",
+          "sha256": "8ea1772a9dc0e95b77c171a1713f667f353d86ad66f2e3d418e7973360d2fb28",
+          "size_bytes": 261216371,
+          "mtime_ns": 1637702237000000000
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/packages/ofiq-quality/src/ofiq_quality/matchers/elasticface.py",
+          "sha256": "f3529a3621e16e957147d3737e3e3e1fa685d3072b626fdf15790b812ee4b48f",
+          "size_bytes": 5797,
+          "mtime_ns": 1786597015853096524
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/packages/ofiq-quality/src/ofiq_quality/matchers/_iresnet.py",
+          "sha256": "0eab914917dca6fd36f9fe7c33022fe70997c8ba9f28484cd7cdd54905265c22",
+          "size_bytes": 5099,
+          "mtime_ns": 1778299327012327434
+        }
+      ],
+      "checks": []
+    },
+    {
+      "resource_id": "transface-s-glint360k-local-candidate",
+      "kind": "LOCAL_MATCHER_CANDIDATE",
+      "name": "TransFace-S Glint360K local checkpoint",
+      "state": "APPROVED_LOCAL_RESEARCH_USE",
+      "version": "sha256:8a334ecc85fd0b547fb86836f5b926abdb4ec9b137ef65ed536d7b2d781905ce",
+      "source": {
+        "uri": "https://github.com/DanJun6737/TransFace.git",
+        "local_root": "/mnt/projects/02_perception_biometrics/ofiq_29794",
+        "upstream_commit": "fb6cd56d04c7ea525e328219f5d5066adac03ada",
+        "evidence_artifacts": [
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/configs/matchers/transface.yaml",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/packages/ofiq-quality/src/ofiq_quality/matchers/transface.py",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/packages/ofiq-quality/src/ofiq_quality/matchers/_vit.py",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/data/weights/transface/transface_s_glint360k.pth",
+          "/mnt/projects/ofiqgui/resources/upstream/transface/README.fb6cd56d.md",
+          "/mnt/projects/ofiqgui/resources/upstream/source-receipts.json"
+        ],
+        "notes": [
+          "The pinned upstream README links the TransFace-S Glint360K checkpoint selected by the project owner.",
+          "The pinned repository tree contains no license file and its README states no license terms.",
+          "No acquisition receipt binds the local checkpoint to the upstream download."
+        ]
+      },
+      "licenses": [],
+      "use_restrictions": [
+        "Owner-approved local noncommercial research use on the QualSight workstation only; never bundle, publish, commit, or redistribute these bytes with QualSight.",
+        "Acquire only through the QualSight setup step from the recorded official or mirror source, and only when the downloaded bytes match the registered SHA-256; refuse on mismatch.",
+        "Do not treat owner authorization as third-party license or permission evidence; third_party_rights_status records the factual rights position.",
+        "Do not redistribute the checkpoint, crops, or embeddings; no upstream license grants any redistribution right.",
+        "Load the exact registered checkpoint only through the frozen QualSight matcher runtime with strict state loading, weights_only deserialization, no random-weight fallback, and no implicit model-pack resolution."
+      ],
+      "redistribution_status": "NOT_APPROVED_FOR_QUALSIGHT_DISTRIBUTION",
+      "research_use_status": "OWNER_APPROVED_LOCAL_NONCOMMERCIAL_RESEARCH_NO_UPSTREAM_LICENSE_FOUND",
+      "citations": [
+        "https://github.com/DanJun6737/TransFace/tree/fb6cd56d04c7ea525e328219f5d5066adac03ada"
+      ],
+      "installation_or_access_method": "Setup acquires the TransFace-S Glint360K checkpoint (registered SHA-256) from the upstream author's published checkpoint link or a byte-identical mirror; on this workstation the registered bytes already exist under ofiq_29794/data/weights and are read in place.",
+      "data_classification": "SENSITIVE_BIOMETRIC_DERIVED",
+      "runtime_requirements": {
+        "platform": "UNEXECUTED_IN_QUALSIGHT",
+        "environment": {},
+        "notes": [
+          "The checkpoint is 346705361 bytes.",
+          "The current loader uses strict state loading and weights_only=True but still permits random weights and implicit buffalo_l resolution.",
+          "No frozen QualSight runtime has loaded or executed this checkpoint.",
+          "No upstream license or checkpoint-specific permission was found in the pinned repository evidence; the project owner accepted local, non-redistributed research use under the recorded receipt.",
+          "TransFace-S is published as trained on Glint360K and evaluated on LFW as a held-out benchmark; this is a published claim, not a QualSight-verified identity exclusion."
+        ]
+      },
+      "owner_authorization": {
+        "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+        "authority": "QualSight project owner (interactive user)",
+        "recorded_at": "2026-08-17T12:50:33-05:00",
+        "scopes": [
+          "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+          "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+        ],
+        "redistribution_allowed": false,
+        "evidence_artifact_path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-use-permission-granted-2026-08-17.json"
+      },
+      "third_party_rights_status": "NO_LICENSE_FOUND",
+      "consumers": [
+        "QS-C22",
+        "QS-C23",
+        "QS-E40"
+      ],
+      "approved_scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ],
+      "blocked_reasons": [],
+      "artifacts": [
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-local-noncommercial-research-2026-08-14.json",
+          "sha256": "48b11e76ac1d7288c40f0052fa000ae72f7edd4c930db3057751c7c7f841a3fa",
+          "size_bytes": 3381,
+          "mtime_ns": 1786720714006247146
+        },
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-use-permission-granted-2026-08-17.json",
+          "sha256": "42f1f02a68b1c1af3894578e3c886f5964c3c5b3042a9a899c14d1e9810c5e44",
+          "size_bytes": 6221,
+          "mtime_ns": 1786989038488586970
+        },
+        {
+          "role": "SOURCE_RECEIPT",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/source-receipts.json",
+          "sha256": "83f3dbff9ac45eff5bc0e26cdc0c81c3761fea8d365bcbb10b1d0b6391acd849",
+          "size_bytes": 2362,
+          "mtime_ns": 1786720722618481290
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/transface/README.fb6cd56d.md",
+          "sha256": "3fbda289775281dd19d7e03aec6320f0f8f6a24776971c7db85e8a170e23b83a",
+          "size_bytes": 6740,
+          "mtime_ns": 1786719273927102401
+        },
+        {
+          "role": "CONFIGURATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/configs/matchers/transface.yaml",
+          "sha256": "fed6295ba2539c59f7722be4fd9c43808a397d80a09f64455e3e0253616698cf",
+          "size_bytes": 947,
+          "mtime_ns": 1786597063058305071
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/weights/transface/transface_s_glint360k.pth",
+          "sha256": "8a334ecc85fd0b547fb86836f5b926abdb4ec9b137ef65ed536d7b2d781905ce",
+          "size_bytes": 346705361,
+          "mtime_ns": 1773779887676433293
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/packages/ofiq-quality/src/ofiq_quality/matchers/transface.py",
+          "sha256": "55c927ae86ae21457da803297aae79a0a44697e57d8a910e2e9c433e37a991b0",
+          "size_bytes": 8511,
+          "mtime_ns": 1786597015853096524
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/packages/ofiq-quality/src/ofiq_quality/matchers/_vit.py",
+          "sha256": "3160dd6adaa86867bae0ab914cd813081e275c3bde8083092a4815613e62e5db",
+          "size_bytes": 10930,
+          "mtime_ns": 1786653934169238178
+        }
+      ],
+      "checks": []
+    },
+    {
+      "resource_id": "insightface-scrfd-10g-local-candidate",
+      "kind": "FACE_DETECTOR_CANDIDATE",
+      "name": "InsightFace buffalo_l SCRFD-10GF local detector",
+      "state": "APPROVED_LOCAL_RESEARCH_USE",
+      "version": "sha256:5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91",
+      "source": {
+        "uri": "https://github.com/deepinsight/insightface.git",
+        "local_root": "/home/aaron/.insightface/models/buffalo_l",
+        "upstream_commit": "7fadd420c2351d0ffa8cac403421c1a3ed733365",
+        "evidence_artifacts": [
+          "/home/aaron/.insightface/models/buffalo_l/det_10g.onnx",
+          "/home/aaron/.local/lib/python3.11/site-packages/insightface/model_zoo/scrfd.py",
+          "/home/aaron/.local/lib/python3.11/site-packages/insightface-0.7.3.dist-info/METADATA",
+          "/mnt/projects/ofiqgui/resources/upstream/insightface/python-package-README.7fadd420.md",
+          "/mnt/projects/ofiqgui/resources/upstream/insightface/release-v0.7.json",
+          "/mnt/projects/ofiqgui/resources/upstream/insightface/release-v0.7.headers",
+          "/mnt/projects/ofiqgui/resources/upstream/insightface/buffalo_l-v0.7-final.headers",
+          "/home/aaron/.insightface/models/buffalo_l.zip",
+          "/mnt/projects/ofiqgui/resources/upstream/source-receipts.json"
+        ],
+        "notes": [
+          "A separately authorized fresh transfer of the official InsightFace v0.7 buffalo_l release asset matched the preserved local archive byte-for-byte, and its det_10g.onnx member matches the registered detector byte-for-byte.",
+          "The pinned upstream README restricts pretrained models to noncommercial research but is not a redistribution license.",
+          "The evidence establishes current official-release byte provenance but does not reconstruct the existing local archive's original acquisition event; raw signed-redirect request traces were not retained."
+        ]
+      },
+      "licenses": [],
+      "use_restrictions": [
+        "Owner-approved local noncommercial research use on the QualSight workstation only; never bundle, publish, commit, or redistribute these bytes with QualSight.",
+        "Acquire only through the QualSight setup step from the recorded official or mirror source, and only when the downloaded bytes match the registered SHA-256; refuse on mismatch.",
+        "Do not treat owner authorization as third-party license or permission evidence; third_party_rights_status records the factual rights position.",
+        "Do not redistribute the detector, crops, or embeddings; the InsightFace notice limits the model pack to noncommercial research.",
+        "Load the exact registered det_10g.onnx directly by path with downloading disabled; never let a runtime resolve or download the buffalo_l pack implicitly."
+      ],
+      "redistribution_status": "NOT_APPROVED_FOR_QUALSIGHT_DISTRIBUTION",
+      "research_use_status": "OWNER_APPROVED_LOCAL_NONCOMMERCIAL_RESEARCH_INSIGHTFACE_NONCOMMERCIAL_NOTICE",
+      "citations": [
+        "https://github.com/deepinsight/insightface/tree/7fadd420c2351d0ffa8cac403421c1a3ed733365/python-package",
+        "https://github.com/deepinsight/insightface/releases/tag/v0.7"
+      ],
+      "installation_or_access_method": "Setup acquires buffalo_l.zip (registered SHA-256, official InsightFace v0.7 release asset) from GitHub or a byte-identical mirror and extracts det_10g.onnx; on this workstation the registered bytes already exist under ~/.insightface/models/buffalo_l and are read in place.",
+      "data_classification": "SENSITIVE_BIOMETRIC_DERIVED",
+      "runtime_requirements": {
+        "platform": "python-3.11-linux-x86_64-unvalidated",
+        "environment": {},
+        "notes": [
+          "The installed InsightFace distribution reports version 0.7.3.",
+          "The current Python environment cannot import InsightFace because its dependency set is incompatible.",
+          "No frozen QualSight runtime has loaded or executed this detector.",
+          "The InsightFace model-zoo notice permits noncommercial research use and directs licensing questions to the maintainers; no model redistribution license exists, and the project owner accepted local, non-redistributed research use under the recorded receipt.",
+          "The original historical acquisition event of the existing archive is not reconstructed; the archive and detector member are byte-bound to the official v0.7 release asset."
+        ]
+      },
+      "owner_authorization": {
+        "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+        "authority": "QualSight project owner (interactive user)",
+        "recorded_at": "2026-08-17T12:50:33-05:00",
+        "scopes": [
+          "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+          "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+        ],
+        "redistribution_allowed": false,
+        "evidence_artifact_path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-use-permission-granted-2026-08-17.json"
+      },
+      "third_party_rights_status": "RESEARCH_NOTICE_ONLY",
+      "consumers": [
+        "QS-C20",
+        "QS-C22",
+        "QS-E40"
+      ],
+      "approved_scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ],
+      "blocked_reasons": [],
+      "artifacts": [
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-local-noncommercial-research-2026-08-14.json",
+          "sha256": "48b11e76ac1d7288c40f0052fa000ae72f7edd4c930db3057751c7c7f841a3fa",
+          "size_bytes": 3381,
+          "mtime_ns": 1786720714006247146
+        },
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-insightface-buffalo-l-evidence-acquisition-2026-08-17.json",
+          "sha256": "4ea9fca18ed5b1a95b55d59aff5f6995eb4f064f6374ebd45a192a2b6aadb481",
+          "size_bytes": 2109,
+          "mtime_ns": 1786944858171515070
+        },
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-use-permission-granted-2026-08-17.json",
+          "sha256": "42f1f02a68b1c1af3894578e3c886f5964c3c5b3042a9a899c14d1e9810c5e44",
+          "size_bytes": 6221,
+          "mtime_ns": 1786989038488586970
+        },
+        {
+          "role": "SOURCE_RECEIPT",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/source-receipts.json",
+          "sha256": "83f3dbff9ac45eff5bc0e26cdc0c81c3761fea8d365bcbb10b1d0b6391acd849",
+          "size_bytes": 2362,
+          "mtime_ns": 1786720722618481290
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/insightface/python-package-README.7fadd420.md",
+          "sha256": "4d5d26d2f990845b81331dd7589ec291407847d72f13d012e19c712e620e7972",
+          "size_bytes": 10734,
+          "mtime_ns": 1786719274051105771
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/insightface/release-v0.7.json",
+          "sha256": "1458ba41add0f0f022e244bbc44aaebd3b03a06fc1620b9a190725fd1de6dca0",
+          "size_bytes": 14330,
+          "mtime_ns": 1786944925329429102
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/insightface/release-v0.7.headers",
+          "sha256": "cf7a746f39d8e94f2858c832d04dadb8e51a33fcbc85bd24ca80b3e4677d2af3",
+          "size_bytes": 1320,
+          "mtime_ns": 1786944925289427967
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/insightface/buffalo_l-v0.7-final.headers",
+          "sha256": "ec2eade1010ec13f2a97b3463c13e97cf0fc0b51e8db2ca920bf6fdf5d698543",
+          "size_bytes": 804,
+          "mtime_ns": 1786944930685580960
+        },
+        {
+          "role": "ARCHIVE",
+          "path": "/home/aaron/.insightface/models/buffalo_l.zip",
+          "sha256": "80ffe37d8a5940d59a7384c201a2a38d4741f2f3c51eef46ebb28218a7b0ca2f",
+          "size_bytes": 288621354,
+          "mtime_ns": 1760803794253235762
+        },
+        {
+          "role": "MODEL",
+          "path": "/home/aaron/.insightface/models/buffalo_l/det_10g.onnx",
+          "sha256": "5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91",
+          "size_bytes": 16923827,
+          "mtime_ns": 1760803794337237754
+        },
+        {
+          "role": "IMPLEMENTATION",
+          "path": "/home/aaron/.local/lib/python3.11/site-packages/insightface/model_zoo/scrfd.py",
+          "sha256": "64b0b787e4c235ff80c1141614a77f2b2c24c90ba5b920f1bc91fde80cbef9f9",
+          "size_bytes": 12852,
+          "mtime_ns": 1760940274741304269
+        },
+        {
+          "role": "VERSION_EVIDENCE",
+          "path": "/home/aaron/.local/lib/python3.11/site-packages/insightface-0.7.3.dist-info/METADATA",
+          "sha256": "f93cd7b4855b5d6301a3301f34d1c9fbb70543b5a59b64fd18c18251835d5754",
+          "size_bytes": 6295,
+          "mtime_ns": 1760940274745304368
+        }
+      ],
+      "checks": []
+    }
+  ]
+}

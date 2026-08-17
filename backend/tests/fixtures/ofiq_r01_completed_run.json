@@ -1,0 +1,810 @@
+{
+  "fixture_schema_version": "1.2.0",
+  "provenance": {
+    "captured_at": "2026-08-13T23:06:42.314971-05:00",
+    "capture_completed_at": "2026-08-13T23:06:45.891724-05:00",
+    "registry": {
+      "path": "/mnt/projects/ofiqgui/resources/resource-registry.json",
+      "sha256": "780f885afc1e6704e550de12a881f2a505c8a30312e6718a43816dbefbb9e4c4",
+      "size_bytes": 32581,
+      "mtime_ns": 1786676970995339874
+    },
+    "registry_preservation": {
+      "state": "NOT_RECORDED",
+      "value": null,
+      "reason": "The registry bytes observed at capture were overwritten by the authorized resource-registry revision before an immutable copy was preserved."
+    },
+    "registry_id": "qualsight-local-resources",
+    "registry_recorded_at": "2026-08-13T21:49:46-05:00",
+    "runtime_resource_id": "ofiq-v1-1-0-build-runtime",
+    "input_resource_id": "ofiq-r-01-conformance-input",
+    "approved_scope": "REPRODUCE_OFIQ_CONFORMANCE_TESTS",
+    "command": [
+      "/mnt/projects/02_perception_biometrics/OFIQ-Project/build/build_linux/OFIQSampleApp",
+      "-c",
+      "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/ofiq_config.jaxn",
+      "-i",
+      "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/r-01-frontal.png"
+    ],
+    "capture_tool": null,
+    "capture_tool_evidence": {
+      "state": "NOT_RECORDED",
+      "value": null,
+      "reason": "The exact capture-tool bytes were not preserved before the fixture verifier changed after execution."
+    },
+    "verification_tool": {
+      "path": "/mnt/projects/ofiqgui/backend/tests/real_fixture.py",
+      "sha256": "e86b781dc5294b808b0829bc077f408540c9c268753037df888bd267ce632f3e",
+      "size_bytes": 40712,
+      "mtime_ns": 1786992470490700711
+    },
+    "source_license": {
+      "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/LICENSE.md",
+      "sha256": "f2457086d49ff0dc0faab72cddc214a5119d321bb46e81e6ad19319063b635bc",
+      "size_bytes": 369,
+      "mtime_ns": 1710426938000000000
+    }
+  },
+  "project": {
+    "project_id": "project:sha256:450da8e00acc076c82fcc0af82f2d133b3fc07a61c3fe723ffaaa58d611d5231",
+    "name": "QualSight OFIQ r-01 conformance reproduction",
+    "description": "Local single-sample OFIQ execution using the registered r-01 conformance input and build-tree runtime.",
+    "lifecycle": "SAVED",
+    "owner_user_id": "local-user:aaron",
+    "access_policy": "LOCAL_SINGLE_USER",
+    "classification": "RESTRICTED",
+    "redistribution_permission": "PROHIBITED",
+    "display_permission": "LIMITED",
+    "use_restrictions": [
+      "Use only to reproduce OFIQ conformance tests.",
+      "Do not modify or republish without explicit consent from the depicted subjects.",
+      "Read the image in place and do not copy it into QualSight fixtures or outputs."
+    ],
+    "tags": [
+      "OFIQ",
+      "conformance",
+      "face-quality"
+    ],
+    "notes": [
+      "Use only to reproduce OFIQ conformance tests.",
+      "Do not modify or republish without explicit consent from the depicted subjects.",
+      "Read the image in place and do not copy it into QualSight fixtures or outputs."
+    ],
+    "metadata": {
+      "text": "{\"approved_scope\":\"REPRODUCE_OFIQ_CONFORMANCE_TESTS\",\"input_resource_id\":\"ofiq-r-01-conformance-input\",\"registry_id\":\"qualsight-local-resources\",\"runtime_resource_id\":\"ofiq-v1-1-0-build-runtime\"}",
+      "sha256": "509656c7a928843b89f150148deda9c91041c67cb9b75303a210a8a412d94e73"
+    },
+    "created_at": "2026-08-13T23:06:42.314971-05:00",
+    "updated_at": "2026-08-13T23:06:45.891724-05:00"
+  },
+  "dataset": {
+    "dataset_id": "dataset:sha256:c2489754de44f45dfc264fcefb9a4b6cba4bfa341a30870528e6e02d8e07d923",
+    "project_id": "project:sha256:450da8e00acc076c82fcc0af82f2d133b3fc07a61c3fe723ffaaa58d611d5231",
+    "name": "OFIQ r-01 frontal conformance image",
+    "version": "sha256:3c3655e6ac9f16bc6909b6f71d7c5ec385008aa6d2352167bdb77acd61d8c947",
+    "source_uri": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images",
+    "license": {
+      "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/LICENSE.md",
+      "sha256": "f2457086d49ff0dc0faab72cddc214a5119d321bb46e81e6ad19319063b635bc",
+      "size_bytes": 369,
+      "mtime_ns": 1710426938000000000
+    },
+    "retrieval": {
+      "state": "NOT_RECORDED",
+      "value": null,
+      "reason": "The registered resource records no upstream retrieval date."
+    },
+    "manifest": {
+      "text": "{\"dataset_resource_id\":\"ofiq-r-01-conformance-input\",\"dataset_version\":\"sha256:3c3655e6ac9f16bc6909b6f71d7c5ec385008aa6d2352167bdb77acd61d8c947\",\"manifest_version\":\"1.0.0\",\"samples\":[{\"media_type\":\"image/png\",\"mtime_ns\":1681821094000000000,\"sample_id\":\"sample:sha256:df7e779e8916870290562a507ae7f8fe8fa3a0814e88de0a1a02fa66702e2fcc\",\"sha256\":\"3c3655e6ac9f16bc6909b6f71d7c5ec385008aa6d2352167bdb77acd61d8c947\",\"size_bytes\":13436071,\"source_path\":\"/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/r-01-frontal.png\"}],\"selection_rule\":\"The sole DATA artifact registered for the approved OFIQ r-01 conformance resource.\"}",
+      "sha256": "1687f29abc393c55b20e997cad18daa84c6b38468759843cd744fdaedec03a41"
+    },
+    "subject_count": {
+      "state": "NOT_RECORDED",
+      "value": null,
+      "reason": "The registered resource records no subject mapping."
+    },
+    "sample_count": {
+      "state": "RECORDED",
+      "value": 1,
+      "reason": null
+    },
+    "modality": "face",
+    "identity_schema": {
+      "state": "NOT_APPLICABLE",
+      "component_id": null,
+      "version": null,
+      "configuration_sha256": null,
+      "artifact_hashes": [],
+      "reason": "Single-sample OFIQ quality execution does not use identity labels."
+    },
+    "metadata_schema": {
+      "state": "NOT_APPLICABLE",
+      "component_id": null,
+      "version": null,
+      "configuration_sha256": null,
+      "artifact_hashes": [],
+      "reason": "No metadata table participates in this registered single-image execution."
+    },
+    "redistribution_permission": "PROHIBITED",
+    "display_permission": "LIMITED",
+    "derived_artifact_policy": "Record measurements and hashes for the approved conformance scope; do not copy or redistribute the registered image.",
+    "classification": "RESTRICTED"
+  },
+  "sample": {
+    "sample_id": "sample:sha256:df7e779e8916870290562a507ae7f8fe8fa3a0814e88de0a1a02fa66702e2fcc",
+    "dataset_id": "dataset:sha256:c2489754de44f45dfc264fcefb9a4b6cba4bfa341a30870528e6e02d8e07d923",
+    "subject_id": {
+      "state": "NOT_APPLICABLE",
+      "value": null,
+      "reason": "The registered input has no subject identity mapping."
+    },
+    "modality": "face",
+    "source_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/r-01-frontal.png",
+    "media_type": "image/png",
+    "sha256": "3c3655e6ac9f16bc6909b6f71d7c5ec385008aa6d2352167bdb77acd61d8c947",
+    "size_bytes": 13436071,
+    "mtime_ns": 1681821094000000000,
+    "metadata": {
+      "text": "{\"bit_depth\":8,\"color_type\":6,\"compression_method\":0,\"filter_method\":0,\"height\":4032,\"interlace_method\":0,\"resource_id\":\"ofiq-r-01-conformance-input\",\"width\":3024}",
+      "sha256": "439ad3bd31154cb93b4258706606fb0e82b9b902cfc85f701ecf09abbdafab73"
+    }
+  },
+  "experiment": {
+    "experiment_id": "experiment:sha256:395eedf6895e3f15bed6c042770747b4fc70e5eece529a906db2c8a1b46d9fee",
+    "project_id": "project:sha256:450da8e00acc076c82fcc0af82f2d133b3fc07a61c3fe723ffaaa58d611d5231",
+    "dataset_id": "dataset:sha256:c2489754de44f45dfc264fcefb9a4b6cba4bfa341a30870528e6e02d8e07d923",
+    "name": "OFIQ r-01 single-sample quality execution",
+    "created_by": "local-user:aaron",
+    "created_at": "2026-08-13T23:06:42.314971-05:00",
+    "protocol": {
+      "kind": "SINGLE_SAMPLE_QUALITY",
+      "sample_ids": [
+        "sample:sha256:df7e779e8916870290562a507ae7f8fe8fa3a0814e88de0a1a02fa66702e2fcc"
+      ]
+    },
+    "configuration": {
+      "text": "{\"approved_scope\":\"REPRODUCE_OFIQ_CONFORMANCE_TESTS\",\"command\":[\"/mnt/projects/02_perception_biometrics/OFIQ-Project/build/build_linux/OFIQSampleApp\",\"-c\",\"/mnt/projects/02_perception_biometrics/OFIQ-Project/data/ofiq_config.jaxn\",\"-i\",\"/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/r-01-frontal.png\"],\"environment\":{\"LD_LIBRARY_PATH\":\"/mnt/projects/02_perception_biometrics/OFIQ-Project/extern/onnxruntime-linux-x64-1.18.1/lib\"},\"input_resource\":{\"resource_id\":\"ofiq-r-01-conformance-input\",\"state\":\"VERIFIED_LIMITED_USE\",\"version\":\"sha256:3c3655e6ac9f16bc6909b6f71d7c5ec385008aa6d2352167bdb77acd61d8c947\"},\"runtime_resource\":{\"blocked_reasons\":[\"The tagged CMake file names the ISO edition-1 bundle while the tracked model README names edition 2.\",\"The local bytes do not prove the downloaded archive identity or retrieval date.\",\"Individual model payloads generally lack a verified named model version.\",\"QualSight redistribution and broader research-use approval have not been recorded.\"],\"resource_id\":\"ofiq-v1-1-0-build-runtime\",\"state\":\"BLOCKED\",\"version\":\"1.1.0\"}}",
+      "sha256": "30f99679480ac11d996897c1edab077a284fa421273ff13f3a3d2c3c66cce58d"
+    }
+  },
+  "run": {
+    "run_id": "run:sha256:c85fbba6f1d06c8e05c6deca48d394a21b49ffd35edd0b57f6e45b625e84e9de",
+    "supersedes_run_id": null,
+    "project_id": "project:sha256:450da8e00acc076c82fcc0af82f2d133b3fc07a61c3fe723ffaaa58d611d5231",
+    "experiment_id": "experiment:sha256:395eedf6895e3f15bed6c042770747b4fc70e5eece529a906db2c8a1b46d9fee",
+    "user_id": "local-user:aaron",
+    "dataset_manifest": {
+      "text": "{\"dataset_resource_id\":\"ofiq-r-01-conformance-input\",\"dataset_version\":\"sha256:3c3655e6ac9f16bc6909b6f71d7c5ec385008aa6d2352167bdb77acd61d8c947\",\"manifest_version\":\"1.0.0\",\"samples\":[{\"media_type\":\"image/png\",\"mtime_ns\":1681821094000000000,\"sample_id\":\"sample:sha256:df7e779e8916870290562a507ae7f8fe8fa3a0814e88de0a1a02fa66702e2fcc\",\"sha256\":\"3c3655e6ac9f16bc6909b6f71d7c5ec385008aa6d2352167bdb77acd61d8c947\",\"size_bytes\":13436071,\"source_path\":\"/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/r-01-frontal.png\"}],\"selection_rule\":\"The sole DATA artifact registered for the approved OFIQ r-01 conformance resource.\"}",
+      "sha256": "1687f29abc393c55b20e997cad18daa84c6b38468759843cd744fdaedec03a41"
+    },
+    "dataset_hash": "1687f29abc393c55b20e997cad18daa84c6b38468759843cd744fdaedec03a41",
+    "subject_protocol": {
+      "state": "NOT_APPLICABLE",
+      "component_id": null,
+      "version": null,
+      "configuration_sha256": null,
+      "artifact_hashes": [],
+      "reason": "The executed single-sample protocol has no subject mapping."
+    },
+    "pair_search_protocol": {
+      "state": "NOT_APPLICABLE",
+      "component_id": null,
+      "version": null,
+      "configuration_sha256": null,
+      "artifact_hashes": [],
+      "reason": "The executed protocol scores one sample and performs no comparison or search."
+    },
+    "quality_engine": {
+      "resource_id": "ofiq-v1-1-0-build-runtime",
+      "version": "1.1.0",
+      "registry_state": "BLOCKED",
+      "artifacts": [
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/build/build_linux/OFIQSampleApp",
+          "sha256": "fb41aa5c819d5432aa94e29415a2e0e702a124cc2c3b4c6aca3cfb6cd0af20b9",
+          "size_bytes": 84432,
+          "mtime_ns": 1768933647652282049
+        },
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/build/build_linux/libofiq_lib.so",
+          "sha256": "5d90a2238fb8879f1eb6817ff1df705c16099f7452878189398fb091c0188664",
+          "size_bytes": 22160376,
+          "mtime_ns": 1768933646668258410
+        },
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/extern/onnxruntime-linux-x64-1.18.1/lib/libonnxruntime.so.1.18.1",
+          "sha256": "1147caa734d19f7549f90a659aa9ca444366eeb80a596900d19d242145a9f4c9",
+          "size_bytes": 15285336,
+          "mtime_ns": 1719510192000000000
+        },
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/grimmer/hse_1_2_C_adaboost.yml.gz",
+          "sha256": "6555645c47dd2d3ff290a6e881890fa8ca8adeaf31d4678a4bd2a3524d25ad87",
+          "size_bytes": 19368922,
+          "mtime_ns": 1708020628000000000
+        },
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/hsemotion/enet_b0_8_best_vgaf_embed_zeroed.onnx",
+          "sha256": "467e6c31152cd6db94f50c5d0b8e2ce4d1280f2fbd7b826609aefb92779a9e15",
+          "size_bytes": 16052940,
+          "mtime_ns": 1708736792000000000
+        },
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/hsemotion/enet_b2_8_embed_zeroed.onnx",
+          "sha256": "9a62be277daf63e553900ff15fe2124fb4ba9b4d759364e21f07464f351e8b44",
+          "size_bytes": 30800917,
+          "mtime_ns": 1708736076000000000
+        },
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_detection/ssd_facedetect.caffemodel",
+          "sha256": "2a56a11a57a4a295956b0660b4a3d76bbdca2206c4961cea8efe7d95c7cb2f2d",
+          "size_bytes": 10666211,
+          "mtime_ns": 1609376866000000000
+        },
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_detection/ssd_facedetect.prototxt.txt",
+          "sha256": "34d850436faf158ca4e690533ba27c1decf29653559299d80db9274146332ca7",
+          "size_bytes": 29881,
+          "mtime_ns": 1609378126000000000
+        },
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_landmark_estimation/ADNet.onnx",
+          "sha256": "5aed3eb5b6ecd3504e5216078a3db064f6c93f2a420f12d0e82f2184c64c9654",
+          "size_bytes": 54747293,
+          "mtime_ns": 1680048058000000000
+        },
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_occlusion_segmentation/face_occlusion_segmentation_ort.onnx",
+          "sha256": "e847464bd8c0c596e8921c18d303fc6bf0ddb4a127ba4d1213c19701ed8790d0",
+          "size_bytes": 57307779,
+          "mtime_ns": 1692983656000000000
+        },
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_parsing/bisenet_400.onnx",
+          "sha256": "750ae55d5c440074a085ddd31a3fbd19a9e922ffb22d25eeb2bdf4f26eb3250a",
+          "size_bytes": 53193813,
+          "mtime_ns": 1679521724000000000
+        },
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/head_pose_estimation/mb1_120x120.onnx",
+          "sha256": "efeb77517d067c197a314bc3d72aa04f03ceb6468f121d6c9f185dd44736e4ae",
+          "size_bytes": 13046240,
+          "mtime_ns": 1666899148000000000
+        },
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/no_compression_artifacts/ssim_248_model.onnx",
+          "sha256": "001fe8e73803a3ffb4dbfc7794d9e20232eb925606e8efe68e54696516d04b41",
+          "size_bytes": 23382575,
+          "mtime_ns": 1700186744000000000
+        },
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/sharpness/face_sharpness_rtree.xml.gz",
+          "sha256": "0d7decdad2b635e4d811f4de30a4bb451038d0698e72d452ba4b231de7710b02",
+          "size_bytes": 507331,
+          "mtime_ns": 1700241826000000000
+        },
+        {
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/unified_quality_score/magface_iresnet50_norm.onnx",
+          "sha256": "bc03f082a59ccb3189c6c9aec429f376523fe6586e207c401ab8d1694888babb",
+          "size_bytes": 174394035,
+          "mtime_ns": 1709969866000000000
+        }
+      ]
+    },
+    "quality_engine_configuration": {
+      "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/ofiq_config.jaxn",
+      "sha256": "e117286706d799a1e23130db01cfdff7ef36d157b22ecf68dd196052a8a8d0b3",
+      "size_bytes": 6118,
+      "mtime_ns": 1768931764811127641
+    },
+    "model_hashes": [
+      {
+        "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/grimmer/hse_1_2_C_adaboost.yml.gz",
+        "sha256": "6555645c47dd2d3ff290a6e881890fa8ca8adeaf31d4678a4bd2a3524d25ad87",
+        "size_bytes": 19368922,
+        "mtime_ns": 1708020628000000000
+      },
+      {
+        "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/hsemotion/enet_b0_8_best_vgaf_embed_zeroed.onnx",
+        "sha256": "467e6c31152cd6db94f50c5d0b8e2ce4d1280f2fbd7b826609aefb92779a9e15",
+        "size_bytes": 16052940,
+        "mtime_ns": 1708736792000000000
+      },
+      {
+        "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/expression_neutrality/hsemotion/enet_b2_8_embed_zeroed.onnx",
+        "sha256": "9a62be277daf63e553900ff15fe2124fb4ba9b4d759364e21f07464f351e8b44",
+        "size_bytes": 30800917,
+        "mtime_ns": 1708736076000000000
+      },
+      {
+        "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_detection/ssd_facedetect.caffemodel",
+        "sha256": "2a56a11a57a4a295956b0660b4a3d76bbdca2206c4961cea8efe7d95c7cb2f2d",
+        "size_bytes": 10666211,
+        "mtime_ns": 1609376866000000000
+      },
+      {
+        "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_detection/ssd_facedetect.prototxt.txt",
+        "sha256": "34d850436faf158ca4e690533ba27c1decf29653559299d80db9274146332ca7",
+        "size_bytes": 29881,
+        "mtime_ns": 1609378126000000000
+      },
+      {
+        "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_landmark_estimation/ADNet.onnx",
+        "sha256": "5aed3eb5b6ecd3504e5216078a3db064f6c93f2a420f12d0e82f2184c64c9654",
+        "size_bytes": 54747293,
+        "mtime_ns": 1680048058000000000
+      },
+      {
+        "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_occlusion_segmentation/face_occlusion_segmentation_ort.onnx",
+        "sha256": "e847464bd8c0c596e8921c18d303fc6bf0ddb4a127ba4d1213c19701ed8790d0",
+        "size_bytes": 57307779,
+        "mtime_ns": 1692983656000000000
+      },
+      {
+        "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/face_parsing/bisenet_400.onnx",
+        "sha256": "750ae55d5c440074a085ddd31a3fbd19a9e922ffb22d25eeb2bdf4f26eb3250a",
+        "size_bytes": 53193813,
+        "mtime_ns": 1679521724000000000
+      },
+      {
+        "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/head_pose_estimation/mb1_120x120.onnx",
+        "sha256": "efeb77517d067c197a314bc3d72aa04f03ceb6468f121d6c9f185dd44736e4ae",
+        "size_bytes": 13046240,
+        "mtime_ns": 1666899148000000000
+      },
+      {
+        "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/no_compression_artifacts/ssim_248_model.onnx",
+        "sha256": "001fe8e73803a3ffb4dbfc7794d9e20232eb925606e8efe68e54696516d04b41",
+        "size_bytes": 23382575,
+        "mtime_ns": 1700186744000000000
+      },
+      {
+        "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/sharpness/face_sharpness_rtree.xml.gz",
+        "sha256": "0d7decdad2b635e4d811f4de30a4bb451038d0698e72d452ba4b231de7710b02",
+        "size_bytes": 507331,
+        "mtime_ns": 1700241826000000000
+      },
+      {
+        "path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/models/unified_quality_score/magface_iresnet50_norm.onnx",
+        "sha256": "bc03f082a59ccb3189c6c9aec429f376523fe6586e207c401ab8d1694888babb",
+        "size_bytes": 174394035,
+        "mtime_ns": 1709969866000000000
+      }
+    ],
+    "matcher": {
+      "state": "NOT_APPLICABLE",
+      "component_id": null,
+      "version": null,
+      "configuration_sha256": null,
+      "artifact_hashes": [],
+      "reason": "The executed OFIQ quality command invokes no matcher."
+    },
+    "matcher_preprocessing": {
+      "state": "NOT_APPLICABLE",
+      "component_id": null,
+      "version": null,
+      "configuration_sha256": null,
+      "artifact_hashes": [],
+      "reason": "The executed OFIQ quality command has no matcher preprocessing stage."
+    },
+    "operating_thresholds": {
+      "state": "NOT_APPLICABLE",
+      "component_id": null,
+      "version": null,
+      "configuration_sha256": null,
+      "artifact_hashes": [],
+      "reason": "The executed command emits quality measurements without a decision threshold."
+    },
+    "statistical_methods": {
+      "state": "NOT_APPLICABLE",
+      "component_id": null,
+      "version": null,
+      "configuration_sha256": null,
+      "artifact_hashes": [],
+      "reason": "This captured per-sample execution applies no inferential statistical method."
+    },
+    "confidence_interval_method": {
+      "state": "NOT_APPLICABLE",
+      "component_id": null,
+      "version": null,
+      "configuration_sha256": null,
+      "artifact_hashes": [],
+      "reason": "This captured per-sample execution computes no confidence interval."
+    },
+    "randomness": {
+      "state": "NOT_APPLICABLE",
+      "component_id": null,
+      "version": null,
+      "configuration_sha256": null,
+      "artifact_hashes": [],
+      "reason": "The executed command and registered configuration contain no random-seed setting."
+    },
+    "random_seeds": [],
+    "application_version": "0.1.0",
+    "repository": {
+      "root": "/mnt/projects/ofiqgui",
+      "state": "UNBORN",
+      "commit": null,
+      "dirty": true,
+      "status_sha256": "13feb5a0aa73e42a7108311b5fdf76c7fb254b9ecfecc2f00a65718a36361c92"
+    },
+    "environment": {
+      "operating_system": "Linux-6.1.0-52-amd64-x86_64-with-glibc2.36",
+      "hostname": "archimedes",
+      "machine": "x86_64",
+      "python_version": "3.11.2",
+      "pydantic_version": "2.13.4",
+      "dependency_manifest": {
+        "path": "/mnt/projects/ofiqgui/uv.lock",
+        "sha256": "211bf93c0bb3c8518772d7ea8d2adcf33f24a5e3e35a2f51264ba58d831ddcb9",
+        "size_bytes": 12957,
+        "mtime_ns": 1786679565941807167
+      },
+      "variables": [
+        {
+          "key": "LD_LIBRARY_PATH",
+          "value": "/mnt/projects/02_perception_biometrics/OFIQ-Project/extern/onnxruntime-linux-x64-1.18.1/lib"
+        }
+      ]
+    },
+    "hardware": {
+      "platform": "linux",
+      "architecture": "x86_64",
+      "logical_cpu_count": 32,
+      "device": {
+        "state": "NOT_RECORDED",
+        "value": null,
+        "reason": "OFIQSampleApp output does not identify an execution device."
+      }
+    },
+    "start_time": "2026-08-13T23:06:42.314971-05:00",
+    "end_time": "2026-08-13T23:06:45.891724-05:00",
+    "runtime_seconds": 3.576730562002922,
+    "initialization_ms": 2748,
+    "assessment_ms": 621,
+    "configuration": {
+      "text": "{\"approved_scope\":\"REPRODUCE_OFIQ_CONFORMANCE_TESTS\",\"command\":[\"/mnt/projects/02_perception_biometrics/OFIQ-Project/build/build_linux/OFIQSampleApp\",\"-c\",\"/mnt/projects/02_perception_biometrics/OFIQ-Project/data/ofiq_config.jaxn\",\"-i\",\"/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/r-01-frontal.png\"],\"environment\":{\"LD_LIBRARY_PATH\":\"/mnt/projects/02_perception_biometrics/OFIQ-Project/extern/onnxruntime-linux-x64-1.18.1/lib\"},\"input_resource\":{\"resource_id\":\"ofiq-r-01-conformance-input\",\"state\":\"VERIFIED_LIMITED_USE\",\"version\":\"sha256:3c3655e6ac9f16bc6909b6f71d7c5ec385008aa6d2352167bdb77acd61d8c947\"},\"runtime_resource\":{\"blocked_reasons\":[\"The tagged CMake file names the ISO edition-1 bundle while the tracked model README names edition 2.\",\"The local bytes do not prove the downloaded archive identity or retrieval date.\",\"Individual model payloads generally lack a verified named model version.\",\"QualSight redistribution and broader research-use approval have not been recorded.\"],\"resource_id\":\"ofiq-v1-1-0-build-runtime\",\"state\":\"BLOCKED\",\"version\":\"1.1.0\"}}",
+      "sha256": "30f99679480ac11d996897c1edab077a284fa421273ff13f3a3d2c3c66cce58d"
+    },
+    "metrics": [
+      {
+        "metric_id": "UnifiedQualityScore",
+        "value": 26.390884,
+        "unit": "native"
+      },
+      {
+        "metric_id": "BackgroundUniformity",
+        "value": 48.132838,
+        "unit": "native"
+      },
+      {
+        "metric_id": "IlluminationUniformity",
+        "value": 0.196759,
+        "unit": "native"
+      },
+      {
+        "metric_id": "LuminanceMean",
+        "value": 0.190488,
+        "unit": "native"
+      },
+      {
+        "metric_id": "LuminanceVariance",
+        "value": 0.009668,
+        "unit": "native"
+      },
+      {
+        "metric_id": "UnderExposurePrevention",
+        "value": 0.105363,
+        "unit": "native"
+      },
+      {
+        "metric_id": "OverExposurePrevention",
+        "value": 0,
+        "unit": "native"
+      },
+      {
+        "metric_id": "DynamicRange",
+        "value": 6.433408,
+        "unit": "native"
+      },
+      {
+        "metric_id": "Sharpness",
+        "value": 49,
+        "unit": "native"
+      },
+      {
+        "metric_id": "CompressionArtifacts",
+        "value": 0.961691,
+        "unit": "native"
+      },
+      {
+        "metric_id": "NaturalColour",
+        "value": 0,
+        "unit": "native"
+      },
+      {
+        "metric_id": "SingleFacePresent",
+        "value": 0,
+        "unit": "native"
+      },
+      {
+        "metric_id": "EyesOpen",
+        "value": 0.078848,
+        "unit": "native"
+      },
+      {
+        "metric_id": "MouthClosed",
+        "value": 0.006977,
+        "unit": "native"
+      },
+      {
+        "metric_id": "EyesVisible",
+        "value": 0,
+        "unit": "native"
+      },
+      {
+        "metric_id": "MouthOcclusionPrevention",
+        "value": 0,
+        "unit": "native"
+      },
+      {
+        "metric_id": "FaceOcclusionPrevention",
+        "value": 0.087116,
+        "unit": "native"
+      },
+      {
+        "metric_id": "InterEyeDistance",
+        "value": 537.077622,
+        "unit": "native"
+      },
+      {
+        "metric_id": "HeadSize",
+        "value": 0.224826,
+        "unit": "native"
+      },
+      {
+        "metric_id": "LeftwardCropOfTheFaceImage",
+        "value": 3.093062,
+        "unit": "native"
+      },
+      {
+        "metric_id": "RightwardCropOfTheFaceImage",
+        "value": 3.53812,
+        "unit": "native"
+      },
+      {
+        "metric_id": "MarginAboveOfTheFaceImage",
+        "value": 1.818983,
+        "unit": "native"
+      },
+      {
+        "metric_id": "MarginBelowOfTheFaceImage",
+        "value": 2.631345,
+        "unit": "native"
+      },
+      {
+        "metric_id": "HeadPoseYaw",
+        "value": -0.920045,
+        "unit": "native"
+      },
+      {
+        "metric_id": "HeadPosePitch",
+        "value": -0.251555,
+        "unit": "native"
+      },
+      {
+        "metric_id": "HeadPoseRoll",
+        "value": -1.3356,
+        "unit": "native"
+      },
+      {
+        "metric_id": "ExpressionNeutrality",
+        "value": 6674.853516,
+        "unit": "native"
+      },
+      {
+        "metric_id": "NoHeadCoverings",
+        "value": 0,
+        "unit": "native"
+      },
+      {
+        "metric_id": "UnifiedQualityScore.scalar",
+        "value": 79,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "BackgroundUniformity.scalar",
+        "value": 77,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "IlluminationUniformity.scalar",
+        "value": 61,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "LuminanceMean.scalar",
+        "value": 45,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "LuminanceVariance.scalar",
+        "value": 91,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "UnderExposurePrevention.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "OverExposurePrevention.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "DynamicRange.scalar",
+        "value": 80,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "Sharpness.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "CompressionArtifacts.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "NaturalColour.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "SingleFacePresent.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "EyesOpen.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "MouthClosed.scalar",
+        "value": 96,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "EyesVisible.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "MouthOcclusionPrevention.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "FaceOcclusionPrevention.scalar",
+        "value": 91,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "InterEyeDistance.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "HeadSize.scalar",
+        "value": 2,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "LeftwardCropOfTheFaceImage.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "RightwardCropOfTheFaceImage.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "MarginAboveOfTheFaceImage.scalar",
+        "value": 99,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "MarginBelowOfTheFaceImage.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "HeadPoseYaw.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "HeadPosePitch.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "HeadPoseRoll.scalar",
+        "value": 100,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "ExpressionNeutrality.scalar",
+        "value": 91,
+        "unit": "scalar"
+      },
+      {
+        "metric_id": "NoHeadCoverings.scalar",
+        "value": 100,
+        "unit": "scalar"
+      }
+    ],
+    "artifacts": [
+      {
+        "artifact_id": "artifact:sha256:cebd4d2c3d9569681712bc5759f3f393be6042b45a7964d27e9a60b97c03e9d0",
+        "run_id": "run:sha256:c85fbba6f1d06c8e05c6deca48d394a21b49ffd35edd0b57f6e45b625e84e9de",
+        "kind": "SOURCE_INPUT",
+        "storage_backend": "FILESYSTEM",
+        "uri": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/r-01-frontal.png",
+        "sha256": "3c3655e6ac9f16bc6909b6f71d7c5ec385008aa6d2352167bdb77acd61d8c947",
+        "size_bytes": 13436071,
+        "media_type": "image/png",
+        "classification": "RESTRICTED",
+        "created_at": "2026-08-13T23:06:45.891724-05:00"
+      }
+    ],
+    "logs": [
+      {
+        "stream": "stdout",
+        "sha256": "0e5acdbe3e012d0afa87838cb5e97fb9bb55acfabc219db5a0f5f1724832fa2f",
+        "text": "[INFO] Initialization took: 2748ms\nOFIQ library version: 1.1.0\nFilename;UnifiedQualityScore;BackgroundUniformity;IlluminationUniformity;LuminanceMean;LuminanceVariance;UnderExposurePrevention;OverExposurePrevention;DynamicRange;Sharpness;CompressionArtifacts;NaturalColour;SingleFacePresent;EyesOpen;MouthClosed;EyesVisible;MouthOcclusionPrevention;FaceOcclusionPrevention;InterEyeDistance;HeadSize;LeftwardCropOfTheFaceImage;RightwardCropOfTheFaceImage;MarginAboveOfTheFaceImage;MarginBelowOfTheFaceImage;HeadPoseYaw;HeadPosePitch;HeadPoseRoll;ExpressionNeutrality;NoHeadCoverings;UnifiedQualityScore.scalar;BackgroundUniformity.scalar;IlluminationUniformity.scalar;LuminanceMean.scalar;LuminanceVariance.scalar;UnderExposurePrevention.scalar;OverExposurePrevention.scalar;DynamicRange.scalar;Sharpness.scalar;CompressionArtifacts.scalar;NaturalColour.scalar;SingleFacePresent.scalar;EyesOpen.scalar;MouthClosed.scalar;EyesVisible.scalar;MouthOcclusionPrevention.scalar;FaceOcclusionPrevention.scalar;InterEyeDistance.scalar;HeadSize.scalar;LeftwardCropOfTheFaceImage.scalar;RightwardCropOfTheFaceImage.scalar;MarginAboveOfTheFaceImage.scalar;MarginBelowOfTheFaceImage.scalar;HeadPoseYaw.scalar;HeadPosePitch.scalar;HeadPoseRoll.scalar;ExpressionNeutrality.scalar;NoHeadCoverings.scalar;assessment_time_in_ms;\n/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/r-01-frontal.png;26.390884;48.132838;0.196759;0.190488;0.009668;0.105363;0;6.433408;49;0.961691;0;0;0.078848;0.006977;0;0;0.087116;537.077622;0.224826;3.093062;3.538120;1.818983;2.631345;-0.920045;-0.251555;-1.335600;6674.853516;0;79;77;61;45;91;100;100;80;100;100;100;100;100;96;100;100;91;100;2;100;100;99;100;100;100;100;91;100;621\n"
+      },
+      {
+        "stream": "stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "text": ""
+      }
+    ],
+    "warnings": [],
+    "provenance_limits": [
+      "The tagged CMake file names the ISO edition-1 bundle while the tracked model README names edition 2.",
+      "The local bytes do not prove the downloaded archive identity or retrieval date.",
+      "Individual model payloads generally lack a verified named model version.",
+      "QualSight redistribution and broader research-use approval have not been recorded.",
+      "Use is limited to reproducing the confirmed OFIQ conformance behavior until the model-bundle provenance review is complete.",
+      "Do not describe the local model payloads as ISO edition 1 or edition 2 without additional evidence.",
+      "Do not copy the restricted conformance images into QualSight.",
+      "Use only to reproduce OFIQ conformance tests.",
+      "Do not modify or republish without explicit consent from the depicted subjects.",
+      "Read the image in place and do not copy it into QualSight fixtures or outputs."
+    ],
+    "exit_code": 0,
+    "status": "COMPLETED",
+    "scientific_support": "NOT_ASSESSED"
+  },
+  "audit_event": {
+    "audit_event_id": "audit-event:sha256:a0ea9c834b502b3004f5bcbc792cbd2abd2d95c615fafee7e00edd953f42fdc9",
+    "project_id": "project:sha256:450da8e00acc076c82fcc0af82f2d133b3fc07a61c3fe723ffaaa58d611d5231",
+    "actor_id": "local-user:aaron",
+    "event_type": "RUN_COMPLETED",
+    "subject_type": "Run",
+    "subject_id": "run:sha256:c85fbba6f1d06c8e05c6deca48d394a21b49ffd35edd0b57f6e45b625e84e9de",
+    "occurred_at": "2026-08-13T23:06:45.891724-05:00",
+    "details": {
+      "text": "{\"exit_code\":0,\"status\":\"COMPLETED\",\"stderr_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"stdout_sha256\":\"0e5acdbe3e012d0afa87838cb5e97fb9bb55acfabc219db5a0f5f1724832fa2f\"}",
+      "sha256": "50503bbddf2ce1a2e9573db121425b016f66043e1d50939c3dab1c4de0e0a3d6"
+    },
+    "previous_evidence_sha256": null,
+    "current_evidence_sha256": "53c8013f62eb959fd8dde53326b6825e472c29a1073e91574ceb65904c40c7c6",
+    "local_only": true
+  }
+}

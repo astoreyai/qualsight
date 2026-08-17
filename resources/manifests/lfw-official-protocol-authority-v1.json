@@ -1,0 +1,201 @@
+{
+  "schema_version": "1.0.0",
+  "evidence_id": "lfw-official-protocol-authority-v1",
+  "recorded_at": "2026-08-17T00:16:37-05:00",
+  "scope": "OFFICIAL_PROTOCOL_AUTHORITY_ONLY",
+  "owner_authorization": {
+    "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-lfw-protocol-evidence-review-2026-08-17.json",
+    "sha256": "415497a06bffa70c8c8a209fa7064836266eebb760e76ec24ca3d62fadd3f49d",
+    "size_bytes": 1684,
+    "decision": "APPROVED_EVIDENCE_ACQUISITION",
+    "scope": "ACQUIRE_LFW_OFFICIAL_PROTOCOL_DOCUMENTS_FOR_EVIDENCE_REVIEW"
+  },
+  "original_protocol_authorization": {
+    "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-lfw-original-protocol-evidence-review-2026-08-17.json",
+    "sha256": "37dcb50842aaf1e7f7d6586bc6cf941e145ae0bffcef46fcfcf74948c28c8271",
+    "size_bytes": 1847,
+    "decision": "APPROVED_EVIDENCE_ACQUISITION",
+    "scope": "ACQUIRE_LFW_ORIGINAL_2007_PROTOCOL_DOCUMENT_FOR_EVIDENCE_REVIEW"
+  },
+  "transport_provenance_status": "PROJECT_RECORDED_URLS_AND_RESPONSE_HEADERS_NO_VERBOSE_REQUEST_TRACES",
+  "acquisition_tool": {
+    "path": "/usr/bin/curl",
+    "sha256": "27125f0331490b7fbf4da11f2bd913ce1b94e071367b2fa8e535ce8c5526e29c",
+    "size_bytes": 280800,
+    "version": "curl 7.88.1"
+  },
+  "documents": [
+    {
+      "document_id": "HUANG_ET_AL_LFW_2007_REPORT",
+      "title": "Labeled Faces in the Wild: A Database for Studying Face Recognition in Unconstrained Environments",
+      "authority": "University of Massachusetts Amherst authors",
+      "url": "https://people.cs.umass.edu/~elm/papers/lfw.pdf",
+      "retrieved_at_start": "2026-08-17T00:16:07-05:00",
+      "retrieved_at_end": "2026-08-17T00:16:07-05:00",
+      "http": {
+        "status": 200,
+        "content_type": "application/pdf",
+        "content_length": 223526,
+        "etag": "\"36926-43fa2fbe23380\"",
+        "last_modified": "Sat, 24 Nov 2007 01:52:30 GMT"
+      },
+      "response_headers": {
+        "path": "/mnt/projects/ofiqgui/resources/upstream/lfw/lfw-2007.headers",
+        "sha256": "369d11f82eaab4cdaeb50abbb52d2c160bb70c78b8fd7e240924d27af0678d6d",
+        "size_bytes": 324
+      },
+      "pdf": {
+        "path": "/mnt/projects/ofiqgui/resources/upstream/lfw/lfw-2007.pdf",
+        "sha256": "87d9b19c74de1fc04c4748faec470956912ecfee39ed73213a87f5b87e516329",
+        "size_bytes": 223526
+      },
+      "required_text_fragments": [
+        "view 2: performance reporting",
+        "the second view of the data consists of ten subsets",
+        "performance of a classifier on 10 separate experiments",
+        "leave-one-out cross validation scheme",
+        "in view 2 of the database, the file pairs.txt"
+      ]
+    },
+    {
+      "document_id": "HUANG_ET_AL_ECCV_2008_LFW",
+      "title": "Labeled Faces in the Wild: A Database for Studying Face Recognition in Unconstrained Environments",
+      "authority": "University of Massachusetts Amherst authors",
+      "url": "https://people.cs.umass.edu/~elm/papers/Huang_eccv2008-lfw.pdf",
+      "retrieved_at_start": "2026-08-17T00:06:06-05:00",
+      "retrieved_at_end": "2026-08-17T00:06:06-05:00",
+      "http": {
+        "status": 200,
+        "content_type": "application/pdf",
+        "content_length": 361179,
+        "etag": "\"582db-456cda4dbdf40\"",
+        "last_modified": "Sat, 13 Sep 2008 21:25:41 GMT"
+      },
+      "response_headers": {
+        "path": "/mnt/projects/ofiqgui/resources/upstream/lfw/Huang_eccv2008-lfw.headers",
+        "sha256": "3bed0d2ba44127d922abc2c252b54c6d98f814eb23a161e8eede8be4cc5f1538",
+        "size_bytes": 324
+      },
+      "pdf": {
+        "path": "/mnt/projects/ofiqgui/resources/upstream/lfw/Huang_eccv2008-lfw.pdf",
+        "sha256": "004a66b3930dc6aa15d54bafbc7b734b1333669a8bcc08ea5ac93d89c251ae86",
+        "size_bytes": 361179
+      },
+      "required_text_fragments": [
+        "view 2: performance reporting",
+        "view 2 consists of 6000 pairs, divided into ten subsets",
+        "performance is computed using 10-fold cross validation using those subsets"
+      ]
+    },
+    {
+      "document_id": "HUANG_LEARNED_MILLER_UM_CS_2014_003",
+      "title": "Labeled Faces in the Wild: Updates and New Reporting Procedures",
+      "authority": "University of Massachusetts Amherst technical report",
+      "url": "https://web.cs.umass.edu/publication/docs/2014/UM-CS-2014-003.pdf",
+      "retrieved_at_start": "2026-08-17T00:06:06-05:00",
+      "retrieved_at_end": "2026-08-17T00:06:07-05:00",
+      "http": {
+        "status": 200,
+        "content_type": "application/pdf",
+        "content_length": 135174,
+        "etag": "\"21006-4f8c56107f5c0\"",
+        "last_modified": "Wed, 07 May 2014 01:35:27 GMT"
+      },
+      "response_headers": {
+        "path": "/mnt/projects/ofiqgui/resources/upstream/lfw/UM-CS-2014-003.headers",
+        "sha256": "eb45195cbeb022b20f684d8001268da81e59d45a4e3a0c0e5fb6e3f1f4bab4b1",
+        "size_bytes": 324
+      },
+      "pdf": {
+        "path": "/mnt/projects/ofiqgui/resources/upstream/lfw/UM-CS-2014-003.pdf",
+        "sha256": "cceb20f7902b7c8094df3e14f711f7e7454e0e52cf1a4b6e1abbf70dc000b944",
+        "size_bytes": 135174
+      },
+      "required_text_fragments": [
+        "unrestricted with labeled outside data",
+        "this is the most permissive protocol",
+        "as long as they do not contain individuals in an lfw test",
+        "using an alignment algorithm that has been trained",
+        "outside data also constitutes the (legitimate) use of"
+      ]
+    }
+  ],
+  "text_extractor": {
+    "path": "/usr/bin/pdftotext",
+    "sha256": "c2436a4d970c0801f269e5505be674bdc02f8a8c48195b09b62500a25a6eb0e6",
+    "size_bytes": 51648,
+    "version": "pdftotext version 22.12.0",
+    "arguments": [
+      "-layout",
+      "{pdf}",
+      "-"
+    ],
+    "timeout_seconds": 30
+  },
+  "protocol_finding": {
+    "view": "VIEW_2_PERFORMANCE_REPORTING",
+    "pair_count": 6000,
+    "fold_count": 10,
+    "selected_category": "UNRESTRICTED_WITH_LABELED_OUTSIDE_DATA",
+    "classification_basis": "CONSERVATIVE_MOST_PERMISSIVE_CATEGORY_FOR_PRETRAINED_FACE_MATCHERS_WITH_NAMED_EXTERNAL_TRAINING_DATA",
+    "status": "OWNER_AUTHORIZED_LOCAL_RESEARCH_USE_MATCHER_TRAINING_EXCLUSION_RECORDED_AS_PUBLISHED_CLAIM",
+    "required_remaining_evidence": [
+      "EACH_MATCHER_TRAINING_SET_EXCLUSION_OF_LFW_TEST_IDENTITIES_IS_A_PUBLISHED_CLAIM_NOT_QUALSIGHT_VERIFIED",
+      "FROZEN_NO_DOWNLOAD_NO_RANDOM_WEIGHT_RUNTIME",
+      "SIX_IMMUTABLE_CONDITION_SPECIFIC_RUNS"
+    ]
+  },
+  "resource_boundary": {
+    "registry": {
+      "path": "/mnt/projects/ofiqgui/resources/resource-registry.json",
+      "sha256": "a07904c77fbd3ec8393f147970ca1774651def966f97f5a123fab22b480f61ce",
+      "size_bytes": 140200
+    },
+    "pair_manifest": {
+      "path": "/mnt/projects/ofiqgui/resources/manifests/lfw-local-pairs-v1.jsonl",
+      "sha256": "7edd2f474307ef5bfbd6118fe7d6f2925fcf85aa1a4a5a2e029450a3d7c2c3e6",
+      "size_bytes": 2800299
+    },
+    "dataset_resource_id": "lfw-funneled-local-candidate",
+    "matcher_training_evidence": [
+      {
+        "resource_id": "adaface-ir101-local-candidate",
+        "documentation_path": "/mnt/projects/ofiqgui/resources/upstream/adaface/README.d8114b3c.md",
+        "required_text_fragment": "| R100 | WebFace4M"
+      },
+      {
+        "resource_id": "elasticface-arc-r100-local-candidate",
+        "documentation_path": "/mnt/projects/ofiqgui/resources/upstream/elasticface/README.5496ec06.md",
+        "required_text_fragment": "we employ MS1MV2 as the training dataset"
+      },
+      {
+        "resource_id": "transface-s-glint360k-local-candidate",
+        "documentation_path": "/mnt/projects/ofiqgui/resources/upstream/transface/README.fb6cd56d.md",
+        "required_text_fragment": "| Glint360K | [TransFace-S]"
+      }
+    ],
+    "required_state": "APPROVED_LOCAL_RESEARCH_USE",
+    "required_approved_scopes": [
+      "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
+      "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+    ],
+    "required_third_party_rights_status": "NO_EXPLICIT_LICENSE_PUBLIC_RESEARCH_DATASET"
+  },
+  "claims": {
+    "official_protocol_documents_acquired": true,
+    "pdf_text_reproduced": true,
+    "protocol_category_selected": true,
+    "complete_official_protocol_conformance": false,
+    "dataset_rights_closed": false,
+    "dataset_acquisition_provenance_closed": false,
+    "image_or_model_execution_performed": false
+  },
+  "limitations": [
+    "The three official UMass documents define LFW evaluation and reporting protocols; they are not a license or terms grant for the underlying image bytes.",
+    "Raw verbose request traces were not preserved; the retrieval URLs are project-recorded and the response headers preserve only the server responses.",
+    "The most permissive labeled-outside-data category is selected conservatively because the three planned pretrained face matchers name external face-training datasets.",
+    "Complete official-protocol conformance is not claimed because exclusion of every LFW test identity from every matcher training set is not established.",
+    "The local archive and pair bytes retain their existing missing-acquisition and missing-rights limitations.",
+    "No LFW image was decoded or displayed and no detector, model, matcher, OFIQ runtime, or scientific Run was executed."
+  ]
+}

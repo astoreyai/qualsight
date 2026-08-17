@@ -1,0 +1,14 @@
+[project]
+name = "qualsight-workspace"
+version = "0.1.0"
+requires-python = "==3.11.*"
+dependencies = []
+
+[tool.uv]
+cache-dir = ".cache/uv"
+package = false
+python-downloads = "never"
+required-version = "==0.9.26"
+
+[tool.uv.workspace]
+members = ["backend"]

@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0.0",
+  "authorization_id": "qualsight-owner-onnxruntime-static-review-2026-08-14",
+  "authority": "QualSight project owner (interactive user)",
+  "recorded_at": "2026-08-14T22:17:38-05:00",
+  "resource_id": "ofiq-v1-1-2-cmake-runtime-candidate",
+  "decision": "APPROVED_STATIC_EVIDENCE_REVIEW",
+  "scope": "STATIC_REVIEW_OFIQ_V1_1_2_ONNX_RUNTIME_EVIDENCE",
+  "decision_evidence": [
+    "The project owner answered yes when asked whether QualSight may perform the narrowly defined static ONNX Runtime review.",
+    "The question limited review to the preserved ONNX archive, headers, licenses, notices, hashes, and ELF metadata and explicitly excluded installation, loading, execution, networking, redistribution, and third-party-rights claims."
+  ],
+  "permitted_actions": [
+    "Read and hash the preserved ONNX Runtime archive and its receipt-bound quarantine bytes.",
+    "Parse the registered package text, headers, license and notice bytes, and ELF structures without loading or executing the target library."
+  ],
+  "prohibited_actions": [
+    "Do not install, load, link, execute, or invoke symbols from ONNX Runtime, OFIQ, a model, or an image pipeline.",
+    "Do not use ldd, dlopen, ctypes, a runtime loader, network retrieval, automatic downloads, or unregistered resource bytes.",
+    "Do not treat this project-owner decision as third-party license sufficiency, redistribution permission, host compatibility, or runtime validation."
+  ],
+  "redistribution_allowed": false
+}

@@ -1,0 +1,81 @@
+{
+  "schema_version": "1.0.0",
+  "authorization_id": "qualsight-owner-local-noncommercial-2026-08-14",
+  "authority": "QualSight project owner (interactive user)",
+  "recorded_at": "2026-08-14T09:51:10-05:00",
+  "decision_evidence": [
+    "The existing resource registry preserves REPRODUCE_OFIQ_CONFORMANCE_TESTS as the sole previously approved limited-use scope for the exact r-01 input.",
+    "1A: acquire the model bundle selected by the OFIQ v1.1.2 tagged CMake configuration and preserve its receipt.",
+    "2Approved: approve QualSight-owner local noncommercial research use while keeping third-party rights evidence distinct.",
+    "3B and C: activate ElasticFace-Arc R100 and TransFace-S Glint360K in addition to AdaFace IR-101.",
+    "4C: compare and display both shared-crop and matcher-native preprocessing conditions."
+  ],
+  "grants": [
+    {
+      "resource_id": "ofiq-v1-1-0-build-runtime",
+      "decision": "NOT_APPROVED",
+      "scopes": []
+    },
+    {
+      "resource_id": "ofiq-r-01-conformance-input",
+      "decision": "APPROVED_LIMITED_USE",
+      "scopes": [
+        "REPRODUCE_OFIQ_CONFORMANCE_TESTS"
+      ]
+    },
+    {
+      "resource_id": "ofiq-v1-1-2-cmake-runtime-candidate",
+      "decision": "APPROVED_EVIDENCE_ACQUISITION",
+      "scopes": [
+        "ACQUIRE_OFIQ_V1_1_2_FOR_EVIDENCE_REVIEW"
+      ]
+    },
+    {
+      "resource_id": "lfw-funneled-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1"
+      ]
+    },
+    {
+      "resource_id": "adaface-ir101-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1"
+      ]
+    },
+    {
+      "resource_id": "elasticface-arc-r100-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1"
+      ]
+    },
+    {
+      "resource_id": "transface-s-glint360k-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1"
+      ]
+    },
+    {
+      "resource_id": "insightface-scrfd-10g-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": [
+        "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1"
+      ]
+    }
+  ],
+  "permitted_actions": [
+    "Acquire and hash the official OFIQ v1.1.2 source and CMake-selected model bundle for evidence and license review in an isolated sibling directory.",
+    "After each resource passes third-party-rights, provenance, runtime-closure, and executable validation, process the registered LFW bytes locally through the three selected matchers and two preprocessing conditions.",
+    "Display authorized source images and condition-specific comparison results only on the local QualSight research workstation."
+  ],
+  "prohibited_actions": [
+    "Do not treat this owner decision as third-party license or permission evidence.",
+    "Do not execute a resource while its registry state is BLOCKED.",
+    "Do not redistribute source images, model checkpoints, raw embeddings, or restricted source artifacts.",
+    "Do not use automatic downloads, random model weights, or unregistered resource bytes at runtime."
+  ],
+  "redistribution_allowed": false
+}

@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.1.0",
+  "receipt_type": "PINNED_GIT_RAW_FILES",
+  "recorded_at": "2026-08-14T09:54:34-05:00",
+  "retrieval_method": "HTTPS GET from raw.githubusercontent.com with redirect following, TLS 1.2 minimum, and nonzero HTTP failure handling",
+  "artifacts": [
+    {
+      "project": "AdaFace",
+      "repository": "https://github.com/mk-minchul/AdaFace.git",
+      "commit": "d8114b3ca8c54cd81ef59ac34c19eda1c548ca17",
+      "source_path": "LICENSE",
+      "retrieved_path": "/mnt/projects/ofiqgui/resources/upstream/adaface/LICENSE.d8114b3c.txt",
+      "sha256": "95b6e493eb9dba27f2150304e790ae254bab18d1611f4d6e2ade28fa3a271583",
+      "size_bytes": 1067
+    },
+    {
+      "project": "AdaFace",
+      "repository": "https://github.com/mk-minchul/AdaFace.git",
+      "commit": "d8114b3ca8c54cd81ef59ac34c19eda1c548ca17",
+      "source_path": "README.md",
+      "retrieved_path": "/mnt/projects/ofiqgui/resources/upstream/adaface/README.d8114b3c.md",
+      "sha256": "4c9a6bcb3eeed1b4850002538ac9712c4b1c0e3383c3c2828984f97d618911b1",
+      "size_bytes": 14972
+    },
+    {
+      "project": "ElasticFace",
+      "repository": "https://github.com/fdbtrs/ElasticFace.git",
+      "commit": "5496ec0643bfdcd5e6b53b885aa4e919e26ce442",
+      "source_path": "README.md",
+      "retrieved_path": "/mnt/projects/ofiqgui/resources/upstream/elasticface/README.5496ec06.md",
+      "sha256": "fd62dd980cf03f47da32382f2a3604b814b274e6a5ab3f2f6b615da9e3751405",
+      "size_bytes": 3440
+    },
+    {
+      "project": "InsightFace",
+      "repository": "https://github.com/deepinsight/insightface.git",
+      "commit": "7fadd420c2351d0ffa8cac403421c1a3ed733365",
+      "source_path": "python-package/README.md",
+      "retrieved_path": "/mnt/projects/ofiqgui/resources/upstream/insightface/python-package-README.7fadd420.md",
+      "sha256": "4d5d26d2f990845b81331dd7589ec291407847d72f13d012e19c712e620e7972",
+      "size_bytes": 10734
+    },
+    {
+      "project": "TransFace",
+      "repository": "https://github.com/DanJun6737/TransFace.git",
+      "commit": "fb6cd56d04c7ea525e328219f5d5066adac03ada",
+      "source_path": "README.md",
+      "retrieved_path": "/mnt/projects/ofiqgui/resources/upstream/transface/README.fb6cd56d.md",
+      "sha256": "3fbda289775281dd19d7e03aec6320f0f8f6a24776971c7db85e8a170e23b83a",
+      "size_bytes": 6740
+    }
+  ]
+}

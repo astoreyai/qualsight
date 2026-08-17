@@ -1,0 +1,16 @@
+.cache/
+.coverage
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+__pycache__/
+*.egg-info/
+*.py[cod]
+coverage/
+frontend/dist/
+node_modules/
+
+
+var/
+atg/evidence/screenshots/

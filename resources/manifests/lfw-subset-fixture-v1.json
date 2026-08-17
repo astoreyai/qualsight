@@ -1,0 +1,190 @@
+{
+  "fixture_id": "lfw-view2-fold1-first5-mated-first5-nonmated-v1",
+  "selection_rule": "From the registered LFW pair manifest take View 2 fold 1 pairs in source order: the first five MATED and the first five NON_MATED pairs; the fixture is the set of images those ten pairs reference.",
+  "provenance": {
+    "image_manifest": {
+      "path": "/mnt/projects/ofiqgui/resources/manifests/lfw-funneled-images-v1.jsonl",
+      "sha256": "9aeb2356b03ebc1a20b276a16251b1a9e33d39f707ddec3cdeba1977c2ddc178",
+      "size_bytes": 1906875,
+      "mtime_ns": 1786719331908677818
+    },
+    "pair_manifest": {
+      "path": "/mnt/projects/ofiqgui/resources/manifests/lfw-local-pairs-v1.jsonl",
+      "sha256": "7edd2f474307ef5bfbd6118fe7d6f2925fcf85aa1a4a5a2e029450a3d7c2c3e6",
+      "size_bytes": 2800299,
+      "mtime_ns": 1786740990752553445
+    },
+    "resource_id": "lfw-funneled-local-candidate"
+  },
+  "allowed_use": "Owner-approved local noncommercial research (QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1); never redistributed.",
+  "pairs": [
+    {
+      "pair_id": "lfw-local-fold-01-mated-0001",
+      "label": "MATED",
+      "fold": 1,
+      "left_path": "Abel_Pacheco/Abel_Pacheco_0001.jpg",
+      "right_path": "Abel_Pacheco/Abel_Pacheco_0004.jpg"
+    },
+    {
+      "pair_id": "lfw-local-fold-01-mated-0002",
+      "label": "MATED",
+      "fold": 1,
+      "left_path": "Akhmed_Zakayev/Akhmed_Zakayev_0001.jpg",
+      "right_path": "Akhmed_Zakayev/Akhmed_Zakayev_0003.jpg"
+    },
+    {
+      "pair_id": "lfw-local-fold-01-mated-0003",
+      "label": "MATED",
+      "fold": 1,
+      "left_path": "Akhmed_Zakayev/Akhmed_Zakayev_0002.jpg",
+      "right_path": "Akhmed_Zakayev/Akhmed_Zakayev_0003.jpg"
+    },
+    {
+      "pair_id": "lfw-local-fold-01-mated-0004",
+      "label": "MATED",
+      "fold": 1,
+      "left_path": "Amber_Tamblyn/Amber_Tamblyn_0001.jpg",
+      "right_path": "Amber_Tamblyn/Amber_Tamblyn_0002.jpg"
+    },
+    {
+      "pair_id": "lfw-local-fold-01-mated-0005",
+      "label": "MATED",
+      "fold": 1,
+      "left_path": "Anders_Fogh_Rasmussen/Anders_Fogh_Rasmussen_0001.jpg",
+      "right_path": "Anders_Fogh_Rasmussen/Anders_Fogh_Rasmussen_0003.jpg"
+    },
+    {
+      "pair_id": "lfw-local-fold-01-non-mated-0001",
+      "label": "NON_MATED",
+      "fold": 1,
+      "left_path": "Abdel_Madi_Shabneh/Abdel_Madi_Shabneh_0001.jpg",
+      "right_path": "Dean_Barker/Dean_Barker_0001.jpg"
+    },
+    {
+      "pair_id": "lfw-local-fold-01-non-mated-0002",
+      "label": "NON_MATED",
+      "fold": 1,
+      "left_path": "Abdel_Madi_Shabneh/Abdel_Madi_Shabneh_0001.jpg",
+      "right_path": "Giancarlo_Fisichella/Giancarlo_Fisichella_0001.jpg"
+    },
+    {
+      "pair_id": "lfw-local-fold-01-non-mated-0003",
+      "label": "NON_MATED",
+      "fold": 1,
+      "left_path": "Abdel_Madi_Shabneh/Abdel_Madi_Shabneh_0001.jpg",
+      "right_path": "Mikhail_Gorbachev/Mikhail_Gorbachev_0001.jpg"
+    },
+    {
+      "pair_id": "lfw-local-fold-01-non-mated-0004",
+      "label": "NON_MATED",
+      "fold": 1,
+      "left_path": "Abdul_Rahman/Abdul_Rahman_0001.jpg",
+      "right_path": "Portia_de_Rossi/Portia_de_Rossi_0001.jpg"
+    },
+    {
+      "pair_id": "lfw-local-fold-01-non-mated-0005",
+      "label": "NON_MATED",
+      "fold": 1,
+      "left_path": "Abel_Pacheco/Abel_Pacheco_0001.jpg",
+      "right_path": "Jong_Thae_Hwa/Jong_Thae_Hwa_0002.jpg"
+    }
+  ],
+  "images": [
+    {
+      "path": "Abdel_Madi_Shabneh/Abdel_Madi_Shabneh_0001.jpg",
+      "sha256": "88c6cb6b3427d48b204a826290dff866714d8f89660898aa5a87eaa4a175ef88",
+      "size_bytes": 19872,
+      "subject_id": "Abdel_Madi_Shabneh"
+    },
+    {
+      "path": "Abdul_Rahman/Abdul_Rahman_0001.jpg",
+      "sha256": "1d0658bfa4abc2b594ded7143fd9154091f78bd8cc5b30740f215d16712c2ba6",
+      "size_bytes": 15733,
+      "subject_id": "Abdul_Rahman"
+    },
+    {
+      "path": "Abel_Pacheco/Abel_Pacheco_0001.jpg",
+      "sha256": "8b6fff626f3d778d34027e19fc88c521a9e1307cf735b22a1406c17e55e8a967",
+      "size_bytes": 17718,
+      "subject_id": "Abel_Pacheco"
+    },
+    {
+      "path": "Abel_Pacheco/Abel_Pacheco_0004.jpg",
+      "sha256": "8050daa859e7e05aedd5c7ec3851e5d5bddcb2b9797d23958664ec2958a230ae",
+      "size_bytes": 21260,
+      "subject_id": "Abel_Pacheco"
+    },
+    {
+      "path": "Akhmed_Zakayev/Akhmed_Zakayev_0001.jpg",
+      "sha256": "40ce429381dd20e6243e484179cd599ac53784bfd839e29aca6356240c148c23",
+      "size_bytes": 19138,
+      "subject_id": "Akhmed_Zakayev"
+    },
+    {
+      "path": "Akhmed_Zakayev/Akhmed_Zakayev_0002.jpg",
+      "sha256": "1ce197f00f439bd127709c565c278324946814d478baa10ea4ef0eff65820690",
+      "size_bytes": 18115,
+      "subject_id": "Akhmed_Zakayev"
+    },
+    {
+      "path": "Akhmed_Zakayev/Akhmed_Zakayev_0003.jpg",
+      "sha256": "8da117470e7e349b9f84793d3b801e57e56ef82ea50b5b62bfa485e98cb0a908",
+      "size_bytes": 18567,
+      "subject_id": "Akhmed_Zakayev"
+    },
+    {
+      "path": "Amber_Tamblyn/Amber_Tamblyn_0001.jpg",
+      "sha256": "5fbd426380a8bb019b2a815ecd00e14880deb52cddea1444152fca4ec9d133dd",
+      "size_bytes": 18753,
+      "subject_id": "Amber_Tamblyn"
+    },
+    {
+      "path": "Amber_Tamblyn/Amber_Tamblyn_0002.jpg",
+      "sha256": "2b6734341ea9de2605673b85555726dd948b2bef9d6e3ab21f4dde0bf3e89a2f",
+      "size_bytes": 19371,
+      "subject_id": "Amber_Tamblyn"
+    },
+    {
+      "path": "Anders_Fogh_Rasmussen/Anders_Fogh_Rasmussen_0001.jpg",
+      "sha256": "13555a1ecd8116e168980ee00fa7df0bca5a7dbd5f67e8e037d322f679ce4311",
+      "size_bytes": 13831,
+      "subject_id": "Anders_Fogh_Rasmussen"
+    },
+    {
+      "path": "Anders_Fogh_Rasmussen/Anders_Fogh_Rasmussen_0003.jpg",
+      "sha256": "62623ad27c071acf6f2fd31aca97ada2ebd74caef1bd4e223ec6994fcff7f311",
+      "size_bytes": 18003,
+      "subject_id": "Anders_Fogh_Rasmussen"
+    },
+    {
+      "path": "Dean_Barker/Dean_Barker_0001.jpg",
+      "sha256": "8f92327e93346682df3524d05989990cfb60f1e12a97add6056946a48eb80ebd",
+      "size_bytes": 17058,
+      "subject_id": "Dean_Barker"
+    },
+    {
+      "path": "Giancarlo_Fisichella/Giancarlo_Fisichella_0001.jpg",
+      "sha256": "53cfa0be2dcf3e8dd4168aff5ebc5a8960a683bf81348e2a9f53ae20653f30cc",
+      "size_bytes": 19796,
+      "subject_id": "Giancarlo_Fisichella"
+    },
+    {
+      "path": "Jong_Thae_Hwa/Jong_Thae_Hwa_0002.jpg",
+      "sha256": "940b12daf956bdaa71a61b284f1325676feb7deb7e681d60139f7aa6402a29e6",
+      "size_bytes": 14984,
+      "subject_id": "Jong_Thae_Hwa"
+    },
+    {
+      "path": "Mikhail_Gorbachev/Mikhail_Gorbachev_0001.jpg",
+      "sha256": "dfc4f58f8830f6691728809f13e4fb5edbf1ae91e814a200c09775f9031ddf8c",
+      "size_bytes": 19130,
+      "subject_id": "Mikhail_Gorbachev"
+    },
+    {
+      "path": "Portia_de_Rossi/Portia_de_Rossi_0001.jpg",
+      "sha256": "d01cb63c6f45dbb5d4f54abf62f2f5e787d7aeed33da538e696a91923026d835",
+      "size_bytes": 20353,
+      "subject_id": "Portia_de_Rossi"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "authorization_id": "qualsight-insightface-buffalo-l-evidence-acquisition-2026-08-17",
+  "recorded_at": "2026-08-17T00:34:05-05:00",
+  "authority": "QualSight project owner (interactive user)",
+  "decision": "APPROVED_EVIDENCE_ACQUISITION",
+  "resource_id": "insightface-scrfd-10g-local-candidate",
+  "scope": "ACQUIRE_INSIGHTFACE_V0_7_BUFFALO_L_FOR_STATIC_PROVENANCE_REVIEW",
+  "decision_evidence": "The project owner previously approved the exact SCRFD resource for the named local noncommercial research scope and instructed the agent to continue the recommended beta-critical route until complete. This separate reversible authorization permits one receipt-preserving acquisition of the official InsightFace v0.7 buffalo_l release asset solely to establish byte provenance for the existing local archive and detector.",
+  "permitted_actions": [
+    "Retrieve the official GitHub release metadata for deepinsight/insightface tag v0.7 and preserve the exact response bytes.",
+    "Transfer https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip once into a new temporary directory while preserving response headers and a verbose transfer trace.",
+    "Compute size, SHA-256, and MD5 identities and compare the fresh transfer byte-for-byte with /home/aaron/.insightface/models/buffalo_l.zip.",
+    "Inspect the ZIP structure and member hashes without extracting, loading, or executing any model.",
+    "Remove only the verified temporary duplicate after the evidence records are durably published; preserve the existing local archive and extracted detector unchanged."
+  ],
+  "prohibited_actions": [
+    "Do not decode or display an LFW image or any other face image.",
+    "Do not load or execute SCRFD, a matcher, an ONNX runtime, or OFIQ.",
+    "Do not infer a redistribution license, commercial permission, or broader model rights from release availability or a noncommercial-research notice.",
+    "Do not promote the SCRFD resource or grant an effective approved scope from acquisition evidence alone."
+  ],
+  "redistribution_allowed": false
+}

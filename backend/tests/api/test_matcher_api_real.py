@@ -1,0 +1,151 @@
+"""QS-C22/C23/C24 API on real data: matrix over the fixture pairs, metrics, comparison and error drilldown."""
+
+from __future__ import annotations
+
+from pathlib import Path
+import shutil
+import tempfile
+import time
+import unittest
+
+from fastapi.testclient import TestClient
+
+from qualsight.api import Settings, create_app
+from qualsight.execution.registry_binding import OFIQ_INPUT_RESOURCE_ID, OFIQ_V112_RUNTIME_RESOURCE_ID
+
+
+ROOT = Path(__file__).resolve().parents[3]
+LFW_RESOURCE_ID = "lfw-funneled-local-candidate"
+RESEARCH_SCOPE = "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+
+
+class RealMatcherApiTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.data_dir = Path(tempfile.mkdtemp(prefix="qualsight-matcher-api-"))
+        settings = Settings(repository_root=ROOT, registry_path=ROOT / "resources" / "resource-registry.json", data_dir=cls.data_dir,
+                            runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID, input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, LFW_RESOURCE_ID))
+        cls.client = TestClient(create_app(settings))
+        cls.client.__enter__()
+        project = cls.client.post("/api/projects", json={"name": "matcher api gate", "description": "QS-C22 API.", "purpose_scope": RESEARCH_SCOPE}).json()
+        cls.project_id = project["project_id"]
+        cls.client.post(f"/api/projects/{cls.project_id}/open")
+        cls.dataset_id = cls.client.post(f"/api/projects/{cls.project_id}/datasets/import-registered", json={"resource_id": LFW_RESOURCE_ID, "verify_hashes": False}).json()["dataset_id"]
+        cls.protocol_id = cls.client.post(f"/api/projects/{cls.project_id}/datasets/{cls.dataset_id}/protocols/freeze-lfw-view2").json()["protocol_id"]
+        started = cls.client.post(f"/api/projects/{cls.project_id}/protocols/{cls.protocol_id}/matrix", params={"fixture_pairs_only": "true"})
+        assert started.status_code == 202, started.text
+        cls.matrix_id = started.json()["matrix_id"]
+        deadline = time.monotonic() + 600
+        while time.monotonic() < deadline:
+            status = cls.client.get(f"/api/matrices/{cls.matrix_id}").json()
+            if status["progress"]["phase"] in {"completed", "failed"}:
+                break
+            time.sleep(1)
+        cls.status = status
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.client.__exit__(None, None, None)
+        shutil.rmtree(cls.data_dir, ignore_errors=True)
+
+    def test_matrix_records_six_leaves_with_separate_identities(self) -> None:
+        self.assertEqual(self.status["progress"]["phase"], "completed", self.status)
+        leaves = self.status["leaves"]
+        self.assertEqual(len(leaves), 6)
+        self.assertEqual({leaf["leaf_id"] for leaf in leaves}, {"QS-C22.AS", "QS-C22.AN", "QS-C22.ES", "QS-C22.EN", "QS-C22.TS", "QS-C22.TN"})
+        self.assertEqual({leaf["condition_id"] for leaf in leaves}, {"SCRFD10G_ADAPTIVE_LARGEST_ARCFACE112_JPEG95_V1", "SCRFD10G_640_HIGHEST_CONFIDENCE_ARCFACE112_INMEMORY_V1"})
+        for leaf in leaves:
+            self.assertEqual(leaf["comparison_count"], 10)
+            self.assertEqual(leaf["scored_count"] + leaf["failed_count"], 10)
+            self.assertIn("EXCLUDE_FAILED_TRIALS", leaf["eer"])
+            self.assertIn("FAILURES_AS_REJECT", leaf["eer"])
+            run = self.client.get(leaf["links"]["run"])
+            self.assertEqual(run.status_code, 200)
+            self.assertIsNone(run.json()["run"]["quality_engine"])
+            self.assertEqual(run.json()["run"]["matcher"]["component_id"], leaf["matcher_id"])
+        listed = self.client.get(f"/api/projects/{self.project_id}/matcher-leaves").json()
+        self.assertEqual(len(listed), 6)
+
+    def test_metrics_comparisons_and_errors_resolve_to_real_pairs_and_samples(self) -> None:
+        leaf = self.status["leaves"][0]
+        metrics = self.client.get(leaf["links"]["metrics"]).json()
+        self.assertEqual(metrics["metrics"]["counts"]["trials"], 10)
+        self.assertEqual(metrics["metrics"]["definitions"]["eer"], ["biometric.verification.eer", "1.0.0"])
+        comparisons = self.client.get(leaf["links"]["comparisons"], params={"limit": 100}).json()
+        self.assertEqual(comparisons["total"], 10)
+        for row in comparisons["rows"]:
+            self.assertEqual((row["score"] is None), (row["failure"] is not None))
+            left = self.client.get(row["links"]["left_sample"])
+            self.assertEqual(left.status_code, 200)
+            self.assertEqual(left.json()["sample_id"], row["left_sample_id"])
+            image = self.client.get(row["links"]["left_image"])
+            self.assertEqual(image.status_code, 200)
+        mated = self.client.get(leaf["links"]["comparisons"], params={"label": "MATED"}).json()
+        self.assertEqual(mated["total"], 5)
+        errors = self.client.get(leaf["links"]["errors"]).json()
+        self.assertEqual(errors["leaf_id"], leaf["leaf_id"])
+        self.assertEqual(errors["threshold_equality_rule"], "ACCEPT_WHEN_SCORE_GE_THRESHOLD")
+        self.assertIsNotNone(errors["transform_id"])
+        # On the fixture pairs the six matchers separate mated from non-mated: no errors at the EER threshold.
+        self.assertEqual(errors["counts"]["false_matches"], 0)
+        self.assertEqual(errors["counts"]["false_non_matches"], 0)
+        # A stricter threshold produces real false non-matches that resolve to their samples.
+        strict = self.client.get(leaf["links"]["errors"], params={"threshold": 0.9}).json()
+        self.assertGreater(strict["counts"]["false_non_matches"], 0)
+        first = strict["false_non_matches"][0]
+        self.assertEqual(first["label"], "MATED")
+        self.assertLess(first["score"], 0.9)
+        self.assertEqual(self.client.get(first["links"]["right_sample"]).status_code, 200)
+
+    def test_erc_reconciles_to_an_independent_recomputation_over_real_quality_and_scores(self) -> None:
+        import numpy as np
+        import pyarrow.parquet as pq
+
+        # A real quality job over the fixture images supplies UnifiedQualityScore per sample.
+        started = self.client.post(f"/api/projects/{self.project_id}/datasets/{self.dataset_id}/quality-batch", json={"selection": {"kind": "subset_fixture"}, "chunks": 1})
+        self.assertEqual(started.status_code, 202, started.text)
+        job_id = started.json()["job_id"]
+        deadline = time.monotonic() + 300
+        while time.monotonic() < deadline:
+            job = self.client.get(f"/api/jobs/{job_id}").json()
+            if job["ended_at"]:
+                break
+            time.sleep(0.5)
+        self.assertEqual(job["state"], "COMPLETED", job)
+        leaf = self.status["leaves"][0]
+        response = self.client.get(f"/api/matcher-runs/{leaf['run_id']}/erc", params={"quality_job_id": job_id, "policy": "pair.quality.min", "threshold": 0.8})
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        erc = body["erc"]
+        self.assertEqual(erc["definition"], ["biometric.quality.utility.erc", "1.0.0"])
+        self.assertEqual(erc["pair_quality_policy"]["id"], "pair.quality.min")
+        self.assertEqual(erc["fixed_matcher_threshold"]["value"], 0.8)
+        fnmr = erc["curves"]["FNMR"]
+        self.assertEqual(fnmr["comparison_units"], 5)
+        # Independent recomputation: min UQS per mated pair, worst rejected first, FNMR at 0.8.
+        quality = {r["sample_id"]: r["UnifiedQualityScore.scalar"] for r in pq.read_table(job["parquet_path"]).to_pylist()}
+        comparisons = self.client.get(leaf["links"]["comparisons"], params={"label": "MATED", "limit": 100}).json()["rows"]
+        units = sorted(((min(quality[r["left_sample_id"]], quality[r["right_sample_id"]]), r["score"]) for r in comparisons), key=lambda item: item[0])
+        n = len(units)
+        expected_first = sum(1 for _, score in units if score < 0.8) / n
+        self.assertEqual(fnmr["points"][0]["rejected_fraction"], 0.0)
+        self.assertAlmostEqual(fnmr["points"][0]["error_rate"], expected_first, places=12)
+        for point in fnmr["points"]:
+            if point["error_rate"] is None:
+                continue
+            start = round(point["rejected_fraction"] * n)
+            retained = units[start:]
+            self.assertAlmostEqual(point["error_rate"], sum(1 for _, score in retained if score < 0.8) / len(retained), places=12)
+        # FMR-ERC is reported separately over the non-mated units, never pooled.
+        self.assertEqual(erc["curves"]["FMR"]["comparison_units"], 5)
+        self.assertIn("not yet registered", erc["derived_summaries"]["FNMR"]["note"])
+        unknown_policy = self.client.get(f"/api/matcher-runs/{leaf['run_id']}/erc", params={"quality_job_id": job_id, "policy": "pair.quality.nope"})
+        self.assertEqual(unknown_policy.status_code, 422)
+
+    def test_unknown_run_is_a_typed_404(self) -> None:
+        self.assertEqual(self.client.get("/api/matcher-runs/run:sha256:" + "0" * 64 + "/metrics").status_code, 404)
+        self.assertEqual(self.client.get("/api/matrices/matrix:sha256:" + "0" * 64).status_code, 404)
+
+
+if __name__ == "__main__":
+    unittest.main()
