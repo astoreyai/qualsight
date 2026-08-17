@@ -1,0 +1,350 @@
+"""Quality-utility analysis Runs (QS-D30–QS-D33): one matcher Run × one quality job × one measure.
+
+The analysis reads the recorded comparisons Parquet of a matcher leaf Run and
+the recorded quality Parquet of a batch job, joins them per protocol pair
+under an explicit versioned pair-quality policy, and writes an immutable
+analysis Run whose artifacts (utility.json, policy.json, pair_quality.parquet)
+carry every number the UI and reports show. Nothing is re-scored: the source
+Runs are referenced by ID and by artifact hash.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import time
+from typing import Any
+
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+from ..domain.entities import Artifact, ArtifactKind, DataClassification, Experiment, Project, ProtocolKind, StorageBackend, VerificationProtocol
+from ..domain.primitives import CanonicalJson, ComponentBinding, ComponentState
+from ..domain.run import CompletedRun, LogRecord, MetricObservation, RunStatus, ScientificSupportState
+from ..engines.ofiq.adapter import content_id
+from ..metrics.policy import THRESHOLD_POLICY_DEFINITION, analyze_policy, retention_matched_cutoff
+from ..metrics.utility import (
+    PAIR_QUALITY_POLICY_VERSION,
+    POLICY_DEFINITIONS,
+    PairQualityPolicy,
+    UtilityInputs,
+    compute_utility_analysis,
+    pair_quality,
+)
+from ..provenance import application_version, environment_identity, hardware_identity, repository_identity, sha256_bytes, sha256_file
+
+ANALYSIS_KIND = "QUALITY_UTILITY"
+ANALYSIS_VERSION = "1.0.1"  # 1.0.0 records used a tie-unsafe retention-matched cutoff for per-measure impact
+DEFAULT_MEASURE = "UnifiedQualityScore"
+DEFAULT_QUALITY_RANGE = (0.0, 100.0)  # OFIQ scalar quality components are 0–100 integers
+
+
+class UtilityAnalysisError(RuntimeError):
+    """Raised when the analysis cannot be executed faithfully on the recorded inputs."""
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc).astimezone()
+
+
+def pair_quality_policies() -> list[dict[str, str]]:
+    """The versioned pair-quality policy registry (PRD §21; QS-D30)."""
+
+    return [{"id": policy.value, "version": PAIR_QUALITY_POLICY_VERSION, "definition": POLICY_DEFINITIONS[policy]} for policy in PairQualityPolicy]
+
+
+@dataclass(frozen=True, slots=True)
+class UtilityRequest:
+    matcher_run_id: str
+    quality_job_id: str
+    quality_measure: str = DEFAULT_MEASURE
+    pair_quality_policy: str = PairQualityPolicy.MIN.value
+    target_fmr: float = 0.001
+    matcher_threshold: float | None = None
+    quality_threshold: float | None = None
+    partial_interval: float = 0.2
+    bootstrap_replicates: int = 1000
+    seed: int = 20260817
+
+
+@dataclass(frozen=True, slots=True)
+class UtilityResult:
+    analysis_id: str
+    run: CompletedRun
+    experiment: Experiment
+    utility: dict[str, Any]
+    policy: dict[str, Any]
+    directory: Path
+    pair_table: Path
+    utility_path: Path
+    policy_path: Path
+    summary: dict[str, Any]
+
+
+def _quality_columns(schema: pa.Schema) -> list[str]:
+    return sorted({name[: -len(".scalar")] for name in schema.names if name.endswith(".scalar")})
+
+
+def _quality_values(parquet_path: str, measure: str) -> tuple[dict[str, float], int]:
+    columns = ["sample_id", "outcome", f"{measure}.scalar", f"{measure}.failed"]
+    table = pq.read_table(parquet_path, columns=columns)
+    values: dict[str, float] = {}
+    measured = 0
+    for record in table.to_pylist():
+        if record["outcome"] != "MEASURED":
+            continue
+        measured += 1
+        if record[f"{measure}.failed"] or record[f"{measure}.scalar"] is None:
+            continue
+        values[record["sample_id"]] = float(record[f"{measure}.scalar"])
+    return values, measured
+
+
+class UtilityAnalysisJob:
+    def __init__(
+        self,
+        *,
+        store: Any,
+        repository_root: Path,
+        project: Project,
+        actor: str,
+        request: UtilityRequest,
+        job_root: Path,
+    ) -> None:
+        self.store = store
+        self.repository_root = repository_root
+        self.project = project
+        self.actor = actor
+        self.request = request
+        self.job_root = job_root
+        leaf = store.matcher_leaf(request.matcher_run_id)
+        if leaf is None:
+            raise UtilityAnalysisError("matcher run is not recorded")
+        if leaf["project_id"] != project.project_id:
+            raise UtilityAnalysisError("matcher run belongs to another project")
+        job = store.job(request.quality_job_id)
+        if job is None or not job.get("parquet_path") or job.get("state") != "COMPLETED":
+            raise UtilityAnalysisError("quality job is not a completed recorded job")
+        if job["project_id"] != project.project_id:
+            raise UtilityAnalysisError("quality job belongs to another project")
+        if job["dataset_id"] != leaf["dataset_id"]:
+            raise UtilityAnalysisError("quality job and matcher run cover different datasets")
+        matcher_run = store.run(request.matcher_run_id)
+        quality_run = store.run(job["run_id"]) if job.get("run_id") else None
+        if matcher_run is None or quality_run is None:
+            raise UtilityAnalysisError("source Runs are not recorded")
+        try:
+            self.policy = PairQualityPolicy(request.pair_quality_policy)
+        except ValueError as error:
+            raise UtilityAnalysisError(f"unknown pair-quality policy {request.pair_quality_policy}") from error
+        schema = pq.read_schema(job["parquet_path"])
+        self.available_measures = _quality_columns(schema)
+        if request.quality_measure not in self.available_measures:
+            raise UtilityAnalysisError(f"quality measure {request.quality_measure} is not a scalar column of the quality job")
+        if not (0 < request.partial_interval <= 1):
+            raise UtilityAnalysisError("partial interval must lie in (0, 1]")
+        if request.bootstrap_replicates < 0 or request.bootstrap_replicates > 100_000:
+            raise UtilityAnalysisError("bootstrap replicates out of range")
+        protocol = store.protocol(leaf["protocol_id"])
+        if protocol is None:
+            raise UtilityAnalysisError("protocol of the matcher run is not recorded")
+        self.protocol = protocol
+        self.leaf = leaf
+        self.quality_job = job
+        self.matcher_run: CompletedRun = matcher_run[0]
+        self.quality_run: CompletedRun = quality_run[0]
+        self.metrics = json.loads(leaf["metrics_json"])
+        self.analysis_id = content_id(
+            "analysis", ANALYSIS_KIND, ANALYSIS_VERSION, request.matcher_run_id, request.quality_job_id, request.quality_measure, self.policy.value,
+            json.dumps({"target_fmr": request.target_fmr, "matcher_threshold": request.matcher_threshold, "quality_threshold": request.quality_threshold, "partial_interval": request.partial_interval, "replicates": request.bootstrap_replicates, "seed": request.seed}, sort_keys=True),
+        )
+        self.directory = job_root / self.analysis_id.replace(":", "_")
+
+    # -- execution ------------------------------------------------------------
+
+    def run(self) -> UtilityResult:
+        started = _now()
+        clock = time.monotonic()
+        request = self.request
+        rows = pq.read_table(self.leaf["comparisons_parquet"]).to_pylist()
+        quality, measured = _quality_values(self.quality_job["parquet_path"], request.quality_measure)
+        scores = np.array([r["score"] if r["score"] is not None else np.nan for r in rows], dtype=np.float64)
+        mated = np.array([r["label"] == "MATED" for r in rows])
+        failed = np.array([r["failure"] is not None for r in rows])
+        q_left = np.array([quality.get(r["left_sample_id"], np.nan) for r in rows], dtype=np.float64)
+        q_right = np.array([quality.get(r["right_sample_id"], np.nan) for r in rows], dtype=np.float64)
+        subject_left = np.array([r["left_subject_id"] for r in rows])
+        subject_right = np.array([r["right_subject_id"] for r in rows])
+        if request.matcher_threshold is None:
+            point = next((p for p in self.metrics["by_policy"]["EXCLUDE_FAILED_TRIALS"]["operating_points"] if p["target_fmr"] == request.target_fmr and p.get("threshold") is not None), None)
+            if point is None:
+                raise UtilityAnalysisError(f"no recorded operating point reaches target FMR {request.target_fmr}")
+            threshold = float(point["threshold"])
+            provenance = {"source": "RECORDED_OPERATING_POINT", "kind": "MATCHER_THRESHOLD", "target_fmr": request.target_fmr, "failure_policy": "EXCLUDE_FAILED_TRIALS", "fmr_at_threshold": point["fmr"], "fnmr_at_threshold": point["fnmr"], "matcher_run_id": request.matcher_run_id}
+        else:
+            threshold = float(request.matcher_threshold)
+            provenance = {"source": "CALLER_SUPPLIED", "kind": "MATCHER_THRESHOLD"}
+        pq_values = pair_quality(q_left, q_right, self.policy)
+        usable_mated = (~failed) & np.isfinite(scores) & np.isfinite(pq_values) & mated
+        if request.quality_threshold is None:
+            # Default: the pair-quality cutoff at the partial-interval rejection fraction of the mated units.
+            if not np.any(usable_mated):
+                raise UtilityAnalysisError("no usable mated comparison units")
+            ordered = np.sort(pq_values[usable_mated])
+            index = min(int(np.floor(request.partial_interval * ordered.shape[0])), ordered.shape[0] - 1)
+            quality_threshold = float(ordered[index])
+            quality_provenance = {"source": "DERIVED_PAIR_QUALITY_AT_PARTIAL_INTERVAL_REJECTION", "rejection_fraction": request.partial_interval, "kind": "QUALITY_POLICY_THRESHOLD"}
+        else:
+            quality_threshold = float(request.quality_threshold)
+            quality_provenance = {"source": "CALLER_SUPPLIED", "kind": "QUALITY_POLICY_THRESHOLD"}
+        quality_range = DEFAULT_QUALITY_RANGE if request.quality_measure in self.available_measures else None
+        utility = compute_utility_analysis(
+            UtilityInputs(scores, mated, failed, q_left, q_right, subject_left, subject_right),
+            policy=self.policy, threshold=threshold, threshold_provenance=provenance, partial_interval=request.partial_interval,
+            quality_range=quality_range, bootstrap_replicates=request.bootstrap_replicates, seed=request.seed, quality_cutoff_for_prediction=quality_threshold,
+        )
+        policy_block = analyze_policy(scores, mated, failed, pq_values, quality_threshold=quality_threshold, matcher_threshold=threshold, quality_measure=request.quality_measure, pair_quality_policy=self.policy.value)
+        policy_block["thresholds"]["quality_policy"]["provenance"] = quality_provenance
+        policy_block["thresholds"]["matcher"]["provenance"] = provenance
+        # Per-quality-measure impact at the same retention (PRD §24), for every scalar measure of the job.
+        retention = policy_block["retention_rate"]
+        per_measure = []
+        if retention is not None:
+            for measure in self.available_measures:
+                values, _ = _quality_values(self.quality_job["parquet_path"], measure)
+                m_left = np.array([values.get(r["left_sample_id"], np.nan) for r in rows], dtype=np.float64)
+                m_right = np.array([values.get(r["right_sample_id"], np.nan) for r in rows], dtype=np.float64)
+                m_pair = pair_quality(m_left, m_right, self.policy)
+                usable = (~failed) & np.isfinite(scores) & np.isfinite(m_pair)
+                cutoff = retention_matched_cutoff(m_pair[usable], retention) if np.any(usable) else None
+                if cutoff is None:
+                    per_measure.append({"quality_measure": measure, "status": "NO_USABLE_UNITS"})
+                    continue
+                block = analyze_policy(scores, mated, failed, m_pair, quality_threshold=cutoff, matcher_threshold=threshold, quality_measure=measure, pair_quality_policy=self.policy.value)
+                per_measure.append({
+                    "quality_measure": measure, "quality_cutoff": cutoff, "cutoff_rule": "RETENTION_MATCHED_TO_POLICY", "usable_units": block["counts"]["usable_units"],
+                    "retained": block["counts"]["retained"], "retention_rate": block["retention_rate"], "errors_prevented": block["impact"]["errors_prevented"],
+                    "false_non_matches_prevented": block["impact"]["false_non_matches_prevented"], "false_matches_prevented": block["impact"]["false_matches_prevented"],
+                    "successful_comparisons_removed": block["impact"]["successful_comparisons_removed"],
+                    "fnmr_after": block["after_policy"]["fnmr"]["rate"], "fmr_after": block["after_policy"]["fmr"]["rate"], "evidence_sha256": block["evidence_sha256"],
+                })
+        policy_block["per_quality_measure_impact"] = {"rule": "each measure is cut at the smallest cutoff whose retention does not exceed the policy retention; the matcher threshold is unchanged", "measures": per_measure}
+        # Persist artifacts.
+        self.directory.mkdir(parents=True, exist_ok=False)
+        pair_table = self.directory / "pair_quality.parquet"
+        accept = np.where(np.isfinite(scores), scores >= threshold, False)
+        table = pa.table(
+            {
+                "pair_id": [r["pair_id"] for r in rows], "fold": [r["fold"] for r in rows], "label": [r["label"] for r in rows],
+                "left_sample_id": [r["left_sample_id"] for r in rows], "right_sample_id": [r["right_sample_id"] for r in rows],
+                "left_subject_id": [r["left_subject_id"] for r in rows], "right_subject_id": [r["right_subject_id"] for r in rows],
+                "score": [None if not np.isfinite(v) else float(v) for v in scores], "failure": [r["failure"] for r in rows],
+                "quality_left": [None if not np.isfinite(v) else float(v) for v in q_left], "quality_right": [None if not np.isfinite(v) else float(v) for v in q_right],
+                "pair_quality": [None if not np.isfinite(v) else float(v) for v in pq_values],
+                "accepted_at_matcher_threshold": [None if not np.isfinite(s) else bool(a) for s, a in zip(scores, accept)],
+                "retained_by_quality_policy": [None if not np.isfinite(v) else bool(v >= quality_threshold) for v in pq_values],
+                "decision_error": [None if not np.isfinite(s) else bool((m and not a) or ((not m) and a)) for s, m, a in zip(scores, mated, accept)],
+            }
+        )
+        pq.write_table(table, pair_table, compression="zstd")
+        document = {
+            "analysis_id": self.analysis_id, "kind": ANALYSIS_KIND, "version": ANALYSIS_VERSION,
+            "sources": {
+                "matcher_run_id": request.matcher_run_id, "matcher_leaf_id": self.leaf["leaf_id"], "matcher_id": self.leaf["matcher_id"], "condition_id": self.leaf["condition_id"], "comparisons_sha256": self.leaf["comparisons_sha256"],
+                "quality_job_id": request.quality_job_id, "quality_run_id": self.quality_job["run_id"], "quality_parquet_sha256": sha256_file(Path(self.quality_job["parquet_path"])), "quality_measure": request.quality_measure, "quality_measure_column": f"{request.quality_measure}.scalar",
+                "samples_measured": measured, "samples_with_measure_value": len(quality),
+            },
+            "pair_quality_policy": {"id": self.policy.value, "version": PAIR_QUALITY_POLICY_VERSION, "definition": POLICY_DEFINITIONS[self.policy]},
+            "quality_direction": "HIGHER_IS_BETTER",
+            "matcher_threshold": {"value": threshold, **provenance},
+            "quality_policy_threshold": {"value": quality_threshold, **quality_provenance},
+            "utility": utility,
+            "counts": {"comparison_units": len(rows), "processing_failures": int(np.sum(failed)), "units_missing_quality": int(np.sum(~failed & ~np.isfinite(pq_values)))},
+        }
+        utility_path = self.directory / "utility.json"
+        utility_path.write_text(json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+        policy_path = self.directory / "policy.json"
+        policy_path.write_text(json.dumps(policy_block, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+        seconds = time.monotonic() - clock
+        run, experiment = self._run(started, seconds, document, policy_block, utility_path, policy_path, pair_table, threshold, quality_threshold)
+        summary = {
+            "analysis_id": self.analysis_id, "run_id": run.run_id, "matcher_run_id": request.matcher_run_id, "leaf_id": self.leaf["leaf_id"], "matcher_id": self.leaf["matcher_id"], "condition_id": self.leaf["condition_id"],
+            "quality_job_id": request.quality_job_id, "quality_measure": request.quality_measure, "pair_quality_policy": self.policy.value, "matcher_threshold": threshold, "quality_threshold": quality_threshold,
+            "au_erc_fnmr": utility["areas"]["FNMR"]["au_erc"]["value"], "partial_au_erc_fnmr": utility["areas"]["FNMR"]["partial_au_erc"]["value"],
+            "au_erc_fmr": utility["areas"]["FMR"]["au_erc"]["value"], "fnmr_before": policy_block["before_policy"]["fnmr"]["rate"], "fnmr_after": policy_block["after_policy"]["fnmr"]["rate"],
+            "retention_rate": policy_block["retention_rate"], "errors_prevented": policy_block["impact"]["errors_prevented"], "successful_comparisons_removed": policy_block["impact"]["successful_comparisons_removed"],
+        }
+        result = UtilityResult(self.analysis_id, run, experiment, document, policy_block, self.directory, pair_table, utility_path, policy_path, summary)
+        self.store.record_utility_analysis(result)
+        return result
+
+    def _run(self, started: datetime, seconds: float, document: dict[str, Any], policy_block: dict[str, Any], utility_path: Path, policy_path: Path, pair_table: Path, threshold: float, quality_threshold: float) -> tuple[CompletedRun, Experiment]:
+        request = self.request
+        source = self.matcher_run
+        configuration = CanonicalJson.from_value({
+            "analysis_id": self.analysis_id, "kind": ANALYSIS_KIND, "version": ANALYSIS_VERSION,
+            "sources": document["sources"], "pair_quality_policy": document["pair_quality_policy"],
+            "matcher_threshold": document["matcher_threshold"], "quality_policy_threshold": document["quality_policy_threshold"],
+            "rejection_domain": document["utility"]["rejection_domain"], "uncertainty": document["utility"]["uncertainty"],
+            "quality_bins": document["utility"]["quality_conditioned"]["bin_edges"], "definitions": {
+                "erc": list(document["utility"]["erc"]["definition"]), "au_erc": list(document["utility"]["areas"]["FNMR"]["au_erc"]["definition"]),
+                "partial_au_erc": list(document["utility"]["areas"]["FNMR"]["partial_au_erc"]["definition"]), "risk_coverage": list(document["utility"]["risk_coverage"]["definition"]),
+                "threshold_policy": list(THRESHOLD_POLICY_DEFINITION)},
+        })
+        experiment_id = content_id("experiment", self.project.project_id, self.leaf["dataset_id"], ANALYSIS_KIND, request.matcher_run_id, request.quality_job_id, request.quality_measure, self.policy.value)
+        run_id = content_id("run", experiment_id, started.isoformat(), sha256_file(utility_path), sha256_file(policy_path), sha256_file(pair_table))
+        utility = document["utility"]
+        observations = [
+            MetricObservation(metric_id="comparisons.total", value=document["counts"]["comparison_units"], unit="count"),
+            MetricObservation(metric_id="comparisons.failed", value=document["counts"]["processing_failures"], unit="count"),
+            MetricObservation(metric_id="policy.retained", value=policy_block["counts"]["retained"], unit="count"),
+            MetricObservation(metric_id="policy.errors_prevented", value=policy_block["impact"]["errors_prevented"], unit="count"),
+            MetricObservation(metric_id="policy.successful_comparisons_removed", value=policy_block["impact"]["successful_comparisons_removed"], unit="count"),
+            MetricObservation(metric_id="timing.analysis_seconds", value=round(seconds, 3), unit="observation"),
+        ]
+        for kind in ("FNMR", "FMR"):
+            for name in ("au_erc", "partial_au_erc"):
+                value = utility["areas"][kind][name]["value"]
+                if value is not None:
+                    metric_id, version = utility["areas"][kind][name]["definition"]
+                    observations.append(MetricObservation(metric_id=f"{metric_id}@{version}[{kind}]", value=float(value), unit="area"))
+            rate = policy_block["after_policy"]["fnmr" if kind == "FNMR" else "fmr"]["rate"]
+            if rate is not None:
+                observations.append(MetricObservation(metric_id=f"policy.{kind.lower()}_after", value=float(rate), unit="rate"))
+        artifacts = []
+        for path, kind, media, backend in ((utility_path, ArtifactKind.METRICS, "application/json", StorageBackend.FILESYSTEM), (policy_path, ArtifactKind.METRICS, "application/json", StorageBackend.FILESYSTEM), (pair_table, ArtifactKind.TABLE, "application/vnd.apache.parquet", StorageBackend.PARQUET)):
+            digest = sha256_file(path)
+            artifacts.append(Artifact(artifact_id=content_id("artifact", run_id, digest, path.name), run_id=run_id, kind=kind, storage_backend=backend, uri=str(path), sha256=digest, size_bytes=path.stat().st_size, media_type=media, classification=DataClassification.SENSITIVE_BIOMETRIC_DERIVED, created_at=_now()))
+        run = CompletedRun(
+            run_id=run_id, project_id=self.project.project_id, experiment_id=experiment_id, user_id=self.actor,
+            dataset_manifest=source.dataset_manifest, dataset_hash=source.dataset_hash,
+            subject_protocol=source.subject_protocol, pair_search_protocol=source.pair_search_protocol,
+            quality_engine=self.quality_run.quality_engine, quality_engine_configuration=self.quality_run.quality_engine_configuration,
+            model_hashes=source.model_hashes, matcher=source.matcher, matcher_preprocessing=source.matcher_preprocessing,
+            operating_thresholds=ComponentBinding(state=ComponentState.CONFIGURED, component_id="qualsight.metrics.policy", version="1.0.0", configuration_sha256=sha256_bytes(json.dumps({"matcher_threshold": threshold, "quality_threshold": quality_threshold, "pair_quality_policy": self.policy.value}, sort_keys=True).encode("utf-8"))),
+            statistical_methods=ComponentBinding(state=ComponentState.CONFIGURED, component_id="qualsight.metrics.utility+statistics", version="1.0.0", configuration_sha256=sha256_bytes(json.dumps({"partial_interval": request.partial_interval, "replicates": request.bootstrap_replicates, "seed": request.seed}, sort_keys=True).encode("utf-8"))),
+            confidence_interval_method=ComponentBinding(state=ComponentState.CONFIGURED, component_id="CLUSTER_BOOTSTRAP_PERCENTILE_95+CLOPPER_PEARSON_95", version="1.0.0"),
+            randomness=ComponentBinding(state=ComponentState.CONFIGURED, component_id="numpy.random.default_rng", version="PCG64", configuration_sha256=sha256_bytes(str(request.seed).encode("utf-8"))),
+            random_seeds=(request.seed,),
+            application_version=application_version(self.repository_root / "backend" / "pyproject.toml"), repository=repository_identity(self.repository_root),
+            environment=environment_identity(self.repository_root / "uv.lock", {}), hardware=hardware_identity("numpy on CPU"),
+            start_time=started, end_time=_now(), runtime_seconds=round(seconds, 3), initialization_ms=0, assessment_ms=int(seconds * 1000),
+            configuration=configuration, metrics=tuple(observations), artifacts=tuple(artifacts),
+            logs=(LogRecord(stream="stdout", sha256=sha256_bytes(b""), text=""), LogRecord(stream="stderr", sha256=sha256_bytes(b""), text="")),
+            warnings=tuple(w for w in (
+                f"{document['counts']['units_missing_quality']} comparison units lack a {request.quality_measure} value on one side and are excluded from utility curves" if document["counts"]["units_missing_quality"] else None,
+                "quality-conditioned bins with fewer than 30 units are flagged as unsupported precision",
+            ) if w),
+            provenance_limits=tuple(source.provenance_limits) + ("Utility results are QualSight-executed on the recorded matcher Run and quality job; they are not published-figure reproductions.",),
+            exit_code=0, status=RunStatus.COMPLETED, scientific_support=ScientificSupportState.NOT_ASSESSED,
+        )
+        experiment = Experiment(
+            experiment_id=experiment_id, project_id=self.project.project_id, dataset_id=self.leaf["dataset_id"],
+            name=f"utility: {self.leaf['leaf_id']} × {request.quality_measure} ({self.policy.value})", created_by=self.actor, created_at=started,
+            protocol=VerificationProtocol(kind=ProtocolKind.VERIFICATION, protocol_id=self.leaf["protocol_id"], pair_manifest=self.protocol.pair_manifest, identity_schema=ComponentBinding(state=ComponentState.CONFIGURED, component_id="lfw-directory-identity", version="1.0.0")),
+            configuration=configuration,
+        )
+        return run, experiment

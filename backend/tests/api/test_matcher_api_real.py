@@ -97,21 +97,32 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertLess(first["score"], 0.9)
         self.assertEqual(self.client.get(first["links"]["right_sample"]).status_code, 200)
 
+    @classmethod
+    def _quality_job(cls) -> dict:
+        """One real quality job over the fixture images (UnifiedQualityScore per sample), started once per class."""
+
+        cached = getattr(cls, "_quality_job_cache", None)
+        if cached is not None:
+            return cached
+        started = cls.client.post(f"/api/projects/{cls.project_id}/datasets/{cls.dataset_id}/quality-batch", json={"selection": {"kind": "subset_fixture"}, "chunks": 1})
+        assert started.status_code == 202, started.text
+        job_id = started.json()["job_id"]
+        deadline = time.monotonic() + 300
+        while time.monotonic() < deadline:
+            job = cls.client.get(f"/api/jobs/{job_id}").json()
+            if job["ended_at"]:
+                break
+            time.sleep(0.5)
+        assert job["state"] == "COMPLETED", job
+        cls._quality_job_cache = job
+        return job
+
     def test_erc_reconciles_to_an_independent_recomputation_over_real_quality_and_scores(self) -> None:
         import numpy as np
         import pyarrow.parquet as pq
 
-        # A real quality job over the fixture images supplies UnifiedQualityScore per sample.
-        started = self.client.post(f"/api/projects/{self.project_id}/datasets/{self.dataset_id}/quality-batch", json={"selection": {"kind": "subset_fixture"}, "chunks": 1})
-        self.assertEqual(started.status_code, 202, started.text)
-        job_id = started.json()["job_id"]
-        deadline = time.monotonic() + 300
-        while time.monotonic() < deadline:
-            job = self.client.get(f"/api/jobs/{job_id}").json()
-            if job["ended_at"]:
-                break
-            time.sleep(0.5)
-        self.assertEqual(job["state"], "COMPLETED", job)
+        job = self._quality_job()
+        job_id = job["job_id"]
         leaf = self.status["leaves"][0]
         response = self.client.get(f"/api/matcher-runs/{leaf['run_id']}/erc", params={"quality_job_id": job_id, "policy": "pair.quality.min", "threshold": 0.8})
         self.assertEqual(response.status_code, 200, response.text)
@@ -138,13 +149,85 @@ class RealMatcherApiTests(unittest.TestCase):
             self.assertAlmostEqual(point["error_rate"], sum(1 for _, score in retained if score < 0.8) / len(retained), places=12)
         # FMR-ERC is reported separately over the non-mated units, never pooled.
         self.assertEqual(erc["curves"]["FMR"]["comparison_units"], 5)
-        self.assertIn("not yet registered", erc["derived_summaries"]["FNMR"]["note"])
+        self.assertIn("metric registry v1.1.0", erc["derived_summaries"]["FNMR"]["note"])
         unknown_policy = self.client.get(f"/api/matcher-runs/{leaf['run_id']}/erc", params={"quality_job_id": job_id, "policy": "pair.quality.nope"})
         self.assertEqual(unknown_policy.status_code, 422)
 
     def test_unknown_run_is_a_typed_404(self) -> None:
         self.assertEqual(self.client.get("/api/matcher-runs/run:sha256:" + "0" * 64 + "/metrics").status_code, 404)
         self.assertEqual(self.client.get("/api/matrices/matrix:sha256:" + "0" * 64).status_code, 404)
+
+
+
+    def test_utility_analysis_run_is_recorded_traceable_and_independently_verified(self) -> None:
+        """QS-D30–QS-D33 on the real fixture: policies registry, analysis Run, exact policy reconciliation, unsupported-precision flags."""
+
+        import subprocess
+        import sys
+
+        policies = self.client.get("/api/pair-quality-policies").json()
+        self.assertEqual({p["id"] for p in policies["policies"]}, {"pair.quality.min", "pair.quality.max", "pair.quality.mean", "pair.quality.geometric_mean", "pair.quality.enrollment", "pair.quality.probe"})
+        self.assertTrue(all(p["version"] == "1.0.0" and p["definition"] for p in policies["policies"]))
+        job = self._quality_job()
+        leaf = self.status["leaves"][0]
+        body = {"matcher_run_id": leaf["run_id"], "quality_job_id": job["job_id"], "pair_quality_policy": "pair.quality.min", "matcher_threshold": 0.8, "quality_threshold": 40.0, "bootstrap_replicates": 200, "seed": 7}
+        started = self.client.post(f"/api/projects/{self.project_id}/utility-analyses", json=body)
+        self.assertEqual(started.status_code, 202, started.text)
+        analysis_id = started.json()["analysis_id"]
+        deadline = time.monotonic() + 300
+        while time.monotonic() < deadline:
+            status = self.client.get(f"/api/utility-analyses/{analysis_id}").json()
+            if status["state"] in {"COMPLETED", "FAILED"}:
+                break
+            time.sleep(0.5)
+        self.assertEqual(status["state"], "COMPLETED", status)
+        summary = status["summary"]
+        self.assertEqual(summary["quality_measure"], "UnifiedQualityScore")
+        self.assertEqual(summary["matcher_threshold"], 0.8)
+        self.assertEqual(summary["quality_threshold"], 40.0)
+        # The analysis is an immutable Run binding both the matcher and the quality engine of its sources.
+        run = self.client.get(summary["links"]["run"]).json()["run"]
+        self.assertEqual(run["matcher"]["component_id"], leaf["matcher_id"])
+        self.assertIsNotNone(run["quality_engine"])
+        self.assertEqual(run["random_seeds"], [7])
+        self.assertTrue(any(m["metric_id"].startswith("biometric.quality.utility.au-erc@1.0.0[FNMR]") for m in run["metrics"]))
+        self.assertEqual(len(run["artifacts"]), 3)
+        # Threshold kinds are never conflated.
+        policy = status["policy"]
+        self.assertEqual(policy["thresholds"]["matcher"]["kind"], "MATCHER_THRESHOLD")
+        self.assertEqual(policy["thresholds"]["quality_policy"]["kind"], "QUALITY_POLICY_THRESHOLD")
+        self.assertFalse(policy["thresholds"]["matcher"]["reestimated_during_policy"])
+        # Exact reconciliation of the policy block against the pair table served by the API.
+        pairs = self.client.get(summary["links"]["pairs"], params={"limit": 1000}).json()
+        self.assertEqual(pairs["total"], 10)
+        usable = [r for r in pairs["rows"] if r["failure"] is None and r["pair_quality"] is not None]
+        rejected = [r for r in usable if r["pair_quality"] < 40.0]
+        self.assertEqual(policy["counts"]["rejected"], len(rejected))
+        self.assertEqual(policy["impact"]["false_non_matches_prevented"], sum(1 for r in rejected if r["label"] == "MATED" and r["score"] < 0.8))
+        self.assertEqual(policy["impact"]["successful_comparisons_removed"], sum(1 for r in rejected if (r["label"] == "MATED") == (r["score"] >= 0.8)))
+        for row in pairs["rows"]:
+            self.assertEqual(row["retained_by_quality_policy"], None if row["pair_quality"] is None else row["pair_quality"] >= 40.0)
+            self.assertEqual(self.client.get(row["links"]["left_quality"]).status_code, 200)
+        # Five mated units cannot support a logistic model or credible bins; the analysis says so instead of printing precision.
+        utility = status["utility"]["utility"]
+        self.assertEqual(utility["association"]["FNMR"]["logistic_error_on_quality"]["status"], "UNSUPPORTED_BY_SAMPLE")
+        self.assertTrue(all(not b["supported"] for b in utility["quality_conditioned"]["FNMR"]["bins"]))
+        self.assertEqual(utility["uncertainty"]["replicates"], 200)
+        # Independent recomputation script over the recorded artifacts.
+        row_directory = None
+        for artifact in run["artifacts"]:
+            if artifact["uri"].endswith("utility.json"):
+                row_directory = Path(artifact["uri"]).parent
+        self.assertIsNotNone(row_directory)
+        verified = subprocess.run([sys.executable, str(ROOT / "scripts" / "verify_utility_analysis.py"), str(row_directory)], capture_output=True, text=True, check=False)
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
+        self.assertIn("UTILITY_ANALYSIS_VERIFIED", verified.stdout)
+        # Re-posting the same request returns the recorded analysis instead of recomputing.
+        again = self.client.post(f"/api/projects/{self.project_id}/utility-analyses", json=body)
+        self.assertEqual(again.status_code, 200)
+        self.assertTrue(again.json()["already_recorded"])
+        listed = self.client.get(f"/api/projects/{self.project_id}/utility-analyses").json()
+        self.assertEqual([item["analysis_id"] for item in listed], [analysis_id])
 
 
 if __name__ == "__main__":

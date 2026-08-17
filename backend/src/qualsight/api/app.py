@@ -32,6 +32,7 @@ from ..engines.ofiq.batch import BatchJobError, OFIQBatchJob
 from ..projects import ProjectLifecycleError, ProjectService, ProjectView
 from ..protocols import ProtocolError, ProtocolService
 from ..matchers.matrix import MatcherMatrixJob, MatrixError
+from ..analysis.utility import UtilityAnalysisError, UtilityAnalysisJob, UtilityRequest, pair_quality_policies
 from ..matchers.upstream import UpstreamSources
 from ..execution.contracts import ContractValidationError, ExecutionOutcomeError
 from ..provenance import artifact_identity
@@ -66,6 +67,19 @@ class AssessRequest(ApiModel):
     image_path: str = Field(min_length=1)
     purpose_scope: str = Field(min_length=1)
     project_id: str | None = None
+
+
+class UtilityAnalysisRequest(ApiModel):
+    matcher_run_id: str = Field(min_length=1)
+    quality_job_id: str = Field(min_length=1)
+    quality_measure: str = Field(default="UnifiedQualityScore", min_length=1)
+    pair_quality_policy: str = Field(default="pair.quality.min", min_length=1)
+    target_fmr: float = Field(default=0.001, gt=0, lt=1)
+    matcher_threshold: float | None = None
+    quality_threshold: float | None = None
+    partial_interval: float = Field(default=0.2, gt=0, le=1)
+    bootstrap_replicates: int = Field(default=1000, ge=0, le=100_000)
+    seed: int = Field(default=20260817, ge=0)
 
 
 class ProjectCreate(ApiModel):
@@ -1011,6 +1025,110 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "quality_job_id": quality_job_id, "quality_run_id": job["run_id"], "quality_measure": "UnifiedQualityScore.scalar",
             "samples_with_quality": len(quality), "erc": erc,
         })
+
+    # -- quality-utility analyses (QS-D30–QS-D33) ---------------------------------
+
+    analyses: dict[str, dict[str, Any]] = {}
+
+    @app.get("/api/pair-quality-policies")
+    def list_pair_quality_policies() -> JSONResponse:
+        return JSONResponse(content={"version": pair_quality_policies()[0]["version"], "policies": pair_quality_policies()})
+
+    def analysis_summary(row: dict[str, Any]) -> dict[str, Any]:
+        summary = json.loads(row["summary_json"])
+        summary["links"] = {"analysis": f"/api/utility-analyses/{row['analysis_id']}", "run": f"/api/runs/{row['run_id']}", "pairs": f"/api/utility-analyses/{row['analysis_id']}/pairs", "matcher_run": f"/api/runs/{row['matcher_run_id']}", "quality_job": f"/api/jobs/{row['quality_job_id']}"}
+        summary["created_at"] = row["created_at"]
+        return summary
+
+    @app.post("/api/projects/{project_id}/utility-analyses", status_code=202)
+    def start_utility_analysis(project_id: str, request: UtilityAnalysisRequest) -> JSONResponse:
+        try:
+            project = projects().require_writable(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        try:
+            job = UtilityAnalysisJob(store=store(), repository_root=settings.repository_root, project=project, actor=projects().actor, request=UtilityRequest(**request.model_dump()), job_root=settings.data_dir / "analyses")
+        except UtilityAnalysisError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        existing = store().utility_analysis(job.analysis_id)
+        if existing is not None:
+            return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": "COMPLETED", "already_recorded": True, "summary": analysis_summary(existing)})
+        with job_lock:
+            if job.analysis_id in analyses:
+                return JSONResponse(status_code=202, content={"analysis_id": job.analysis_id, "state": analyses[job.analysis_id]["state"]})
+            analyses[job.analysis_id] = {"state": "RUNNING", "error": None}
+
+        def _run() -> None:
+            try:
+                job.run()
+                with job_lock:
+                    analyses[job.analysis_id] = {"state": "COMPLETED", "error": None}
+            except Exception as error:  # noqa: BLE001 - surfaced through the status endpoint
+                with job_lock:
+                    analyses[job.analysis_id] = {"state": "FAILED", "error": f"{type(error).__name__}: {error}"}
+
+        executor.submit(_run)
+        return JSONResponse(status_code=202, content={"analysis_id": job.analysis_id, "state": "RUNNING"})
+
+    @app.get("/api/projects/{project_id}/utility-analyses")
+    def project_utility_analyses(project_id: str) -> JSONResponse:
+        return JSONResponse(content=[analysis_summary(row) for row in store().utility_analyses(project_id=project_id)])
+
+    @app.get("/api/utility-analyses/{analysis_id}")
+    def utility_analysis(analysis_id: str, include: Literal["summary", "full"] = Query(default="full")) -> JSONResponse:
+        row = store().utility_analysis(analysis_id)
+        with job_lock:
+            live = analyses.get(analysis_id)
+        if row is None:
+            if live is None:
+                raise HTTPException(status_code=404, detail="utility analysis is not recorded")
+            return JSONResponse(content={"analysis_id": analysis_id, "state": live["state"], "error": live["error"]})
+        content: dict[str, Any] = {"analysis_id": analysis_id, "state": "COMPLETED", "error": None, "summary": analysis_summary(row)}
+        if include == "full":
+            directory = Path(row["directory"])
+            content["utility"] = json.loads((directory / "utility.json").read_text(encoding="utf-8"))
+            content["policy"] = json.loads((directory / "policy.json").read_text(encoding="utf-8"))
+            content["artifact_sha256"] = {"utility.json": row["utility_sha256"], "policy.json": row["policy_sha256"], "pair_quality.parquet": row["pair_table_sha256"]}
+        return JSONResponse(content=content)
+
+    @app.get("/api/utility-analyses/{analysis_id}/pairs")
+    def utility_analysis_pairs(
+        analysis_id: str,
+        label: str | None = Query(default=None),
+        retained: bool | None = Query(default=None),
+        decision_error: bool | None = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=10_000),
+        offset: int = Query(default=0, ge=0),
+    ) -> JSONResponse:
+        import duckdb
+
+        row = store().utility_analysis(analysis_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="utility analysis is not recorded")
+        parquet = str(Path(row["directory"]) / "pair_quality.parquet").replace("'", "''")
+        clauses, params = ["1=1"], []
+        if label is not None:
+            clauses.append("label = ?"); params.append(label)
+        if retained is not None:
+            clauses.append("retained_by_quality_policy = ?"); params.append(retained)
+        if decision_error is not None:
+            clauses.append("decision_error = ?"); params.append(decision_error)
+        where = " AND ".join(clauses)
+        connection = duckdb.connect()
+        try:
+            total = int(connection.execute(f"SELECT COUNT(*) FROM read_parquet('{parquet}') WHERE {where}", params).fetchone()[0])
+            cursor = connection.execute(f"SELECT * FROM read_parquet('{parquet}') WHERE {where} ORDER BY pair_quality NULLS LAST, pair_id LIMIT ? OFFSET ?", [*params, int(limit), int(offset)])
+            names = [item[0] for item in cursor.description]
+            rows = [dict(zip(names, values)) for values in cursor.fetchall()]
+        finally:
+            connection.close()
+        for item in rows:
+            left = store().sample(item["left_sample_id"])
+            right = store().sample(item["right_sample_id"])
+            item["links"] = {"left_sample": f"/api/samples/{item['left_sample_id']}", "right_sample": f"/api/samples/{item['right_sample_id']}", "left_image": f"/api/samples/image?path={left.source_path}" if left else None, "right_image": f"/api/samples/image?path={right.source_path}" if right else None, "left_quality": f"/api/samples/{item['left_sample_id']}/quality", "right_quality": f"/api/samples/{item['right_sample_id']}/quality", "run": f"/api/runs/{row['run_id']}"}
+        return JSONResponse(content={"analysis_id": analysis_id, "run_id": row["run_id"], "total": total, "offset": offset, "rows": rows})
 
     @app.get("/api/projects/{project_id}/versions")
     def project_versions(project_id: str) -> JSONResponse:

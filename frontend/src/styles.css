@@ -44,6 +44,7 @@ button.primary:disabled { opacity: 0.55; cursor: progress; }
 .results { grid-column: 3; grid-row: 1 / span 3; }
 .workbench { grid-column: 1 / span 3; }
 .matchers { grid-column: 1 / span 3; }
+.utility { grid-column: 1 / span 3; }
 .runs { grid-column: 1 / span 2; }
 .status { color: var(--accent); }
 .error { color: var(--danger); border: 1px solid rgba(248, 113, 113, 0.4); border-radius: 8px; padding: 0.7rem; }
@@ -121,3 +122,13 @@ button.cell.selected { border-color: var(--ok); }
 .pair { display: flex; gap: 0.5rem; align-items: center; background: #0d1526; border: 1px solid var(--panel-border); border-radius: 8px; padding: 0.4rem; }
 .pair img { width: 64px; height: 64px; object-fit: cover; border-radius: 4px; }
 .pair-facts { display: flex; flex-direction: column; gap: 0.1rem; font-size: 0.78rem; }
+
+.utility-controls { flex-wrap: wrap; align-items: flex-end; }
+.utility-controls label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.75rem; color: var(--muted); }
+.utility-controls select, .utility-controls input { background: #0d1526; color: var(--text); border: 1px solid var(--panel-border); border-radius: 8px; padding: 0.4rem; min-width: 110px; }
+.utility-grid { display: grid; grid-template-columns: 1fr 360px; gap: 1rem; align-items: start; }
+.utility-table tr.selected td { background: rgba(125, 211, 252, 0.08); }
+.utility-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 0.8rem; align-items: start; }
+.utility-facts h4 { margin: 0 0 0.4rem; font-size: 0.85rem; }
+.measure-impact { max-height: 260px; overflow: auto; }
+button.secondary.selected { border-color: var(--ok); }

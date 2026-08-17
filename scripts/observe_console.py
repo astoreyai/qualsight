@@ -244,6 +244,33 @@ def main() -> int:
                     "sample_facts": sample_facts,
                 }
             )
+            # QS-D30..D33: run a utility analysis over the fixture matcher Run and the fixture quality job, inspect the results.
+            page.wait_for_function("() => document.querySelectorAll('[data-testid=utility-leaf] option').length > 0 && document.querySelectorAll('[data-testid=utility-job] option').length > 0", timeout=60_000)
+            page.fill("[data-testid=utility-q]", "40")
+            page.fill("[data-testid=utility-replicates]", "200")
+            page.select_option("[data-testid=utility-policy]", "pair.quality.min")
+            page.click("[data-testid=utility-run]")
+            page.wait_for_selector("[data-testid=utility-detail]", timeout=300_000)
+            page.wait_for_selector("[data-testid=erc-plot] polyline", state="attached", timeout=60_000)
+            utility_rows = page.evaluate("() => Array.from(document.querySelectorAll('[data-testid=utility-table] tbody tr')).map(r => r.innerText)")
+            policy_table = page.inner_text("[data-testid=policy-table]")
+            conditioned_rows = page.evaluate("() => document.querySelectorAll('[data-testid=conditioned-table] tbody tr').length")
+            measure_rows = page.evaluate("() => document.querySelectorAll('[data-testid=measure-impact] tbody tr').length")
+            page.click("[data-testid=pairs-rejected]")
+            page.wait_for_selector("[data-testid=utility-pairs]", timeout=60_000)
+            rejected_pairs = page.evaluate("() => Array.from(document.querySelectorAll('[data-testid=utility-pair]')).map(e => e.innerText)")
+            observation["steps"].append(
+                {
+                    "step": "utility",
+                    "analysis_rows": utility_rows,
+                    "erc_polylines": page.evaluate("() => document.querySelectorAll('[data-testid=erc-plot] polyline').length"),
+                    "policy_table": policy_table,
+                    "conditioned_bins": conditioned_rows,
+                    "per_measure_rows": measure_rows,
+                    "rejected_pairs": rejected_pairs[:6],
+                    "detail_heading": page.inner_text("[data-testid=utility-detail] h3"),
+                }
+            )
             projects_api = json.load(urllib.request.urlopen(f"http://127.0.0.1:{API_PORT}/api/projects"))  # noqa: S310
             console_project = next((p for p in projects_api if p["name"] == "Console lifecycle observation"), None)
             observation["console_project"] = (

@@ -154,6 +154,22 @@ CREATE TABLE IF NOT EXISTS matcher_leaves (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS matcher_leaves_by_matrix ON matcher_leaves(matrix_id, leaf_id);
+CREATE TABLE IF NOT EXISTS utility_analyses (
+    analysis_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(project_id),
+    matcher_run_id TEXT NOT NULL,
+    quality_job_id TEXT NOT NULL,
+    quality_measure TEXT NOT NULL,
+    pair_quality_policy TEXT NOT NULL,
+    directory TEXT NOT NULL,
+    utility_sha256 TEXT NOT NULL,
+    policy_sha256 TEXT NOT NULL,
+    pair_table_sha256 TEXT NOT NULL,
+    summary_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS utility_analyses_by_project ON utility_analyses(project_id, created_at);
 CREATE TABLE IF NOT EXISTS jobs (
     job_id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL REFERENCES projects(project_id),
@@ -699,6 +715,64 @@ class RunStore:
                 self._connection.execute("ROLLBACK")
                 raise
             self._connection.execute("COMMIT")
+
+    def record_utility_analysis(self, result: Any) -> None:
+        run = result.run
+        run_json = run.model_dump_json()
+        run_sha = _evidence(run_json)
+        experiment_json = result.experiment.model_dump_json()
+        summary_text = json.dumps(result.summary, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        with self._lock:
+            self._connection.execute("BEGIN")
+            try:
+                self._insert_once("experiments", "experiment_id", result.experiment.experiment_id, byte_exact=False, columns={
+                    "experiment_id": result.experiment.experiment_id, "project_id": result.experiment.project_id, "dataset_id": result.experiment.dataset_id,
+                    "evidence_sha256": _evidence(experiment_json), "record_json": experiment_json})
+                self._insert_once("runs", "run_id", run.run_id, byte_exact=True, columns={
+                    "run_id": run.run_id, "project_id": run.project_id, "experiment_id": run.experiment_id, "sample_id": None,
+                    "run_kind": "ANALYSIS", "status": run.status.value, "engine_resource_id": run.matcher.component_id or "",
+                    "engine_version": run.matcher.version or "", "start_time": run.start_time.isoformat(), "end_time": run.end_time.isoformat(),
+                    "evidence_sha256": run_sha, "record_json": run_json})
+                for artifact in run.artifacts:
+                    artifact_json = artifact.model_dump_json()
+                    self._insert_once("artifacts", "artifact_id", artifact.artifact_id, byte_exact=True, columns={
+                        "artifact_id": artifact.artifact_id, "run_id": artifact.run_id, "kind": artifact.kind.value, "uri": artifact.uri,
+                        "sha256": artifact.sha256, "evidence_sha256": _evidence(artifact_json), "record_json": artifact_json})
+                self._connection.execute(
+                    "INSERT INTO utility_analyses (analysis_id, run_id, project_id, matcher_run_id, quality_job_id, quality_measure, pair_quality_policy, directory, utility_sha256, policy_sha256, pair_table_sha256, summary_json, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (result.analysis_id, run.run_id, run.project_id, result.summary["matcher_run_id"], result.summary["quality_job_id"], result.summary["quality_measure"], result.summary["pair_quality_policy"],
+                     str(result.directory), hashlib.sha256(result.utility_path.read_bytes()).hexdigest(), hashlib.sha256(result.policy_path.read_bytes()).hexdigest(), hashlib.sha256(result.pair_table.read_bytes()).hexdigest(),
+                     summary_text, run.end_time.isoformat()),
+                )
+                event = AuditEvent(
+                    audit_event_id=f"audit-event:sha256:{_evidence(run.run_id + run_sha)}", project_id=run.project_id, actor_id=run.user_id,
+                    event_type=AuditEventType.RUN_COMPLETED, subject_type="Run", subject_id=run.run_id, occurred_at=run.end_time,
+                    details=CanonicalJson.from_value({"kind": "ANALYSIS", "analysis_id": result.analysis_id, "matcher_run_id": result.summary["matcher_run_id"], "quality_job_id": result.summary["quality_job_id"], "quality_measure": result.summary["quality_measure"]}),
+                    current_evidence_sha256=run_sha, local_only=True)
+                event_json = event.model_dump_json()
+                self._insert_once("audit_events", "audit_event_id", event.audit_event_id, byte_exact=True, columns={
+                    "audit_event_id": event.audit_event_id, "project_id": event.project_id, "subject_type": event.subject_type, "subject_id": event.subject_id,
+                    "occurred_at": event.occurred_at.isoformat(), "evidence_sha256": _evidence(event_json), "record_json": event_json})
+            except BaseException:
+                self._connection.execute("ROLLBACK")
+                raise
+            self._connection.execute("COMMIT")
+
+    def utility_analyses(self, *, project_id: str | None = None, matcher_run_id: str | None = None) -> list[dict[str, Any]]:
+        clauses, params = [], []
+        if project_id is not None:
+            clauses.append("project_id = ?"); params.append(project_id)
+        if matcher_run_id is not None:
+            clauses.append("matcher_run_id = ?"); params.append(matcher_run_id)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        cursor = self._connection.execute(f"SELECT * FROM utility_analyses{where} ORDER BY created_at", params)
+        return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
+
+    def utility_analysis(self, analysis_id: str) -> dict[str, Any] | None:
+        cursor = self._connection.execute("SELECT * FROM utility_analyses WHERE analysis_id = ? OR run_id = ?", (analysis_id, analysis_id))
+        row = cursor.fetchone()
+        return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
 
     def matcher_leaves(self, *, project_id: str | None = None, matrix_id: str | None = None) -> list[dict[str, Any]]:
         clauses, params = [], []

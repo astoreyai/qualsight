@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
   "registry_id": "qualsight-core-metrics",
-  "registry_version": "1.0.1",
+  "registry_version": "1.1.0",
   "authority_documents": [
     {
       "source_id": "prd-0.3",
@@ -32,7 +32,9 @@
       "metric_id": "biometric.verification.fmr",
       "definition_version": "1.0.0",
       "canonical_name": "False Match Rate",
-      "aliases": ["FMR"],
+      "aliases": [
+        "FMR"
+      ],
       "domain": "VERIFICATION",
       "metric_type": "RATE",
       "definition": "The proportion of included non-mated comparison trials for which the recorded matcher decision is accept at a specified matcher threshold.",
@@ -68,13 +70,34 @@
       "source_standard": "QUALSIGHT_PRD",
       "source_version": "0.3",
       "references": [
-        {"source_id": "prd-0.3", "locator": "PRD.md:577-578"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:54-55"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:58"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:64"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:70"}
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:577-578"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:54-55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:58"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:64"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        }
       ],
-      "source_requirements": ["QS-REQ-015", "QS-REQ-016", "QS-REQ-018", "QS-REQ-024", "QS-REQ-029"],
+      "source_requirements": [
+        "QS-REQ-015",
+        "QS-REQ-016",
+        "QS-REQ-018",
+        "QS-REQ-024",
+        "QS-REQ-029"
+      ],
       "implementation": {
         "kind": "DEFINITION_ONLY",
         "artifact": "metrics/metric-registry.json"
@@ -91,7 +114,9 @@
       "metric_id": "biometric.verification.fnmr",
       "definition_version": "1.0.0",
       "canonical_name": "False Non-Match Rate",
-      "aliases": ["FNMR"],
+      "aliases": [
+        "FNMR"
+      ],
       "domain": "VERIFICATION",
       "metric_type": "RATE",
       "definition": "The proportion of included mated comparison trials for which the recorded matcher decision is reject at a specified matcher threshold.",
@@ -127,13 +152,34 @@
       "source_standard": "QUALSIGHT_PRD",
       "source_version": "0.3",
       "references": [
-        {"source_id": "prd-0.3", "locator": "PRD.md:580-584"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:54-55"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:58"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:64"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:70"}
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:580-584"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:54-55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:58"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:64"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        }
       ],
-      "source_requirements": ["QS-REQ-015", "QS-REQ-016", "QS-REQ-018", "QS-REQ-024", "QS-REQ-029"],
+      "source_requirements": [
+        "QS-REQ-015",
+        "QS-REQ-016",
+        "QS-REQ-018",
+        "QS-REQ-024",
+        "QS-REQ-029"
+      ],
       "implementation": {
         "kind": "DEFINITION_ONLY",
         "artifact": "metrics/metric-registry.json"
@@ -150,7 +196,9 @@
       "metric_id": "biometric.verification.roc",
       "definition_version": "1.0.0",
       "canonical_name": "Receiver Operating Characteristic",
-      "aliases": ["ROC"],
+      "aliases": [
+        "ROC"
+      ],
       "domain": "VERIFICATION",
       "metric_type": "CURVE",
       "definition": "The empirical threshold curve whose x-coordinate is FMR and whose y-coordinate is one minus FNMR, using one recorded matcher threshold set and decision rule.",
@@ -181,17 +229,40 @@
         "equality_rule_required": true,
         "threshold_reestimation": "NOT_APPLICABLE"
       },
-      "confidence_interval_methods": ["SUBJECT_AWARE_BOOTSTRAP"],
+      "confidence_interval_methods": [
+        "SUBJECT_AWARE_BOOTSTRAP"
+      ],
       "source_standard": "QUALSIGHT_PRD",
       "source_version": "0.3",
       "references": [
-        {"source_id": "prd-0.3", "locator": "PRD.md:583-590"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:54-55"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:58"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:64"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:70"}
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:583-590"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:54-55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:58"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:64"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        }
       ],
-      "source_requirements": ["QS-REQ-015", "QS-REQ-016", "QS-REQ-018", "QS-REQ-024", "QS-REQ-029"],
+      "source_requirements": [
+        "QS-REQ-015",
+        "QS-REQ-016",
+        "QS-REQ-018",
+        "QS-REQ-024",
+        "QS-REQ-029"
+      ],
       "implementation": {
         "kind": "DEFINITION_ONLY",
         "artifact": "metrics/metric-registry.json"
@@ -208,7 +279,9 @@
       "metric_id": "biometric.verification.det",
       "definition_version": "1.0.0",
       "canonical_name": "Detection Error Tradeoff",
-      "aliases": ["DET"],
+      "aliases": [
+        "DET"
+      ],
       "domain": "VERIFICATION",
       "metric_type": "CURVE",
       "definition": "The empirical threshold curve whose coordinates are FMR and FNMR from one recorded matcher threshold set; any normal-deviate axis transform is presentation metadata.",
@@ -239,17 +312,40 @@
         "equality_rule_required": true,
         "threshold_reestimation": "NOT_APPLICABLE"
       },
-      "confidence_interval_methods": ["SUBJECT_AWARE_BOOTSTRAP"],
+      "confidence_interval_methods": [
+        "SUBJECT_AWARE_BOOTSTRAP"
+      ],
       "source_standard": "QUALSIGHT_PRD",
       "source_version": "0.3",
       "references": [
-        {"source_id": "prd-0.3", "locator": "PRD.md:589-590"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:54-55"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:58"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:64"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:70"}
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:589-590"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:54-55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:58"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:64"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        }
       ],
-      "source_requirements": ["QS-REQ-015", "QS-REQ-016", "QS-REQ-018", "QS-REQ-024", "QS-REQ-029"],
+      "source_requirements": [
+        "QS-REQ-015",
+        "QS-REQ-016",
+        "QS-REQ-018",
+        "QS-REQ-024",
+        "QS-REQ-029"
+      ],
       "implementation": {
         "kind": "DEFINITION_ONLY",
         "artifact": "metrics/metric-registry.json"
@@ -266,7 +362,9 @@
       "metric_id": "biometric.verification.eer",
       "definition_version": "1.0.0",
       "canonical_name": "Equal Error Rate",
-      "aliases": ["EER"],
+      "aliases": [
+        "EER"
+      ],
       "domain": "VERIFICATION",
       "metric_type": "OPERATING_POINT",
       "definition": "The error rate at a matcher operating point where FMR equals FNMR, reported only with the method used to locate or estimate that operating point.",
@@ -298,17 +396,40 @@
         "equality_rule_required": true,
         "threshold_reestimation": "EER_ESTIMATION_METHOD"
       },
-      "confidence_interval_methods": ["SUBJECT_AWARE_BOOTSTRAP"],
+      "confidence_interval_methods": [
+        "SUBJECT_AWARE_BOOTSTRAP"
+      ],
       "source_standard": "QUALSIGHT_PRD",
       "source_version": "0.3",
       "references": [
-        {"source_id": "prd-0.3", "locator": "PRD.md:592-596"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:54-55"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:58"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:64"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:70"}
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:592-596"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:54-55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:58"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:64"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        }
       ],
-      "source_requirements": ["QS-REQ-015", "QS-REQ-016", "QS-REQ-018", "QS-REQ-024", "QS-REQ-029"],
+      "source_requirements": [
+        "QS-REQ-015",
+        "QS-REQ-016",
+        "QS-REQ-018",
+        "QS-REQ-024",
+        "QS-REQ-029"
+      ],
       "implementation": {
         "kind": "DEFINITION_ONLY",
         "artifact": "metrics/metric-registry.json"
@@ -325,7 +446,11 @@
       "metric_id": "biometric.quality.utility.erc",
       "definition_version": "1.0.0",
       "canonical_name": "Error-versus-Reject Curve",
-      "aliases": ["ERC", "Error-versus-Discard Curve", "EDC"],
+      "aliases": [
+        "ERC",
+        "Error-versus-Discard Curve",
+        "EDC"
+      ],
       "domain": "QUALITY",
       "metric_type": "CURVE",
       "definition": "The retained-set error rate as progressively worse-quality comparison units are rejected under a recorded pair-quality policy while the matcher threshold remains fixed across the curve.",
@@ -368,18 +493,57 @@
       "source_standard": "QUALSIGHT_PRD",
       "source_version": "0.3",
       "references": [
-        {"source_id": "prd-0.3", "locator": "PRD.md:706-725"},
-        {"source_id": "prd-0.3", "locator": "PRD.md:739-753"},
-        {"source_id": "prd-0.3", "locator": "PRD.md:797-825"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:55"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:58"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:60-61"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:64"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:68"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:70"},
-        {"source_id": "requirements-0.2", "locator": "REQUIREMENTS.md:84"}
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:706-725"
+        },
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:739-753"
+        },
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:797-825"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:58"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:60-61"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:64"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:68"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:84"
+        }
       ],
-      "source_requirements": ["QS-REQ-016", "QS-REQ-018", "QS-REQ-020", "QS-REQ-021", "QS-REQ-024", "QS-REQ-028A", "QS-REQ-029", "QS-REQ-043"],
+      "source_requirements": [
+        "QS-REQ-016",
+        "QS-REQ-018",
+        "QS-REQ-020",
+        "QS-REQ-021",
+        "QS-REQ-024",
+        "QS-REQ-028A",
+        "QS-REQ-029",
+        "QS-REQ-043"
+      ],
       "implementation": {
         "kind": "DEFINITION_ONLY",
         "artifact": "metrics/metric-registry.json"
@@ -390,6 +554,743 @@
       ],
       "warnings": [
         "Matcher thresholds must not be silently re-optimized during rejection, and equal-quality units must not be split across rejection points."
+      ]
+    },
+    {
+      "metric_id": "biometric.quality.utility.au-erc",
+      "definition_version": "1.0.0",
+      "canonical_name": "Area under the Error-versus-Reject Curve",
+      "aliases": [
+        "AU-ERC",
+        "AUERC"
+      ],
+      "domain": "QUALITY",
+      "metric_type": "AREA",
+      "definition": "The trapezoid area under the registered ERC over an explicitly recorded rejection interval, normally [0, 1], computed over the recorded step points of the curve.",
+      "formula": {
+        "kind": "CURVE_AREA",
+        "formula_version": "1.0.0",
+        "curve_metric_id": "biometric.quality.utility.erc",
+        "curve_definition_version": "1.0.0",
+        "integration_domain": "RECORDED_REJECTION_INTERVAL",
+        "integration_method": "TRAPEZOID_OVER_RECORDED_STEP_POINTS"
+      },
+      "higher_or_lower_is_better": "LOWER",
+      "required_inputs": [
+        "registered_erc_curve",
+        "integration_domain",
+        "integration_method",
+        "pair_quality_policy_id",
+        "fixed_matcher_threshold",
+        "processing_failure_policy"
+      ],
+      "aggregation_unit": "PAIR_QUALITY_COMPARISON_UNIT",
+      "threshold_semantics": {
+        "threshold_kind": "FIXED_MATCHER_THRESHOLD_AND_RECORDED_QUALITY_CUTOFF",
+        "decision_rule_source": "RECORDED_PROTOCOL",
+        "score_direction_required": true,
+        "equality_rule_required": true,
+        "threshold_reestimation": "FORBIDDEN_ACROSS_ANALYSIS"
+      },
+      "confidence_interval_methods": [
+        "SUBJECT_AWARE_BOOTSTRAP",
+        "PAIRED_SUBJECT_BOOTSTRAP"
+      ],
+      "source_standard": "QUALSIGHT_PRD",
+      "source_version": "0.3",
+      "references": [
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:706-725"
+        },
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:739-753"
+        },
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:934-969"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:60"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:61"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:68"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:84"
+        }
+      ],
+      "source_requirements": [
+        "QS-REQ-016",
+        "QS-REQ-020",
+        "QS-REQ-021",
+        "QS-REQ-028A",
+        "QS-REQ-029",
+        "QS-REQ-043"
+      ],
+      "implementation": {
+        "kind": "DEFINITION_ONLY",
+        "artifact": "metrics/metric-registry.json"
+      },
+      "implementation_version": "1.0.0",
+      "limitations": [
+        "The area depends on the recorded rejection interval, the pair-quality policy, and the fixed matcher threshold; areas computed under different settings are not comparable."
+      ],
+      "warnings": [
+        "The integration domain must be recorded with every reported value."
+      ]
+    },
+    {
+      "metric_id": "biometric.quality.utility.partial-au-erc",
+      "definition_version": "1.0.0",
+      "canonical_name": "Partial area under the Error-versus-Reject Curve",
+      "aliases": [
+        "pAU-ERC",
+        "partial AU-ERC"
+      ],
+      "domain": "QUALITY",
+      "metric_type": "AREA",
+      "definition": "The trapezoid area under the registered ERC over an explicitly recorded partial rejection interval [0, r] with r < 1, such as 0-10 percent or 0-20 percent rejection.",
+      "formula": {
+        "kind": "CURVE_AREA",
+        "formula_version": "1.0.0",
+        "curve_metric_id": "biometric.quality.utility.erc",
+        "curve_definition_version": "1.0.0",
+        "integration_domain": "RECORDED_PARTIAL_REJECTION_INTERVAL",
+        "integration_method": "TRAPEZOID_OVER_RECORDED_STEP_POINTS"
+      },
+      "higher_or_lower_is_better": "LOWER",
+      "required_inputs": [
+        "registered_erc_curve",
+        "integration_domain",
+        "integration_method",
+        "pair_quality_policy_id",
+        "fixed_matcher_threshold",
+        "processing_failure_policy"
+      ],
+      "aggregation_unit": "PAIR_QUALITY_COMPARISON_UNIT",
+      "threshold_semantics": {
+        "threshold_kind": "FIXED_MATCHER_THRESHOLD_AND_RECORDED_QUALITY_CUTOFF",
+        "decision_rule_source": "RECORDED_PROTOCOL",
+        "score_direction_required": true,
+        "equality_rule_required": true,
+        "threshold_reestimation": "FORBIDDEN_ACROSS_ANALYSIS"
+      },
+      "confidence_interval_methods": [
+        "SUBJECT_AWARE_BOOTSTRAP",
+        "PAIRED_SUBJECT_BOOTSTRAP"
+      ],
+      "source_standard": "QUALSIGHT_PRD",
+      "source_version": "0.3",
+      "references": [
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:706-725"
+        },
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:739-753"
+        },
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:934-969"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:60"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:61"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:68"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:84"
+        }
+      ],
+      "source_requirements": [
+        "QS-REQ-016",
+        "QS-REQ-020",
+        "QS-REQ-021",
+        "QS-REQ-028A",
+        "QS-REQ-029",
+        "QS-REQ-043"
+      ],
+      "implementation": {
+        "kind": "DEFINITION_ONLY",
+        "artifact": "metrics/metric-registry.json"
+      },
+      "implementation_version": "1.0.0",
+      "limitations": [
+        "Partial areas over different intervals are not comparable; the upper bound r is an experiment input."
+      ],
+      "warnings": [
+        "The partial interval must be recorded with every reported value."
+      ]
+    },
+    {
+      "metric_id": "biometric.quality.utility.risk-coverage",
+      "definition_version": "1.0.0",
+      "canonical_name": "Risk-Coverage Curve",
+      "aliases": [
+        "risk-coverage",
+        "RC curve"
+      ],
+      "domain": "QUALITY",
+      "metric_type": "CURVE",
+      "definition": "The retained-set error rate (risk) as a function of the retained coverage fraction, obtained from the registered ERC by coverage = 1 - rejected fraction with the matcher threshold fixed.",
+      "formula": {
+        "kind": "COVERAGE_CURVE",
+        "formula_version": "1.0.0",
+        "source_curve_metric_id": "biometric.quality.utility.erc",
+        "source_curve_definition_version": "1.0.0",
+        "x_quantity": "RETAINED_COVERAGE_FRACTION",
+        "y_quantity": "RETAINED_BASE_ERROR_RATE"
+      },
+      "higher_or_lower_is_better": "NOT_APPLICABLE_TO_CURVE",
+      "required_inputs": [
+        "registered_erc_curve",
+        "pair_quality_policy_id",
+        "fixed_matcher_threshold",
+        "processing_failure_policy"
+      ],
+      "aggregation_unit": "PAIR_QUALITY_COMPARISON_UNIT",
+      "threshold_semantics": {
+        "threshold_kind": "FIXED_MATCHER_THRESHOLD_AND_RECORDED_QUALITY_CUTOFF",
+        "decision_rule_source": "RECORDED_PROTOCOL",
+        "score_direction_required": true,
+        "equality_rule_required": true,
+        "threshold_reestimation": "FORBIDDEN_ACROSS_ANALYSIS"
+      },
+      "confidence_interval_methods": [
+        "SUBJECT_AWARE_BOOTSTRAP",
+        "PAIRED_SUBJECT_BOOTSTRAP"
+      ],
+      "source_standard": "QUALSIGHT_PRD",
+      "source_version": "0.3",
+      "references": [
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:706-725"
+        },
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:739-753"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:60"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:61"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:84"
+        }
+      ],
+      "source_requirements": [
+        "QS-REQ-020",
+        "QS-REQ-021",
+        "QS-REQ-029",
+        "QS-REQ-043"
+      ],
+      "implementation": {
+        "kind": "DEFINITION_ONLY",
+        "artifact": "metrics/metric-registry.json"
+      },
+      "implementation_version": "1.0.0",
+      "limitations": [
+        "Coverage is a fraction of the usable comparison units after the recorded failure policy, not of all attempted comparisons."
+      ],
+      "warnings": [
+        "Coverage curves under different pair-quality policies must not be overlaid without labelling the policy."
+      ]
+    },
+    {
+      "metric_id": "biometric.quality.utility.quality-conditioned-fnmr",
+      "definition_version": "1.0.0",
+      "canonical_name": "Quality-conditioned false non-match rate",
+      "aliases": [
+        "FNMR | quality bin",
+        "conditional FNMR"
+      ],
+      "domain": "QUALITY",
+      "metric_type": "RATE",
+      "definition": "The false non-match rate of the registered FNMR definition computed within each recorded pair-quality bin at the fixed matcher threshold, with the bin edges, unit counts, and exact binomial intervals reported per bin.",
+      "formula": {
+        "kind": "CONDITIONAL_RATE",
+        "formula_version": "1.0.0",
+        "base_metric_id": "biometric.verification.fnmr",
+        "base_definition_version": "1.0.0",
+        "conditioning_variable": "PAIR_QUALITY_BIN",
+        "bin_edges": "RECORDED_WITH_RESULT"
+      },
+      "higher_or_lower_is_better": "LOWER",
+      "required_inputs": [
+        "registered_base_error_metric",
+        "fixed_matcher_threshold",
+        "pair_quality_policy_id",
+        "bin_edges",
+        "processing_failure_policy"
+      ],
+      "aggregation_unit": "PAIR_QUALITY_COMPARISON_UNIT",
+      "threshold_semantics": {
+        "threshold_kind": "FIXED_MATCHER_THRESHOLD_AND_RECORDED_QUALITY_CUTOFF",
+        "decision_rule_source": "RECORDED_PROTOCOL",
+        "score_direction_required": true,
+        "equality_rule_required": true,
+        "threshold_reestimation": "FORBIDDEN_ACROSS_ANALYSIS"
+      },
+      "confidence_interval_methods": [
+        "CLOPPER_PEARSON_EXACT_BINOMIAL",
+        "SUBJECT_AWARE_BOOTSTRAP"
+      ],
+      "source_standard": "QUALSIGHT_PRD",
+      "source_version": "0.3",
+      "references": [
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:706-725"
+        },
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:608-632"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:60"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:84"
+        }
+      ],
+      "source_requirements": [
+        "QS-REQ-016",
+        "QS-REQ-020",
+        "QS-REQ-029",
+        "QS-REQ-043"
+      ],
+      "implementation": {
+        "kind": "DEFINITION_ONLY",
+        "artifact": "metrics/metric-registry.json"
+      },
+      "implementation_version": "1.0.0",
+      "limitations": [
+        "Bins with few comparison units cannot support a credible rate and are flagged rather than reported as precise."
+      ],
+      "warnings": [
+        "Bin edges are an experiment input and must be recorded with every reported table."
+      ]
+    },
+    {
+      "metric_id": "biometric.quality.utility.quality-conditioned-fmr",
+      "definition_version": "1.0.0",
+      "canonical_name": "Quality-conditioned false match rate",
+      "aliases": [
+        "FMR | quality bin",
+        "conditional FMR"
+      ],
+      "domain": "QUALITY",
+      "metric_type": "RATE",
+      "definition": "The false match rate of the registered FMR definition computed within each recorded pair-quality bin at the fixed matcher threshold, reported only where the non-mated units in the bin statistically support it.",
+      "formula": {
+        "kind": "CONDITIONAL_RATE",
+        "formula_version": "1.0.0",
+        "base_metric_id": "biometric.verification.fmr",
+        "base_definition_version": "1.0.0",
+        "conditioning_variable": "PAIR_QUALITY_BIN",
+        "bin_edges": "RECORDED_WITH_RESULT"
+      },
+      "higher_or_lower_is_better": "LOWER",
+      "required_inputs": [
+        "registered_base_error_metric",
+        "fixed_matcher_threshold",
+        "pair_quality_policy_id",
+        "bin_edges",
+        "processing_failure_policy"
+      ],
+      "aggregation_unit": "PAIR_QUALITY_COMPARISON_UNIT",
+      "threshold_semantics": {
+        "threshold_kind": "FIXED_MATCHER_THRESHOLD_AND_RECORDED_QUALITY_CUTOFF",
+        "decision_rule_source": "RECORDED_PROTOCOL",
+        "score_direction_required": true,
+        "equality_rule_required": true,
+        "threshold_reestimation": "FORBIDDEN_ACROSS_ANALYSIS"
+      },
+      "confidence_interval_methods": [
+        "CLOPPER_PEARSON_EXACT_BINOMIAL",
+        "SUBJECT_AWARE_BOOTSTRAP"
+      ],
+      "source_standard": "QUALSIGHT_PRD",
+      "source_version": "0.3",
+      "references": [
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:706-725"
+        },
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:608-632"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:60"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:84"
+        }
+      ],
+      "source_requirements": [
+        "QS-REQ-016",
+        "QS-REQ-020",
+        "QS-REQ-029",
+        "QS-REQ-043"
+      ],
+      "implementation": {
+        "kind": "DEFINITION_ONLY",
+        "artifact": "metrics/metric-registry.json"
+      },
+      "implementation_version": "1.0.0",
+      "limitations": [
+        "Non-mated units per bin are usually too few for low target FMR values; unsupported bins are flagged."
+      ],
+      "warnings": [
+        "Bin edges are an experiment input and must be recorded with every reported table."
+      ]
+    },
+    {
+      "metric_id": "biometric.quality.utility.quality-error-association",
+      "definition_version": "1.0.0",
+      "canonical_name": "Quality-error association",
+      "aliases": [
+        "quality-error correlation",
+        "quality-utility association"
+      ],
+      "domain": "QUALITY",
+      "metric_type": "ASSOCIATION",
+      "definition": "Association statistics between pair quality and matcher outcome over the usable comparison units: Spearman and Kendall rank correlation between pair quality and comparison score, and a logistic regression of the error indicator at the fixed matcher threshold on pair quality with its coefficient and odds ratio, each with an interval and a support flag.",
+      "formula": {
+        "kind": "ASSOCIATION_STATISTICS",
+        "formula_version": "1.0.0",
+        "predictor": "PAIR_QUALITY",
+        "outcome": "ERROR_INDICATOR_AT_FIXED_MATCHER_THRESHOLD_AND_COMPARISON_SCORE",
+        "statistics": [
+          "SPEARMAN_RANK_CORRELATION",
+          "KENDALL_TAU_B",
+          "LOGISTIC_REGRESSION_COEFFICIENT",
+          "ODDS_RATIO"
+        ]
+      },
+      "higher_or_lower_is_better": "NOT_APPLICABLE_TO_CURVE",
+      "required_inputs": [
+        "pair_quality_value",
+        "comparison_score",
+        "error_indicator",
+        "fixed_matcher_threshold",
+        "pair_quality_policy_id",
+        "processing_failure_policy",
+        "model_support_rule"
+      ],
+      "aggregation_unit": "PAIR_QUALITY_COMPARISON_UNIT",
+      "threshold_semantics": {
+        "threshold_kind": "FIXED_MATCHER_THRESHOLD_AND_RECORDED_QUALITY_CUTOFF",
+        "decision_rule_source": "RECORDED_PROTOCOL",
+        "score_direction_required": true,
+        "equality_rule_required": true,
+        "threshold_reestimation": "FORBIDDEN_ACROSS_ANALYSIS"
+      },
+      "confidence_interval_methods": [
+        "FISHER_Z_LARGE_SAMPLE",
+        "WALD_NORMAL",
+        "SUBJECT_AWARE_BOOTSTRAP"
+      ],
+      "source_standard": "QUALSIGHT_PRD",
+      "source_version": "0.3",
+      "references": [
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:706-725"
+        },
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:934-969"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:60"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:68"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:84"
+        }
+      ],
+      "source_requirements": [
+        "QS-REQ-020",
+        "QS-REQ-028A",
+        "QS-REQ-029",
+        "QS-REQ-043"
+      ],
+      "implementation": {
+        "kind": "DEFINITION_ONLY",
+        "artifact": "metrics/metric-registry.json"
+      },
+      "implementation_version": "1.0.0",
+      "limitations": [
+        "Regression models run only when the recorded support rule (events per parameter) is met; otherwise the statistic is reported as unsupported.",
+        "Comparison units that share subjects are not independent observations; intervals that assume independence are labelled as approximations."
+      ],
+      "warnings": [
+        "Association is not evidence of calibration; scores and qualities are never described as probabilities."
+      ]
+    },
+    {
+      "metric_id": "biometric.quality.utility.failure-predictor",
+      "definition_version": "1.0.0",
+      "canonical_name": "Quality as failure predictor",
+      "aliases": [
+        "failure prediction",
+        "quality failure predictor"
+      ],
+      "domain": "QUALITY",
+      "metric_type": "CLASSIFIER_SUMMARY",
+      "definition": "Treats the matcher error at the fixed matcher threshold (or a comparison processing failure) as the outcome and negative pair quality as the predictor, reporting ROC-AUC, PR-AUC as average precision, and sensitivity, specificity, precision, and recall at the recorded quality policy threshold.",
+      "formula": {
+        "kind": "BINARY_PREDICTOR_SUMMARY",
+        "formula_version": "1.0.0",
+        "predictor": "NEGATIVE_PAIR_QUALITY",
+        "outcome": "ERROR_AT_FIXED_MATCHER_THRESHOLD_OR_PROCESSING_FAILURE",
+        "statistics": [
+          "ROC_AUC",
+          "PR_AUC_AVERAGE_PRECISION",
+          "SENSITIVITY",
+          "SPECIFICITY",
+          "PRECISION",
+          "RECALL"
+        ],
+        "cutoff_source": "RECORDED_QUALITY_POLICY_THRESHOLD"
+      },
+      "higher_or_lower_is_better": "NOT_APPLICABLE_TO_CURVE",
+      "required_inputs": [
+        "pair_quality_value",
+        "outcome_indicator",
+        "fixed_matcher_threshold",
+        "quality_policy_threshold",
+        "pair_quality_policy_id",
+        "processing_failure_policy"
+      ],
+      "aggregation_unit": "PAIR_QUALITY_COMPARISON_UNIT",
+      "threshold_semantics": {
+        "threshold_kind": "FIXED_MATCHER_THRESHOLD_AND_RECORDED_QUALITY_CUTOFF",
+        "decision_rule_source": "RECORDED_PROTOCOL",
+        "score_direction_required": true,
+        "equality_rule_required": true,
+        "threshold_reestimation": "FORBIDDEN_ACROSS_ANALYSIS"
+      },
+      "confidence_interval_methods": [
+        "CLOPPER_PEARSON_EXACT_BINOMIAL",
+        "SUBJECT_AWARE_BOOTSTRAP"
+      ],
+      "source_standard": "QUALSIGHT_PRD",
+      "source_version": "0.3",
+      "references": [
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:706-725"
+        },
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:608-632"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:60"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:84"
+        }
+      ],
+      "source_requirements": [
+        "QS-REQ-016",
+        "QS-REQ-020",
+        "QS-REQ-029",
+        "QS-REQ-043"
+      ],
+      "implementation": {
+        "kind": "DEFINITION_ONLY",
+        "artifact": "metrics/metric-registry.json"
+      },
+      "implementation_version": "1.0.0",
+      "limitations": [
+        "Both outcome classes are required; when the sample has no errors the summary is reported as unsupported.",
+        "PR-AUC is preferred where matcher errors are rare."
+      ],
+      "warnings": [
+        "A high ROC-AUC does not make the quality score a calibrated probability of failure."
+      ]
+    },
+    {
+      "metric_id": "biometric.policy.threshold-analysis",
+      "definition_version": "1.0.0",
+      "canonical_name": "Threshold and policy analysis",
+      "aliases": [
+        "operating policy analysis",
+        "quality policy impact"
+      ],
+      "domain": "VERIFICATION",
+      "metric_type": "OPERATING_POINT",
+      "definition": "For an operating policy of pair quality at or above a QUALITY POLICY THRESHOLD combined with a fixed MATCHER THRESHOLD, reports retention rate, rejection rate, FMR and FNMR before and after the policy, the number rejected, the number of errors prevented, the number of successful comparisons removed, and the per-quality-measure impact, each reconciled exactly to the source comparisons.",
+      "formula": {
+        "kind": "POLICY_OPERATING_POINT",
+        "formula_version": "1.0.0",
+        "matcher_threshold_kind": "MATCHER_THRESHOLD",
+        "quality_threshold_kind": "QUALITY_POLICY_THRESHOLD",
+        "reported_quantities": [
+          "RETENTION_RATE",
+          "REJECTION_RATE",
+          "FMR",
+          "FNMR",
+          "NUMBER_REJECTED",
+          "ERRORS_PREVENTED",
+          "SUCCESSFUL_COMPARISONS_REMOVED",
+          "PER_QUALITY_MEASURE_IMPACT"
+        ],
+        "matcher_threshold_reestimation": "FORBIDDEN"
+      },
+      "higher_or_lower_is_better": "NOT_APPLICABLE_TO_CURVE",
+      "required_inputs": [
+        "fixed_matcher_threshold",
+        "quality_policy_threshold",
+        "pair_quality_policy_id",
+        "quality_measure_id",
+        "score_direction",
+        "threshold_equality_rule",
+        "processing_failure_policy"
+      ],
+      "aggregation_unit": "PAIR_QUALITY_COMPARISON_UNIT",
+      "threshold_semantics": {
+        "threshold_kind": "MATCHER_THRESHOLD_AND_QUALITY_POLICY_THRESHOLD_REPORTED_SEPARATELY",
+        "decision_rule_source": "RECORDED_PROTOCOL",
+        "score_direction_required": true,
+        "equality_rule_required": true,
+        "threshold_reestimation": "FORBIDDEN_DURING_POLICY_ANALYSIS"
+      },
+      "confidence_interval_methods": [
+        "CLOPPER_PEARSON_EXACT_BINOMIAL",
+        "SUBJECT_AWARE_BOOTSTRAP"
+      ],
+      "source_standard": "QUALSIGHT_PRD",
+      "source_version": "0.3",
+      "references": [
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:797-825"
+        },
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:608-632"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:64"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:84"
+        }
+      ],
+      "source_requirements": [
+        "QS-REQ-016",
+        "QS-REQ-024",
+        "QS-REQ-029",
+        "QS-REQ-043"
+      ],
+      "implementation": {
+        "kind": "DEFINITION_ONLY",
+        "artifact": "metrics/metric-registry.json"
+      },
+      "implementation_version": "1.0.0",
+      "limitations": [
+        "The per-quality-measure impact table cuts each measure at a retention-matched cutoff and is a diagnostic, not a policy recommendation."
+      ],
+      "warnings": [
+        "Matcher, quality-policy, and standards or engine thresholds must never be visually conflated."
       ]
     }
   ]

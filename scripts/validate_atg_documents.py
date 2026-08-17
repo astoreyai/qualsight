@@ -89,6 +89,11 @@ CURRENT_ACCEPTED_WHOLE = {
     "QS-C23",
     "QS-C24",
     "QS-C25",
+    "QS-D30",
+    "QS-D31",
+    "QS-D32",
+    "QS-D33",
+    "QS-D34",
 }
 CURRENT_ACCEPTED_REFINEMENTS = {"QS-A00.R8", "QS-A05.R1"}
 CURRENT_ACCEPTED_CHILDREN = {
@@ -438,8 +443,8 @@ def _validate_controller_snapshot(
                 "ATG_LOOP.md controller snapshot",
                 f"{label} differs: count={count}, ids={sorted(observed)}",
             )
-    if rows.get("Dependency-ready whole capabilities") != (1, {"QS-D30"}):
-        _fail("ATG_LOOP.md controller snapshot", "QS-D30 is the only dependency-ready whole capability under decision 28")
+    if rows.get("Dependency-ready whole capabilities") != (1, {"QS-E40"}):
+        _fail("ATG_LOOP.md controller snapshot", "QS-E40 is the only dependency-ready whole capability after Phase 3")
     if "Authorized OFIQ process executions" not in rows:
         _fail("ATG_LOOP.md controller snapshot", "authorized OFIQ execution row is missing")
 
@@ -620,6 +625,9 @@ def _validate_current_output_hashes(records: list[dict[str, Any]]) -> int:
         "scripts/validate_atg_documents.py": PROJECT_ROOT
         / "scripts/validate_atg_documents.py",
         "tests/test_atg_documents.py": PROJECT_ROOT / "tests/test_atg_documents.py",
+        "metrics/metric-registry.json": PROJECT_ROOT / "metrics/metric-registry.json",
+        "scripts/validate_metric_registry.py": PROJECT_ROOT / "scripts/validate_metric_registry.py",
+        "tests/test_metric_registry.py": PROJECT_ROOT / "tests/test_metric_registry.py",
         "resources/resource-registry.json": PROJECT_ROOT
         / "resources/resource-registry.json",
         "resources/manifests/lfw-local-pairs-v1.jsonl": PROJECT_ROOT
@@ -716,6 +724,9 @@ def _validate_current_output_hashes(records: list[dict[str, Any]]) -> int:
         "backend/tests/test_matcher_runtime_real.py": PROJECT_ROOT / "backend/tests/test_matcher_runtime_real.py",
         "backend/tests/test_matcher_matrix_real.py": PROJECT_ROOT / "backend/tests/test_matcher_matrix_real.py",
         "backend/tests/api/test_matcher_api_real.py": PROJECT_ROOT / "backend/tests/api/test_matcher_api_real.py",
+        "atg/evidence/2026-08-17-console-observation-06.json": PROJECT_ROOT / "atg/evidence/2026-08-17-console-observation-06.json",
+        "scripts/verify_utility_analysis.py": PROJECT_ROOT / "scripts/verify_utility_analysis.py",
+        "resources/authorizations/qualsight-owner-phase2-amendment-2026-08-17.json": PROJECT_ROOT / "resources/authorizations/qualsight-owner-phase2-amendment-2026-08-17.json",
     }
     for label, path in expected.items():
         actual = _sha256(path)

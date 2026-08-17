@@ -61,6 +61,18 @@ def main(argv: list[str] | None = None) -> int:
     matrix.add_argument("--project-id", required=True)
     matrix.add_argument("--protocol-id", required=True)
     matrix.add_argument("--fixture-pairs-only", action="store_true", help="restrict to the registered subset-fixture pairs (gate mode)")
+    utility = sub.add_parser("utility", help="run a quality-utility analysis over one matcher Run and one quality job")
+    utility.add_argument("--project-id", required=True)
+    utility.add_argument("--matcher-run-id", required=True)
+    utility.add_argument("--quality-job-id", required=True)
+    utility.add_argument("--quality-measure", default="UnifiedQualityScore")
+    utility.add_argument("--policy", default="pair.quality.min")
+    utility.add_argument("--target-fmr", type=float, default=0.001)
+    utility.add_argument("--matcher-threshold", type=float, default=None)
+    utility.add_argument("--quality-threshold", type=float, default=None)
+    utility.add_argument("--partial-interval", type=float, default=0.2)
+    utility.add_argument("--replicates", type=int, default=1000)
+    utility.add_argument("--seed", type=int, default=20260817)
     args = parser.parse_args(argv)
 
     settings = Settings.from_environment()
@@ -209,6 +221,26 @@ def main(argv: list[str] | None = None) -> int:
                                 "eer": policy["eer"]["eer"], "tenfold_mean_accuracy": policy["view2_tenfold"]["mean_accuracy"],
                                 "fnmr_at_fmr_1e-3": next((p.get("fnmr") for p in policy["operating_points"] if p["target_fmr"] == 0.001), None)})
             print(json.dumps({"matrix_id": job.matrix_id, "leaves": summary}, indent=2))
+            return 0
+        if args.command == "utility":
+            from .analysis.utility import UtilityAnalysisJob, UtilityRequest
+            from .projects import ProjectService
+
+            engine = _engine(settings)
+            service = ProjectService(store, engine)
+            project = service.require_writable(args.project_id)
+            request = UtilityRequest(
+                matcher_run_id=args.matcher_run_id, quality_job_id=args.quality_job_id, quality_measure=args.quality_measure, pair_quality_policy=args.policy,
+                target_fmr=args.target_fmr, matcher_threshold=args.matcher_threshold, quality_threshold=args.quality_threshold, partial_interval=args.partial_interval,
+                bootstrap_replicates=args.replicates, seed=args.seed,
+            )
+            job = UtilityAnalysisJob(store=store, repository_root=settings.repository_root, project=project, actor=service.actor, request=request, job_root=settings.data_dir / "analyses")
+            existing = store.utility_analysis(job.analysis_id)
+            if existing is not None:
+                print(json.dumps({"analysis_id": job.analysis_id, "already_recorded": True, "summary": json.loads(existing["summary_json"])}, indent=2))
+                return 0
+            result = job.run()
+            print(json.dumps({"analysis_id": result.analysis_id, "run_id": result.run.run_id, "directory": str(result.directory), "summary": result.summary}, indent=2))
             return 0
         if args.command == "export-run":
             manifest = export_run_manifest(store, args.run_id, args.out)

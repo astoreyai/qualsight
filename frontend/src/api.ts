@@ -282,7 +282,82 @@ export interface MatrixStatus {
   leaves: MatcherLeaf[];
 }
 
+
+export interface PairQualityPolicy { id: string; version: string; definition: string }
+
+export interface UtilitySummary {
+  analysis_id: string;
+  run_id: string;
+  matcher_run_id: string;
+  leaf_id: string;
+  matcher_id: string;
+  condition_id: string;
+  quality_job_id: string;
+  quality_measure: string;
+  pair_quality_policy: string;
+  matcher_threshold: number;
+  quality_threshold: number;
+  au_erc_fnmr: number | null;
+  partial_au_erc_fnmr: number | null;
+  au_erc_fmr: number | null;
+  fnmr_before: number | null;
+  fnmr_after: number | null;
+  retention_rate: number | null;
+  errors_prevented: number;
+  successful_comparisons_removed: number;
+  created_at: string;
+  links: { analysis: string; run: string; pairs: string; matcher_run: string; quality_job: string };
+}
+
+export interface UtilityRequestBody {
+  matcher_run_id: string;
+  quality_job_id: string;
+  quality_measure?: string;
+  pair_quality_policy?: string;
+  target_fmr?: number;
+  matcher_threshold?: number | null;
+  quality_threshold?: number | null;
+  partial_interval?: number;
+  bootstrap_replicates?: number;
+  seed?: number;
+}
+
+export interface UtilityAnalysisOut {
+  analysis_id: string;
+  state: "RUNNING" | "COMPLETED" | "FAILED";
+  error: string | null;
+  summary?: UtilitySummary;
+  utility?: any;
+  policy?: any;
+  artifact_sha256?: Record<string, string>;
+}
+
+export interface UtilityPairRow {
+  pair_id: string;
+  fold: number;
+  label: string;
+  left_sample_id: string;
+  right_sample_id: string;
+  left_subject_id: string;
+  right_subject_id: string;
+  score: number | null;
+  failure: string | null;
+  quality_left: number | null;
+  quality_right: number | null;
+  pair_quality: number | null;
+  accepted_at_matcher_threshold: boolean | null;
+  retained_by_quality_policy: boolean | null;
+  decision_error: boolean | null;
+  links: { left_sample: string; right_sample: string; left_image: string | null; right_image: string | null; left_quality: string; right_quality: string; run: string };
+}
+
 export const api = {
+  pairQualityPolicies: () => fetch("/api/pair-quality-policies").then((r) => readJson<{ version: string; policies: PairQualityPolicy[] }>(r)),
+  utilityAnalyses: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/utility-analyses`).then((r) => readJson<UtilitySummary[]>(r)),
+  startUtilityAnalysis: (project_id: string, body: UtilityRequestBody) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/utility-analyses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => readJson<{ analysis_id: string; state: string; already_recorded?: boolean }>(r)),
+  utilityAnalysis: (analysis_id: string) => fetch(`/api/utility-analyses/${encodeURIComponent(analysis_id)}`).then((r) => readJson<UtilityAnalysisOut>(r)),
+  utilityPairs: (analysis_id: string, query: string) => fetch(`/api/utility-analyses/${encodeURIComponent(analysis_id)}/pairs?${query}`).then((r) => readJson<{ total: number; rows: UtilityPairRow[] }>(r)),
   protocols: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/protocols`).then((r) => readJson<Array<{ protocol_id: string; name: string; pair_count: number; mated_count: number; nonmated_count: number }>>(r)),
   freezeProtocol: (project_id: string, dataset_id: string) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/${encodeURIComponent(dataset_id)}/protocols/freeze-lfw-view2`, { method: "POST" }).then((r) => readJson<{ protocol_id: string; pair_count: number }>(r)),

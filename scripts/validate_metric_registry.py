@@ -28,6 +28,16 @@ CORE_METRIC_IDS = {
     "biometric.verification.eer",
     "biometric.quality.utility.erc",
 }
+PHASE3_METRIC_IDS = {
+    "biometric.quality.utility.au-erc",
+    "biometric.quality.utility.partial-au-erc",
+    "biometric.quality.utility.risk-coverage",
+    "biometric.quality.utility.quality-conditioned-fnmr",
+    "biometric.quality.utility.quality-conditioned-fmr",
+    "biometric.quality.utility.quality-error-association",
+    "biometric.quality.utility.failure-predictor",
+    "biometric.policy.threshold-analysis",
+}
 REQUIRED_SOURCE_REQUIREMENTS = {
     "QS-REQ-015",
     "QS-REQ-016",
@@ -62,7 +72,7 @@ ALLOWED_DOMAINS = {
     "DEMOGRAPHICS",
     "SYSTEM",
 }
-ALLOWED_TYPES = {"RATE", "CURVE", "OPERATING_POINT"}
+ALLOWED_TYPES = {"RATE", "CURVE", "OPERATING_POINT", "AREA", "ASSOCIATION", "CLASSIFIER_SUMMARY"}
 ALLOWED_DIRECTIONS = {"LOWER", "HIGHER", "NOT_APPLICABLE_TO_CURVE"}
 CORE_METADATA = {
     "biometric.verification.fmr": ("VERIFICATION", "RATE", "LOWER"),
@@ -333,6 +343,250 @@ CORE_CONTRACTS = {
         "prose_sha256": "df0fda7279926d145449038321c368a208f15552ec5fa0d1e187d987b387f52a",
     },
 }
+
+
+PHASE3_CONTRACTS = {'biometric.policy.threshold-analysis': {'aggregation_unit': 'PAIR_QUALITY_COMPARISON_UNIT',
+                                         'aliases': ('operating policy analysis', 'quality policy impact'),
+                                         'canonical_name': 'Threshold and policy analysis',
+                                         'confidence_interval_methods': ('CLOPPER_PEARSON_EXACT_BINOMIAL',
+                                                                         'SUBJECT_AWARE_BOOTSTRAP'),
+                                         'prose_sha256': 'ba17fba57cb2ddf8f5fec79be3411111a938676a4f8eb9ce53fd48f907f8077f',
+                                         'references': (('prd-0.3', 'PRD.md:797-825'),
+                                                        ('prd-0.3', 'PRD.md:608-632'),
+                                                        ('requirements-0.2', 'REQUIREMENTS.md:55'),
+                                                        ('requirements-0.2', 'REQUIREMENTS.md:64'),
+                                                        ('requirements-0.2', 'REQUIREMENTS.md:70'),
+                                                        ('requirements-0.2', 'REQUIREMENTS.md:84')),
+                                         'required_inputs': ('fixed_matcher_threshold',
+                                                             'quality_policy_threshold',
+                                                             'pair_quality_policy_id',
+                                                             'quality_measure_id',
+                                                             'score_direction',
+                                                             'threshold_equality_rule',
+                                                             'processing_failure_policy'),
+                                         'source_requirements': ('QS-REQ-016',
+                                                                 'QS-REQ-024',
+                                                                 'QS-REQ-029',
+                                                                 'QS-REQ-043'),
+                                         'threshold_semantics': {'decision_rule_source': 'RECORDED_PROTOCOL',
+                                                                 'equality_rule_required': True,
+                                                                 'score_direction_required': True,
+                                                                 'threshold_kind': 'MATCHER_THRESHOLD_AND_QUALITY_POLICY_THRESHOLD_REPORTED_SEPARATELY',
+                                                                 'threshold_reestimation': 'FORBIDDEN_DURING_POLICY_ANALYSIS'}},
+ 'biometric.quality.utility.au-erc': {'aggregation_unit': 'PAIR_QUALITY_COMPARISON_UNIT',
+                                      'aliases': ('AU-ERC', 'AUERC'),
+                                      'canonical_name': 'Area under the Error-versus-Reject Curve',
+                                      'confidence_interval_methods': ('SUBJECT_AWARE_BOOTSTRAP',
+                                                                      'PAIRED_SUBJECT_BOOTSTRAP'),
+                                      'prose_sha256': '7fbadf3548e6ba5ffc591f8a4f31e956bb90d748b38ab65cfba18f5e3e0f65d6',
+                                      'references': (('prd-0.3', 'PRD.md:706-725'),
+                                                     ('prd-0.3', 'PRD.md:739-753'),
+                                                     ('prd-0.3', 'PRD.md:934-969'),
+                                                     ('requirements-0.2', 'REQUIREMENTS.md:55'),
+                                                     ('requirements-0.2', 'REQUIREMENTS.md:60'),
+                                                     ('requirements-0.2', 'REQUIREMENTS.md:61'),
+                                                     ('requirements-0.2', 'REQUIREMENTS.md:68'),
+                                                     ('requirements-0.2', 'REQUIREMENTS.md:70'),
+                                                     ('requirements-0.2', 'REQUIREMENTS.md:84')),
+                                      'required_inputs': ('registered_erc_curve',
+                                                          'integration_domain',
+                                                          'integration_method',
+                                                          'pair_quality_policy_id',
+                                                          'fixed_matcher_threshold',
+                                                          'processing_failure_policy'),
+                                      'source_requirements': ('QS-REQ-016',
+                                                              'QS-REQ-020',
+                                                              'QS-REQ-021',
+                                                              'QS-REQ-028A',
+                                                              'QS-REQ-029',
+                                                              'QS-REQ-043'),
+                                      'threshold_semantics': {'decision_rule_source': 'RECORDED_PROTOCOL',
+                                                              'equality_rule_required': True,
+                                                              'score_direction_required': True,
+                                                              'threshold_kind': 'FIXED_MATCHER_THRESHOLD_AND_RECORDED_QUALITY_CUTOFF',
+                                                              'threshold_reestimation': 'FORBIDDEN_ACROSS_ANALYSIS'}},
+ 'biometric.quality.utility.failure-predictor': {'aggregation_unit': 'PAIR_QUALITY_COMPARISON_UNIT',
+                                                 'aliases': ('failure prediction',
+                                                             'quality failure predictor'),
+                                                 'canonical_name': 'Quality as failure predictor',
+                                                 'confidence_interval_methods': ('CLOPPER_PEARSON_EXACT_BINOMIAL',
+                                                                                 'SUBJECT_AWARE_BOOTSTRAP'),
+                                                 'prose_sha256': '124f3b5b9793f51ad374b5b1657682a5a4fdd35b7e62407132f52c09c3ada9fb',
+                                                 'references': (('prd-0.3', 'PRD.md:706-725'),
+                                                                ('prd-0.3', 'PRD.md:608-632'),
+                                                                ('requirements-0.2', 'REQUIREMENTS.md:55'),
+                                                                ('requirements-0.2', 'REQUIREMENTS.md:60'),
+                                                                ('requirements-0.2', 'REQUIREMENTS.md:70'),
+                                                                ('requirements-0.2', 'REQUIREMENTS.md:84')),
+                                                 'required_inputs': ('pair_quality_value',
+                                                                     'outcome_indicator',
+                                                                     'fixed_matcher_threshold',
+                                                                     'quality_policy_threshold',
+                                                                     'pair_quality_policy_id',
+                                                                     'processing_failure_policy'),
+                                                 'source_requirements': ('QS-REQ-016',
+                                                                         'QS-REQ-020',
+                                                                         'QS-REQ-029',
+                                                                         'QS-REQ-043'),
+                                                 'threshold_semantics': {'decision_rule_source': 'RECORDED_PROTOCOL',
+                                                                         'equality_rule_required': True,
+                                                                         'score_direction_required': True,
+                                                                         'threshold_kind': 'FIXED_MATCHER_THRESHOLD_AND_RECORDED_QUALITY_CUTOFF',
+                                                                         'threshold_reestimation': 'FORBIDDEN_ACROSS_ANALYSIS'}},
+ 'biometric.quality.utility.partial-au-erc': {'aggregation_unit': 'PAIR_QUALITY_COMPARISON_UNIT',
+                                              'aliases': ('pAU-ERC', 'partial AU-ERC'),
+                                              'canonical_name': 'Partial area under the Error-versus-Reject '
+                                                                'Curve',
+                                              'confidence_interval_methods': ('SUBJECT_AWARE_BOOTSTRAP',
+                                                                              'PAIRED_SUBJECT_BOOTSTRAP'),
+                                              'prose_sha256': '0081dd2243216d26d4109247eaac12b2a1f5dbc29f9a1aa4343e31e7edd8f9fb',
+                                              'references': (('prd-0.3', 'PRD.md:706-725'),
+                                                             ('prd-0.3', 'PRD.md:739-753'),
+                                                             ('prd-0.3', 'PRD.md:934-969'),
+                                                             ('requirements-0.2', 'REQUIREMENTS.md:55'),
+                                                             ('requirements-0.2', 'REQUIREMENTS.md:60'),
+                                                             ('requirements-0.2', 'REQUIREMENTS.md:61'),
+                                                             ('requirements-0.2', 'REQUIREMENTS.md:68'),
+                                                             ('requirements-0.2', 'REQUIREMENTS.md:70'),
+                                                             ('requirements-0.2', 'REQUIREMENTS.md:84')),
+                                              'required_inputs': ('registered_erc_curve',
+                                                                  'integration_domain',
+                                                                  'integration_method',
+                                                                  'pair_quality_policy_id',
+                                                                  'fixed_matcher_threshold',
+                                                                  'processing_failure_policy'),
+                                              'source_requirements': ('QS-REQ-016',
+                                                                      'QS-REQ-020',
+                                                                      'QS-REQ-021',
+                                                                      'QS-REQ-028A',
+                                                                      'QS-REQ-029',
+                                                                      'QS-REQ-043'),
+                                              'threshold_semantics': {'decision_rule_source': 'RECORDED_PROTOCOL',
+                                                                      'equality_rule_required': True,
+                                                                      'score_direction_required': True,
+                                                                      'threshold_kind': 'FIXED_MATCHER_THRESHOLD_AND_RECORDED_QUALITY_CUTOFF',
+                                                                      'threshold_reestimation': 'FORBIDDEN_ACROSS_ANALYSIS'}},
+ 'biometric.quality.utility.quality-conditioned-fmr': {'aggregation_unit': 'PAIR_QUALITY_COMPARISON_UNIT',
+                                                       'aliases': ('FMR | quality bin', 'conditional FMR'),
+                                                       'canonical_name': 'Quality-conditioned false match '
+                                                                         'rate',
+                                                       'confidence_interval_methods': ('CLOPPER_PEARSON_EXACT_BINOMIAL',
+                                                                                       'SUBJECT_AWARE_BOOTSTRAP'),
+                                                       'prose_sha256': '3563aee94e661c1f4e6b67e61980798a4523fa1caa404eba75c7dcc837b91081',
+                                                       'references': (('prd-0.3', 'PRD.md:706-725'),
+                                                                      ('prd-0.3', 'PRD.md:608-632'),
+                                                                      ('requirements-0.2',
+                                                                       'REQUIREMENTS.md:55'),
+                                                                      ('requirements-0.2',
+                                                                       'REQUIREMENTS.md:60'),
+                                                                      ('requirements-0.2',
+                                                                       'REQUIREMENTS.md:70'),
+                                                                      ('requirements-0.2',
+                                                                       'REQUIREMENTS.md:84')),
+                                                       'required_inputs': ('registered_base_error_metric',
+                                                                           'fixed_matcher_threshold',
+                                                                           'pair_quality_policy_id',
+                                                                           'bin_edges',
+                                                                           'processing_failure_policy'),
+                                                       'source_requirements': ('QS-REQ-016',
+                                                                               'QS-REQ-020',
+                                                                               'QS-REQ-029',
+                                                                               'QS-REQ-043'),
+                                                       'threshold_semantics': {'decision_rule_source': 'RECORDED_PROTOCOL',
+                                                                               'equality_rule_required': True,
+                                                                               'score_direction_required': True,
+                                                                               'threshold_kind': 'FIXED_MATCHER_THRESHOLD_AND_RECORDED_QUALITY_CUTOFF',
+                                                                               'threshold_reestimation': 'FORBIDDEN_ACROSS_ANALYSIS'}},
+ 'biometric.quality.utility.quality-conditioned-fnmr': {'aggregation_unit': 'PAIR_QUALITY_COMPARISON_UNIT',
+                                                        'aliases': ('FNMR | quality bin', 'conditional FNMR'),
+                                                        'canonical_name': 'Quality-conditioned false '
+                                                                          'non-match rate',
+                                                        'confidence_interval_methods': ('CLOPPER_PEARSON_EXACT_BINOMIAL',
+                                                                                        'SUBJECT_AWARE_BOOTSTRAP'),
+                                                        'prose_sha256': '1fa77aee51c2bec9bff624a2eef1f24f7f4b00b199944e3a155a24a5286cd7f8',
+                                                        'references': (('prd-0.3', 'PRD.md:706-725'),
+                                                                       ('prd-0.3', 'PRD.md:608-632'),
+                                                                       ('requirements-0.2',
+                                                                        'REQUIREMENTS.md:55'),
+                                                                       ('requirements-0.2',
+                                                                        'REQUIREMENTS.md:60'),
+                                                                       ('requirements-0.2',
+                                                                        'REQUIREMENTS.md:70'),
+                                                                       ('requirements-0.2',
+                                                                        'REQUIREMENTS.md:84')),
+                                                        'required_inputs': ('registered_base_error_metric',
+                                                                            'fixed_matcher_threshold',
+                                                                            'pair_quality_policy_id',
+                                                                            'bin_edges',
+                                                                            'processing_failure_policy'),
+                                                        'source_requirements': ('QS-REQ-016',
+                                                                                'QS-REQ-020',
+                                                                                'QS-REQ-029',
+                                                                                'QS-REQ-043'),
+                                                        'threshold_semantics': {'decision_rule_source': 'RECORDED_PROTOCOL',
+                                                                                'equality_rule_required': True,
+                                                                                'score_direction_required': True,
+                                                                                'threshold_kind': 'FIXED_MATCHER_THRESHOLD_AND_RECORDED_QUALITY_CUTOFF',
+                                                                                'threshold_reestimation': 'FORBIDDEN_ACROSS_ANALYSIS'}},
+ 'biometric.quality.utility.quality-error-association': {'aggregation_unit': 'PAIR_QUALITY_COMPARISON_UNIT',
+                                                         'aliases': ('quality-error correlation',
+                                                                     'quality-utility association'),
+                                                         'canonical_name': 'Quality-error association',
+                                                         'confidence_interval_methods': ('FISHER_Z_LARGE_SAMPLE',
+                                                                                         'WALD_NORMAL',
+                                                                                         'SUBJECT_AWARE_BOOTSTRAP'),
+                                                         'prose_sha256': '89b081b6b57de14e4c5caac3ca8fc1ccb0484d8b6619dd0ecd7eb3aee5ad0720',
+                                                         'references': (('prd-0.3', 'PRD.md:706-725'),
+                                                                        ('prd-0.3', 'PRD.md:934-969'),
+                                                                        ('requirements-0.2',
+                                                                         'REQUIREMENTS.md:60'),
+                                                                        ('requirements-0.2',
+                                                                         'REQUIREMENTS.md:68'),
+                                                                        ('requirements-0.2',
+                                                                         'REQUIREMENTS.md:70'),
+                                                                        ('requirements-0.2',
+                                                                         'REQUIREMENTS.md:84')),
+                                                         'required_inputs': ('pair_quality_value',
+                                                                             'comparison_score',
+                                                                             'error_indicator',
+                                                                             'fixed_matcher_threshold',
+                                                                             'pair_quality_policy_id',
+                                                                             'processing_failure_policy',
+                                                                             'model_support_rule'),
+                                                         'source_requirements': ('QS-REQ-020',
+                                                                                 'QS-REQ-028A',
+                                                                                 'QS-REQ-029',
+                                                                                 'QS-REQ-043'),
+                                                         'threshold_semantics': {'decision_rule_source': 'RECORDED_PROTOCOL',
+                                                                                 'equality_rule_required': True,
+                                                                                 'score_direction_required': True,
+                                                                                 'threshold_kind': 'FIXED_MATCHER_THRESHOLD_AND_RECORDED_QUALITY_CUTOFF',
+                                                                                 'threshold_reestimation': 'FORBIDDEN_ACROSS_ANALYSIS'}},
+ 'biometric.quality.utility.risk-coverage': {'aggregation_unit': 'PAIR_QUALITY_COMPARISON_UNIT',
+                                             'aliases': ('risk-coverage', 'RC curve'),
+                                             'canonical_name': 'Risk-Coverage Curve',
+                                             'confidence_interval_methods': ('SUBJECT_AWARE_BOOTSTRAP',
+                                                                             'PAIRED_SUBJECT_BOOTSTRAP'),
+                                             'prose_sha256': 'e96a02dc1c951bb52e558ec1111efdfc04441b949722dcffcd2e2df7ba6949e6',
+                                             'references': (('prd-0.3', 'PRD.md:706-725'),
+                                                            ('prd-0.3', 'PRD.md:739-753'),
+                                                            ('requirements-0.2', 'REQUIREMENTS.md:60'),
+                                                            ('requirements-0.2', 'REQUIREMENTS.md:61'),
+                                                            ('requirements-0.2', 'REQUIREMENTS.md:70'),
+                                                            ('requirements-0.2', 'REQUIREMENTS.md:84')),
+                                             'required_inputs': ('registered_erc_curve',
+                                                                 'pair_quality_policy_id',
+                                                                 'fixed_matcher_threshold',
+                                                                 'processing_failure_policy'),
+                                             'source_requirements': ('QS-REQ-020',
+                                                                     'QS-REQ-021',
+                                                                     'QS-REQ-029',
+                                                                     'QS-REQ-043'),
+                                             'threshold_semantics': {'decision_rule_source': 'RECORDED_PROTOCOL',
+                                                                     'equality_rule_required': True,
+                                                                     'score_direction_required': True,
+                                                                     'threshold_kind': 'FIXED_MATCHER_THRESHOLD_AND_RECORDED_QUALITY_CUTOFF',
+                                                                     'threshold_reestimation': 'FORBIDDEN_ACROSS_ANALYSIS'}}}
 
 
 class MetricRegistryValidationError(ValueError):
@@ -690,6 +944,55 @@ def _validate_formula(value: Any, metric_id: str, location: str) -> dict[str, An
         for field, expected_value in expected.items():
             if formula[field] != expected_value:
                 _fail(f"{location}.{field}", f"must equal {expected_value}")
+    elif kind == "CURVE_AREA":
+        _strict_keys(formula, location, {"kind", "formula_version", "curve_metric_id", "curve_definition_version", "integration_domain", "integration_method"})
+        if metric_id not in {"biometric.quality.utility.au-erc", "biometric.quality.utility.partial-au-erc"}:
+            _fail(location, "CURVE_AREA is not valid for this metric")
+        if formula["curve_metric_id"] != "biometric.quality.utility.erc":
+            _fail(f"{location}.curve_metric_id", "areas must integrate the registered ERC")
+        expected_domain = "RECORDED_REJECTION_INTERVAL" if metric_id.endswith(".au-erc") else "RECORDED_PARTIAL_REJECTION_INTERVAL"
+        if formula["integration_domain"] != expected_domain:
+            _fail(f"{location}.integration_domain", f"must equal {expected_domain}")
+        if formula["integration_method"] != "TRAPEZOID_OVER_RECORDED_STEP_POINTS":
+            _fail(f"{location}.integration_method", "must equal TRAPEZOID_OVER_RECORDED_STEP_POINTS")
+        _semver(formula["curve_definition_version"], f"{location}.curve_definition_version")
+    elif kind == "COVERAGE_CURVE":
+        _strict_keys(formula, location, {"kind", "formula_version", "source_curve_metric_id", "source_curve_definition_version", "x_quantity", "y_quantity"})
+        if metric_id != "biometric.quality.utility.risk-coverage":
+            _fail(location, "COVERAGE_CURVE is not valid for this metric")
+        if formula["source_curve_metric_id"] != "biometric.quality.utility.erc" or formula["x_quantity"] != "RETAINED_COVERAGE_FRACTION" or formula["y_quantity"] != "RETAINED_BASE_ERROR_RATE":
+            _fail(location, "risk-coverage must re-parameterize the registered ERC by retained coverage")
+        _semver(formula["source_curve_definition_version"], f"{location}.source_curve_definition_version")
+    elif kind == "CONDITIONAL_RATE":
+        _strict_keys(formula, location, {"kind", "formula_version", "base_metric_id", "base_definition_version", "conditioning_variable", "bin_edges"})
+        expected_base = {"biometric.quality.utility.quality-conditioned-fnmr": "biometric.verification.fnmr", "biometric.quality.utility.quality-conditioned-fmr": "biometric.verification.fmr"}.get(metric_id)
+        if expected_base is None:
+            _fail(location, "CONDITIONAL_RATE is not valid for this metric")
+        if formula["base_metric_id"] != expected_base or formula["conditioning_variable"] != "PAIR_QUALITY_BIN" or formula["bin_edges"] != "RECORDED_WITH_RESULT":
+            _fail(location, "conditional rate must condition the core rate on recorded pair-quality bins")
+        _semver(formula["base_definition_version"], f"{location}.base_definition_version")
+    elif kind == "ASSOCIATION_STATISTICS":
+        _strict_keys(formula, location, {"kind", "formula_version", "predictor", "outcome", "statistics"})
+        if metric_id != "biometric.quality.utility.quality-error-association":
+            _fail(location, "ASSOCIATION_STATISTICS is not valid for this metric")
+        if _strings(formula["statistics"], f"{location}.statistics") != ["SPEARMAN_RANK_CORRELATION", "KENDALL_TAU_B", "LOGISTIC_REGRESSION_COEFFICIENT", "ODDS_RATIO"]:
+            _fail(f"{location}.statistics", "association statistics set is frozen")
+    elif kind == "BINARY_PREDICTOR_SUMMARY":
+        _strict_keys(formula, location, {"kind", "formula_version", "predictor", "outcome", "statistics", "cutoff_source"})
+        if metric_id != "biometric.quality.utility.failure-predictor":
+            _fail(location, "BINARY_PREDICTOR_SUMMARY is not valid for this metric")
+        if _strings(formula["statistics"], f"{location}.statistics") != ["ROC_AUC", "PR_AUC_AVERAGE_PRECISION", "SENSITIVITY", "SPECIFICITY", "PRECISION", "RECALL"]:
+            _fail(f"{location}.statistics", "predictor statistics set is frozen")
+        if formula["cutoff_source"] != "RECORDED_QUALITY_POLICY_THRESHOLD":
+            _fail(f"{location}.cutoff_source", "must equal RECORDED_QUALITY_POLICY_THRESHOLD")
+    elif kind == "POLICY_OPERATING_POINT":
+        _strict_keys(formula, location, {"kind", "formula_version", "matcher_threshold_kind", "quality_threshold_kind", "reported_quantities", "matcher_threshold_reestimation"})
+        if metric_id != "biometric.policy.threshold-analysis":
+            _fail(location, "POLICY_OPERATING_POINT is not valid for this metric")
+        if formula["matcher_threshold_kind"] != "MATCHER_THRESHOLD" or formula["quality_threshold_kind"] != "QUALITY_POLICY_THRESHOLD" or formula["matcher_threshold_reestimation"] != "FORBIDDEN":
+            _fail(location, "policy operating point must keep matcher and quality-policy thresholds distinct and fixed")
+        if _strings(formula["reported_quantities"], f"{location}.reported_quantities") != ["RETENTION_RATE", "REJECTION_RATE", "FMR", "FNMR", "NUMBER_REJECTED", "ERRORS_PREVENTED", "SUCCESSFUL_COMPARISONS_REMOVED", "PER_QUALITY_MEASURE_IMPACT"]:
+            _fail(f"{location}.reported_quantities", "reported quantity set is frozen")
     else:
         _fail(f"{location}.kind", f"unsupported formula kind {kind}")
     _semver(formula["formula_version"], f"{location}.formula_version")
@@ -804,9 +1107,9 @@ def _validate_metric(
         _fail(f"{location}.implementation_version", "must equal definition_version")
     if not set(requirements) <= REQUIRED_SOURCE_REQUIREMENTS:
         _fail(f"{location}.source_requirements", "contains a requirement outside this registry slice")
-    expected_contract = CORE_CONTRACTS.get(metric_id)
+    expected_contract = CORE_CONTRACTS.get(metric_id) or PHASE3_CONTRACTS.get(metric_id)
     if expected_contract is None:
-        _fail(location, "has no versioned core semantic contract")
+        _fail(location, "has no versioned semantic contract")
     observed_contract = {
         "canonical_name": canonical_name,
         "aliases": tuple(aliases),
@@ -855,7 +1158,7 @@ def validate_registry(registry: dict[str, Any]) -> dict[str, Any]:
         _fail("registry.schema_version", "unsupported schema version")
     if _string(registry["registry_id"], "registry.registry_id", 128) != "qualsight-core-metrics":
         _fail("registry.registry_id", "must equal qualsight-core-metrics")
-    if _semver(registry["registry_version"], "registry.registry_version") != "1.0.1":
+    if _semver(registry["registry_version"], "registry.registry_version") != "1.1.0":
         _fail("registry.registry_version", "unsupported registry version")
     authorities = _validate_authorities(registry["authority_documents"])
     requirements = _validate_requirements(registry["source_requirements"], "registry.source_requirements")
@@ -868,8 +1171,8 @@ def validate_registry(registry: dict[str, Any]) -> dict[str, Any]:
     metric_ids = [metric["metric_id"] for metric in metrics]
     if len(metric_ids) != len(set(metric_ids)):
         _fail("registry.metrics", "contains duplicate metric IDs")
-    if set(metric_ids) != CORE_METRIC_IDS:
-        _fail("registry.metrics", "must contain the exact six Phase-0 core metrics")
+    if set(metric_ids) != CORE_METRIC_IDS | PHASE3_METRIC_IDS:
+        _fail("registry.metrics", "must contain the six Phase-0 core metrics and the eight Phase-3 quality-utility metrics")
     versions_by_id = {metric["metric_id"]: metric["definition_version"] for metric in metrics}
     for index, metric in enumerate(metrics):
         formula = metric["formula"]
@@ -899,7 +1202,7 @@ def validate_registry(registry: dict[str, Any]) -> dict[str, Any]:
         _fail("registry.metrics", "canonical names and aliases must be globally unique")
     versions = {metric["definition_version"] for metric in metrics}
     if versions != {"1.0.0"}:
-        _fail("registry.metrics", "the Phase-0 core definitions must use version 1.0.0")
+        _fail("registry.metrics", "the Phase-0 core and Phase-3 utility definitions must use version 1.0.0")
     return {
         "registry_id": registry["registry_id"],
         "registry_version": registry["registry_version"],
