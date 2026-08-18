@@ -25,6 +25,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -133,6 +134,7 @@ def main() -> int:
             page.wait_for_selector("[data-testid=project-actions]", timeout=30_000)
             created_message = page.inner_text("[data-testid=project-message]")
             observation["steps"].append({"step": "project-created", "message": created_message})
+            console_project_id_holder = [next(p["project_id"] for p in json.load(urllib.request.urlopen(f"http://127.0.0.1:{API_PORT}/api/projects")) if p["name"] == "Console lifecycle observation")]  # noqa: S310
             page.click("[data-testid=assess-button]")
             page.wait_for_selector("[data-testid=measure-table]", timeout=180_000)
             banner = page.inner_text("[data-testid=result-banner]")
@@ -335,6 +337,34 @@ def main() -> int:
                     "reproduction_states": reproduction_states,
                 }
             )
+            # QS-X60/QS-X61: 1:N identification over the fixture subjects and a controlled-degradation response through the console.
+            page.wait_for_function("() => !document.querySelector('[data-testid=ident-freeze]')?.disabled", timeout=60_000)
+            page.click("[data-testid=ident-freeze]")
+            page.wait_for_selector("[data-testid=ident-search]", timeout=60_000)
+            page.click("[data-testid=ident-search]")
+            page.wait_for_selector("[data-testid=ident-detail]", timeout=600_000)
+            page.wait_for_selector("[data-testid=cmc-plot] polyline", state="attached", timeout=60_000)
+            page.click("[data-testid=ident-candidates]")
+            page.wait_for_selector("[data-testid=ident-candidate-table] tbody tr", timeout=60_000)
+            ident_rows = page.evaluate("() => Array.from(document.querySelectorAll('[data-testid=ident-searches] tbody tr')).map(r => r.innerText)")
+            page.click("[data-testid=transform-run]")
+            page.wait_for_selector("[data-testid=derived-batch]", timeout=120_000)
+            page.click("[data-testid=derived-batch]")
+            page.wait_for_function("() => (document.querySelector('[data-testid=project-message]')?.innerText || '').includes('OFIQ batch')", timeout=60_000)
+            # wait until the derived batch is complete by polling the API for a job over the derived dataset
+            derived_sets = json.load(urllib.request.urlopen(f"http://127.0.0.1:{API_PORT}/api/projects/" + urllib.parse.quote(console_project_id_holder[0], safe='') + "/derived-sets"))  # noqa: S310
+            derived_dataset = derived_sets[-1]["derived_dataset_id"]
+            deadline = time.monotonic() + 600
+            while time.monotonic() < deadline:
+                jobs_api = json.load(urllib.request.urlopen(f"http://127.0.0.1:{API_PORT}/api/projects/" + urllib.parse.quote(console_project_id_holder[0], safe='') + "/jobs"))  # noqa: S310
+                if any(j["dataset_id"] == derived_dataset and j["state"] == "COMPLETED" for j in jobs_api):
+                    break
+                time.sleep(2)
+            page.wait_for_function("() => !document.querySelector('[data-testid=degradation-run]')?.disabled", timeout=60_000)
+            page.click("[data-testid=degradation-run]")
+            page.wait_for_selector("[data-testid=degradation-detail]", timeout=600_000)
+            degradation_tables = page.evaluate("() => Array.from(document.querySelectorAll('[data-testid=degradation-table]')).map(t => t.innerText.slice(0, 400))")
+            observation["steps"].append({"step": "advanced", "identification_rows": ident_rows, "degradation_tables": degradation_tables})
             projects_api = json.load(urllib.request.urlopen(f"http://127.0.0.1:{API_PORT}/api/projects"))  # noqa: S310
             console_project = next((p for p in projects_api if p["name"] == "Console lifecycle observation"), None)
             observation["console_project"] = (

@@ -176,6 +176,7 @@ export interface JobOut {
   resource_use: Record<string, number>;
   parquet_path: string | null;
   engine_version: string | null;
+  dataset_id?: string | null;
 }
 
 export interface DistributionBin {
@@ -470,7 +471,36 @@ export interface ReproductionOut {
   created_at: string;
 }
 
+
+export interface IdentificationProtocolOut {
+  protocol_id: string; mode: string; name: string; selection: string; rank_depth: number; gallery_count: number; mated_probe_count: number; nonmated_probe_count: number; subjects_total: number; manifest_sha256: string; created_at: string;
+}
+export interface IdentificationSearchSummary {
+  search_id: string; run_id: string; protocol_id: string; matcher_id: string; condition_id: string; device: string; gallery_size: number; gallery_template_failures: number; mated_searches: number; nonmated_searches: number; probe_template_failures: number; rank_1: number | null; fnir_at_fpir_0_01: number | null; seconds: number; created_at: string;
+  links: { search: string; run: string; candidates: string; protocol: string };
+}
+export interface IdentificationSearchOut { search_id: string; state: "RUNNING" | "COMPLETED" | "FAILED"; run_id?: string; summary?: IdentificationSearchSummary; metrics?: any; progress?: any; error?: string | null }
+export interface DerivedSetOut { derived_set_id: string; derived_dataset_id: string; source_dataset_id: string; transforms: any[]; levels: number; source_count: number; derived_count: number; created_at: string; directory: string }
+export interface DegradationSummary { analysis_id: string; run_id: string; derived_set_id: string; matcher_id: string; condition_id: string; matcher_threshold: number; transforms: string[]; levels: number; mated_pairs: number; nonmated_pairs: number; seconds: number; fnmr_by_transform: Record<string, Array<number | null>>; uqs_by_transform: Record<string, Array<number | null>>; created_at?: string; links?: { analysis: string; run: string } }
+export interface DegradationOut { analysis_id: string; state: "RUNNING" | "COMPLETED" | "FAILED"; run_id?: string; summary?: DegradationSummary; document?: any; progress?: any; error?: string | null }
+
 export const api = {
+  freezeIdentification: (project_id: string, dataset_id: string, selection: string, rank_depth: number) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/${encodeURIComponent(dataset_id)}/protocols/freeze-lfw-identification`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ selection, rank_depth }) }).then((r) => readJson<IdentificationProtocolOut>(r)),
+  identificationProtocols: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/identification-protocols`).then((r) => readJson<IdentificationProtocolOut[]>(r)),
+  startIdentificationSearch: (project_id: string, protocol_id: string, body: { matcher_id: string; condition_id: string; quality_job_id?: string | null }) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/identification-protocols/${encodeURIComponent(protocol_id)}/search`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => readJson<{ search_id: string; state: string }>(r)),
+  identificationSearch: (search_id: string) => fetch(`/api/identification-searches/${encodeURIComponent(search_id)}`).then((r) => readJson<IdentificationSearchOut>(r)),
+  identificationSearches: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/identification-searches`).then((r) => readJson<IdentificationSearchSummary[]>(r)),
+  identificationCandidates: (search_id: string, query: string) => fetch(`/api/identification-searches/${encodeURIComponent(search_id)}/candidates?${query}`).then((r) => readJson<{ total: number; rows: any[] }>(r)),
+  transforms: () => fetch("/api/transforms").then((r) => readJson<{ operators: Array<{ kind: string; parameter: string; version: string }> }>(r)),
+  createTransformations: (project_id: string, dataset_id: string, body: { selection: string; sample_ids?: string[]; transforms: Array<{ kind: string; parameters: number[] }> }) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/${encodeURIComponent(dataset_id)}/transformations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => readJson<DerivedSetOut>(r)),
+  derivedSets: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/derived-sets`).then((r) => readJson<DerivedSetOut[]>(r)),
+  startDegradation: (project_id: string, body: Record<string, unknown>) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/degradation-analyses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => readJson<{ analysis_id: string; state: string }>(r)),
+  degradation: (analysis_id: string) => fetch(`/api/degradation-analyses/${encodeURIComponent(analysis_id)}`).then((r) => readJson<DegradationOut>(r)),
+  degradations: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/degradation-analyses`).then((r) => readJson<DegradationSummary[]>(r)),
   figures: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/figures`).then((r) => readJson<FigureOut[]>(r)),
   createFigure: (project_id: string, kind: string, parameters: Record<string, unknown>) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/figures`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, parameters }) }).then((r) => readJson<FigureOut>(r)),

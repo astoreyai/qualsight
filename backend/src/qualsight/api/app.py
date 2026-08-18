@@ -43,6 +43,12 @@ from ..reporting.exports import ExportError, export_table
 from ..reporting.reports import ReportBuilder, ReportError
 from ..security.network_guard import guard_status, install_network_guard
 from ..importers.external_scores import EXTERNAL_CONDITION_ID, ExternalScoreImportError, ExternalScoreImporter
+from ..identification.protocol import IdentificationProtocolError, freeze_lfw_identification
+from ..identification.search import IdentificationSearchError, IdentificationSearchJob
+from ..transforms.derived import DerivedSetError, build_derived_set
+from ..transforms.degradation import DegradationAnalysisError, DegradationAnalysisJob, DegradationRequest
+from ..transforms.operators import PARAMETER_NAMES
+from ..matchers.matrix import dataset_resource_of
 from ..security.purge import PurgeError, SCOPE_STATEMENT, purge_project, purge_targets
 from ..matchers.upstream import UpstreamSources
 from ..execution.contracts import ContractValidationError, ExecutionOutcomeError
@@ -142,6 +148,34 @@ class ExternalScoreImportRequest(ApiModel):
     purpose_scope: str = Field(default="QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1", min_length=1)
 
 
+class IdentificationFreezeRequest(ApiModel):
+    selection: Literal["all", "subset_fixture"] = "all"
+    rank_depth: int = Field(default=20, ge=1, le=1000)
+
+
+class IdentificationSearchRequest(ApiModel):
+    matcher_id: str = Field(min_length=1)
+    condition_id: str = Field(min_length=1)
+    quality_job_id: str | None = None
+    purpose_scope: str = Field(default="QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1", min_length=1)
+
+
+class TransformationRequest(ApiModel):
+    selection: Literal["all", "subset_fixture", "sample_ids"] = "subset_fixture"
+    sample_ids: tuple[str, ...] = ()
+    transforms: list[dict[str, Any]] = Field(min_length=1)
+
+
+class DegradationAnalysisRequestBody(ApiModel):
+    derived_set_id: str = Field(min_length=1)
+    quality_job_id: str = Field(min_length=1)
+    baseline_quality_job_id: str | None = None
+    matcher_id: str = Field(min_length=1)
+    condition_id: str = Field(min_length=1)
+    matcher_threshold: float
+    protocol_id: str | None = None
+
+
 class ProjectCreate(ApiModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1, max_length=4000)
@@ -209,6 +243,7 @@ class BatchRequest(ApiModel):
     selection: BatchSelection
     chunks: int = Field(default=1, ge=1, le=32)
     purpose_scope: str | None = None
+    execution: Literal["host", "container"] = "host"
 
 
 class JobOut(ApiModel):
@@ -228,6 +263,7 @@ class JobOut(ApiModel):
     resource_use: dict[str, float]
     parquet_path: str | None = None
     engine_version: str | None = None
+    dataset_id: str | None = None
 
 
 class ProjectOut(ApiModel):
@@ -413,6 +449,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 resource_use=progress.resource_use,
                 parquet_path=str(job.parquet_path) if job.parquet_path else None,
                 engine_version=job.engine_version,
+                dataset_id=job.dataset.dataset_id,
             )
         assert row is not None
         return JobOut(
@@ -432,6 +469,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             resource_use=json.loads(row["resource_use_json"]),
             parquet_path=row["parquet_path"],
             engine_version=row["engine_version"],
+            dataset_id=row["dataset_id"],
         )
 
     @app.post("/api/projects/{project_id}/datasets/{dataset_id}/quality-batch", response_model=JobOut, status_code=202)
@@ -489,6 +527,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 job_root=settings.data_dir / "jobs",
                 chunks=request.chunks,
                 selection_rule=rule,
+                execution=request.execution,
             )
         except BatchJobError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
@@ -984,6 +1023,209 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         record_action(project_id, AuditEventType.RUN_COMPLETED, "ExternalScoreImport", result.run.run_id, {"resource_id": request.resource_id, "protocol_id": protocol_id, "provenance_marker": "EXTERNALLY_COMPUTED", "mapping": result.mapping})
         row = store().matcher_leaf(result.run.run_id)
         return JSONResponse(status_code=201, content={**leaf_summary(row), "provenance_marker": "EXTERNALLY_COMPUTED", "mapping": result.mapping})
+
+    # -- controlled transformations and degradation responses (QS-X61) ---------------
+
+    degradations: dict[str, DegradationAnalysisJob] = {}
+
+    @app.get("/api/transforms")
+    def list_transforms() -> JSONResponse:
+        return JSONResponse(content={"operators": [{"kind": kind, "parameter": name, "version": "1.0.0"} for kind, name in PARAMETER_NAMES.items()]})
+
+    @app.post("/api/projects/{project_id}/datasets/{dataset_id}/transformations", status_code=201)
+    def create_transformations(project_id: str, dataset_id: str, request: TransformationRequest) -> JSONResponse:
+        try:
+            project = projects().require_writable(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        dataset = store().dataset(dataset_id)
+        if dataset is None or dataset.project_id != project_id:
+            raise HTTPException(status_code=404, detail="dataset is not recorded in this project")
+        if store().derived_set(dataset_id) is not None:
+            raise HTTPException(status_code=409, detail="transformations start from a registered source dataset, not from a derived one")
+        if request.selection == "subset_fixture":
+            fixture = json.loads((settings.repository_root / "resources" / "manifests" / "lfw-subset-fixture-v1.json").read_text(encoding="utf-8"))
+            wanted = {image["path"] for image in fixture["images"]}
+            samples = [s for s in store().samples_for_dataset(dataset_id, limit=1_000_000) if any(s.source_path.endswith("/" + path) for path in wanted)]
+        elif request.selection == "sample_ids":
+            samples = [s for s in (store().sample(sample_id) for sample_id in request.sample_ids) if s is not None and s.dataset_id == dataset_id]
+        else:
+            samples = store().samples_for_dataset(dataset_id, limit=1_000_000)
+        if not samples:
+            raise HTTPException(status_code=422, detail="the selection contains no samples")
+        try:
+            result = build_derived_set(store(), project=project, dataset=dataset, dataset_resource_id=dataset_resource_of(dataset), samples=samples, transforms=request.transforms, root=settings.data_dir / "derived", actor=projects().actor)
+        except DerivedSetError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        record_action(project_id, AuditEventType.DATASET_IMPORTED, "DerivedSet", result.derived_set_id, {"source_dataset_id": dataset_id, "derived_dataset_id": result.record["derived_dataset_id"], "transforms": request.transforms, "source_count": len(samples), "derived_count": len(result.samples)})
+        return JSONResponse(status_code=201, content=result.record)
+
+    @app.get("/api/derived-sets/{derived_set_id}")
+    def derived_set_detail(derived_set_id: str) -> JSONResponse:
+        record = store().derived_set(derived_set_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="derived set is not recorded")
+        return JSONResponse(content={**record, "samples": store().derived_samples(record["derived_set_id"])})
+
+    @app.get("/api/projects/{project_id}/derived-sets")
+    def project_derived_sets(project_id: str) -> JSONResponse:
+        return JSONResponse(content=store().derived_sets(project_id=project_id))
+
+    @app.post("/api/projects/{project_id}/degradation-analyses", status_code=202)
+    def start_degradation_analysis(project_id: str, request: DegradationAnalysisRequestBody) -> JSONResponse:
+        try:
+            project = projects().require_writable(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir)
+        try:
+            upstream.acquire()
+            job = DegradationAnalysisJob(store=store(), registry=engine().registry, upstream=upstream, repository_root=settings.repository_root, project=project, request=DegradationRequest(**request.model_dump()), job_root=settings.data_dir / "analyses", actor=projects().actor)
+        except (DegradationAnalysisError, ContractValidationError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        with job_lock:
+            degradations[job.analysis_id] = job
+
+        def _run() -> None:
+            try:
+                job.run()
+            except Exception as error:  # noqa: BLE001
+                job.progress = {"phase": "failed", "detail": f"{type(error).__name__}: {error}"}
+
+        executor.submit(_run)
+        record_action(project_id, AuditEventType.RUN_STARTED, "DegradationAnalysis", job.analysis_id, {"derived_set_id": request.derived_set_id, "quality_job_id": request.quality_job_id, "matcher_id": request.matcher_id, "matcher_threshold": request.matcher_threshold})
+        return JSONResponse(status_code=202, content={"analysis_id": job.analysis_id, "state": "RUNNING"})
+
+    @app.get("/api/degradation-analyses/{analysis_id}")
+    def degradation_analysis_status(analysis_id: str) -> JSONResponse:
+        row = store().degradation_analysis(analysis_id)
+        with job_lock:
+            live = degradations.get(analysis_id)
+        if row is None:
+            if live is None:
+                raise HTTPException(status_code=404, detail="degradation analysis is not recorded")
+            return JSONResponse(content={"analysis_id": analysis_id, "state": "FAILED" if live.progress["phase"] == "failed" else "RUNNING", "progress": live.progress, "error": live.progress["detail"] if live.progress["phase"] == "failed" else None})
+        return JSONResponse(content={"analysis_id": analysis_id, "state": "COMPLETED", "run_id": row["run_id"], "summary": json.loads(row["summary_json"]), "document": json.loads((Path(row["directory"]) / "degradation.json").read_text(encoding="utf-8")), "document_sha256": row["document_sha256"]})
+
+    @app.get("/api/projects/{project_id}/degradation-analyses")
+    def project_degradation_analyses(project_id: str) -> JSONResponse:
+        return JSONResponse(content=[{**json.loads(row["summary_json"]), "created_at": row["created_at"], "links": {"analysis": f"/api/degradation-analyses/{row['analysis_id']}", "run": f"/api/runs/{row['run_id']}"}} for row in store().degradation_analyses(project_id=project_id)])
+
+    # -- 1:N identification (QS-X60) ------------------------------------------------
+
+    searches: dict[str, IdentificationSearchJob] = {}
+
+    def search_summary(row: dict[str, Any]) -> dict[str, Any]:
+        summary = json.loads(row["summary_json"])
+        summary["links"] = {"search": f"/api/identification-searches/{row['search_id']}", "run": f"/api/runs/{row['run_id']}", "candidates": f"/api/identification-searches/{row['search_id']}/candidates", "protocol": f"/api/identification-protocols/{row['protocol_id']}"}
+        summary["created_at"] = row["created_at"]
+        return summary
+
+    @app.post("/api/projects/{project_id}/datasets/{dataset_id}/protocols/freeze-lfw-identification", status_code=201)
+    def freeze_identification_protocol(project_id: str, dataset_id: str, request: IdentificationFreezeRequest) -> JSONResponse:
+        try:
+            project = projects().require_writable(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        dataset = store().dataset(dataset_id)
+        if dataset is None or dataset.project_id != project_id:
+            raise HTTPException(status_code=404, detail="dataset is not recorded in this project")
+        try:
+            record = freeze_lfw_identification(store(), project=project, dataset=dataset, selection=request.selection, rank_depth=request.rank_depth, repository_root=settings.repository_root, actor=projects().actor)
+        except IdentificationProtocolError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        record_action(project_id, AuditEventType.CONFIGURATION_CHANGED, "IdentificationProtocol", record["protocol_id"], {"selection": request.selection, "rank_depth": request.rank_depth, "gallery_count": record["gallery_count"], "mated_probe_count": record["mated_probe_count"], "nonmated_probe_count": record["nonmated_probe_count"], "manifest_sha256": record["manifest_sha256"]})
+        return JSONResponse(status_code=201, content=record)
+
+    @app.get("/api/identification-protocols/{protocol_id}")
+    def identification_protocol_detail(protocol_id: str) -> JSONResponse:
+        record = store().identification_protocol(protocol_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="identification protocol is not recorded")
+        return JSONResponse(content={**record, "entries": store().identification_entries(protocol_id)})
+
+    @app.get("/api/projects/{project_id}/identification-protocols")
+    def project_identification_protocols(project_id: str) -> JSONResponse:
+        return JSONResponse(content=store().identification_protocols(project_id=project_id))
+
+    @app.post("/api/projects/{project_id}/identification-protocols/{protocol_id}/search", status_code=202)
+    def start_identification_search(project_id: str, protocol_id: str, request: IdentificationSearchRequest) -> JSONResponse:
+        try:
+            project = projects().require_writable(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        protocol = store().identification_protocol(protocol_id)
+        if protocol is None or protocol["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="identification protocol is not recorded in this project")
+        upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir)
+        try:
+            upstream.acquire()
+            job = IdentificationSearchJob(store=store(), registry=engine().registry, upstream=upstream, repository_root=settings.repository_root, project=project, protocol=protocol, entries=store().identification_entries(protocol_id), matcher_id=request.matcher_id, condition_id=request.condition_id, job_root=settings.data_dir / "identification", actor=projects().actor, purpose_scope=request.purpose_scope, quality_job_id=request.quality_job_id)
+        except (IdentificationSearchError, ContractValidationError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        with job_lock:
+            searches[job.search_id] = job
+
+        def _run() -> None:
+            try:
+                job.run()
+            except Exception as error:  # noqa: BLE001
+                job.progress = {"phase": "failed", "detail": f"{type(error).__name__}: {error}"}
+
+        executor.submit(_run)
+        record_action(project_id, AuditEventType.RUN_STARTED, "IdentificationSearch", job.search_id, {"protocol_id": protocol_id, "matcher_id": request.matcher_id, "condition_id": request.condition_id})
+        return JSONResponse(status_code=202, content={"search_id": job.search_id, "state": "RUNNING", "progress": job.progress})
+
+    @app.get("/api/identification-searches/{search_id}")
+    def identification_search_status(search_id: str) -> JSONResponse:
+        row = store().identification_search(search_id)
+        with job_lock:
+            live = searches.get(search_id)
+        if row is None:
+            if live is None:
+                raise HTTPException(status_code=404, detail="identification search is not recorded")
+            return JSONResponse(content={"search_id": search_id, "state": "FAILED" if live.progress["phase"] == "failed" else "RUNNING", "progress": live.progress, "error": live.progress["detail"] if live.progress["phase"] == "failed" else None})
+        return JSONResponse(content={"search_id": search_id, "state": "COMPLETED", "run_id": row["run_id"], "summary": search_summary(row), "metrics": json.loads(row["metrics_json"]), "metrics_sha256": row["metrics_sha256"], "candidates_sha256": row["candidates_sha256"]})
+
+    @app.get("/api/projects/{project_id}/identification-searches")
+    def project_identification_searches(project_id: str) -> JSONResponse:
+        return JSONResponse(content=[search_summary(row) for row in store().identification_searches(project_id=project_id)])
+
+    @app.get("/api/identification-searches/{search_id}/candidates")
+    def identification_candidates(search_id: str, probe_kind: str | None = Query(default=None), probe_sample_id: str | None = Query(default=None), rank_le: int | None = Query(default=None, ge=1), limit: int = Query(default=200, ge=1, le=100_000), offset: int = Query(default=0, ge=0)) -> JSONResponse:
+        import duckdb
+
+        row = store().identification_search(search_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="identification search is not recorded")
+        parquet = row["candidates_parquet"].replace("'", "''")
+        clauses, params = ["1=1"], []
+        if probe_kind is not None:
+            clauses.append("probe_kind = ?"); params.append(probe_kind)
+        if probe_sample_id is not None:
+            clauses.append("probe_sample_id = ?"); params.append(probe_sample_id)
+        if rank_le is not None:
+            clauses.append("rank <= ?"); params.append(rank_le)
+        where = " AND ".join(clauses)
+        connection = duckdb.connect()
+        try:
+            total = int(connection.execute(f"SELECT COUNT(*) FROM read_parquet('{parquet}') WHERE {where}", params).fetchone()[0])
+            cursor = connection.execute(f"SELECT * FROM read_parquet('{parquet}') WHERE {where} ORDER BY probe_sample_id, rank LIMIT ? OFFSET ?", [*params, int(limit), int(offset)])
+            names = [item[0] for item in cursor.description]
+            rows = [dict(zip(names, values)) for values in cursor.fetchall()]
+        finally:
+            connection.close()
+        for item in rows:
+            item["links"] = {"probe_sample": f"/api/samples/{item['probe_sample_id']}", "gallery_sample": f"/api/samples/{item['gallery_sample_id']}", "run": f"/api/runs/{row['run_id']}"}
+        return JSONResponse(content={"search_id": search_id, "run_id": row["run_id"], "total": total, "offset": offset, "rows": rows})
 
     @app.get("/api/matrices/{matrix_id}")
     def matrix_status(matrix_id: str) -> JSONResponse:

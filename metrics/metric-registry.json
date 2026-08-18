@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
   "registry_id": "qualsight-core-metrics",
-  "registry_version": "1.1.0",
+  "registry_version": "1.2.0",
   "authority_documents": [
     {
       "source_id": "prd-0.3",
@@ -19,6 +19,7 @@
   "source_requirements": [
     "QS-REQ-015",
     "QS-REQ-016",
+    "QS-REQ-017B",
     "QS-REQ-018",
     "QS-REQ-020",
     "QS-REQ-021",
@@ -1291,6 +1292,420 @@
       ],
       "warnings": [
         "Matcher, quality-policy, and standards or engine thresholds must never be visually conflated."
+      ]
+    },
+    {
+      "metric_id": "biometric.identification.fpir",
+      "definition_version": "1.0.0",
+      "canonical_name": "False positive identification rate",
+      "aliases": [
+        "FPIR"
+      ],
+      "domain": "IDENTIFICATION",
+      "metric_type": "RATE",
+      "definition": "For open-set searches, the proportion of non-mated searches (probes whose subject is not enrolled) that return at least one candidate at or above the threshold within the recorded candidate list length.",
+      "formula": {
+        "kind": "IDENTIFICATION_RATE",
+        "formula_version": "1.0.0",
+        "numerator_population": "NON_MATED_SEARCHES",
+        "numerator_event": "ANY_CANDIDATE_AT_OR_ABOVE_THRESHOLD",
+        "denominator_population": "INCLUDED_NON_MATED_SEARCHES",
+        "denominator_policy": "RECORDED_FAILURE_POLICY"
+      },
+      "higher_or_lower_is_better": "LOWER",
+      "required_inputs": [
+        "identification_protocol",
+        "search_mode",
+        "candidate_list_length",
+        "score_direction",
+        "threshold_equality_rule",
+        "processing_failure_policy",
+        "fixed_matcher_threshold"
+      ],
+      "aggregation_unit": "IDENTIFICATION_SEARCH",
+      "threshold_semantics": {
+        "threshold_kind": "MATCHER_THRESHOLD_ON_CANDIDATE_SCORES",
+        "decision_rule_source": "RECORDED_PROTOCOL",
+        "score_direction_required": true,
+        "equality_rule_required": true,
+        "threshold_reestimation": "FORBIDDEN_ACROSS_OPERATING_POINTS"
+      },
+      "confidence_interval_methods": [
+        "CLOPPER_PEARSON_EXACT_BINOMIAL",
+        "SUBJECT_AWARE_BOOTSTRAP"
+      ],
+      "source_standard": "QUALSIGHT_PRD",
+      "source_version": "0.3",
+      "references": [
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:634-661"
+        },
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:608-632"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:57"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:84"
+        }
+      ],
+      "source_requirements": [
+        "QS-REQ-016",
+        "QS-REQ-017B",
+        "QS-REQ-029",
+        "QS-REQ-043"
+      ],
+      "implementation": {
+        "kind": "DEFINITION_ONLY",
+        "artifact": "metrics/metric-registry.json"
+      },
+      "implementation_version": "1.0.0",
+      "limitations": [
+        "Open-set only; the non-mated probe population must be recorded with the protocol."
+      ],
+      "warnings": [
+        "FPIR at very low targets is unsupported when the non-mated search count is small; such operating points are flagged."
+      ]
+    },
+    {
+      "metric_id": "biometric.identification.fnir",
+      "definition_version": "1.0.0",
+      "canonical_name": "False negative identification rate",
+      "aliases": [
+        "FNIR"
+      ],
+      "domain": "IDENTIFICATION",
+      "metric_type": "RATE",
+      "definition": "For open-set searches, the proportion of mated searches (probes whose subject is enrolled) whose true mate is not returned at or above the threshold within the recorded candidate list length; reported at recorded FPIR operating points.",
+      "formula": {
+        "kind": "IDENTIFICATION_RATE",
+        "formula_version": "1.0.0",
+        "numerator_population": "MATED_SEARCHES",
+        "numerator_event": "TRUE_MATE_NOT_RETURNED_AT_OR_ABOVE_THRESHOLD_WITHIN_LIST",
+        "denominator_population": "INCLUDED_MATED_SEARCHES",
+        "denominator_policy": "RECORDED_FAILURE_POLICY"
+      },
+      "higher_or_lower_is_better": "LOWER",
+      "required_inputs": [
+        "identification_protocol",
+        "search_mode",
+        "candidate_list_length",
+        "score_direction",
+        "threshold_equality_rule",
+        "processing_failure_policy",
+        "fixed_matcher_threshold",
+        "true_mate_identity"
+      ],
+      "aggregation_unit": "IDENTIFICATION_SEARCH",
+      "threshold_semantics": {
+        "threshold_kind": "MATCHER_THRESHOLD_ON_CANDIDATE_SCORES",
+        "decision_rule_source": "RECORDED_PROTOCOL",
+        "score_direction_required": true,
+        "equality_rule_required": true,
+        "threshold_reestimation": "FORBIDDEN_ACROSS_OPERATING_POINTS"
+      },
+      "confidence_interval_methods": [
+        "CLOPPER_PEARSON_EXACT_BINOMIAL",
+        "SUBJECT_AWARE_BOOTSTRAP"
+      ],
+      "source_standard": "QUALSIGHT_PRD",
+      "source_version": "0.3",
+      "references": [
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:634-661"
+        },
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:608-632"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:57"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:84"
+        }
+      ],
+      "source_requirements": [
+        "QS-REQ-016",
+        "QS-REQ-017B",
+        "QS-REQ-029",
+        "QS-REQ-043"
+      ],
+      "implementation": {
+        "kind": "DEFINITION_ONLY",
+        "artifact": "metrics/metric-registry.json"
+      },
+      "implementation_version": "1.0.0",
+      "limitations": [
+        "The threshold is fixed from the non-mated searches at the target FPIR and never re-estimated on the mated searches."
+      ],
+      "warnings": [
+        "FNIR depends on the candidate list length; the length is an experiment input recorded with every value."
+      ]
+    },
+    {
+      "metric_id": "biometric.identification.tpir",
+      "definition_version": "1.0.0",
+      "canonical_name": "True positive identification rate",
+      "aliases": [
+        "TPIR"
+      ],
+      "domain": "IDENTIFICATION",
+      "metric_type": "RATE",
+      "definition": "One minus FNIR at the same operating point: the proportion of mated searches whose true mate is returned at or above the threshold within the recorded candidate list length.",
+      "formula": {
+        "kind": "IDENTIFICATION_RATE",
+        "formula_version": "1.0.0",
+        "numerator_population": "MATED_SEARCHES",
+        "numerator_event": "TRUE_MATE_RETURNED_AT_OR_ABOVE_THRESHOLD_WITHIN_LIST",
+        "denominator_population": "INCLUDED_MATED_SEARCHES",
+        "denominator_policy": "RECORDED_FAILURE_POLICY"
+      },
+      "higher_or_lower_is_better": "HIGHER",
+      "required_inputs": [
+        "identification_protocol",
+        "search_mode",
+        "candidate_list_length",
+        "score_direction",
+        "threshold_equality_rule",
+        "processing_failure_policy",
+        "fixed_matcher_threshold",
+        "true_mate_identity"
+      ],
+      "aggregation_unit": "IDENTIFICATION_SEARCH",
+      "threshold_semantics": {
+        "threshold_kind": "MATCHER_THRESHOLD_ON_CANDIDATE_SCORES",
+        "decision_rule_source": "RECORDED_PROTOCOL",
+        "score_direction_required": true,
+        "equality_rule_required": true,
+        "threshold_reestimation": "FORBIDDEN_ACROSS_OPERATING_POINTS"
+      },
+      "confidence_interval_methods": [
+        "CLOPPER_PEARSON_EXACT_BINOMIAL",
+        "SUBJECT_AWARE_BOOTSTRAP"
+      ],
+      "source_standard": "QUALSIGHT_PRD",
+      "source_version": "0.3",
+      "references": [
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:634-661"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:57"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:84"
+        }
+      ],
+      "source_requirements": [
+        "QS-REQ-017B",
+        "QS-REQ-029",
+        "QS-REQ-043"
+      ],
+      "implementation": {
+        "kind": "DEFINITION_ONLY",
+        "artifact": "metrics/metric-registry.json"
+      },
+      "implementation_version": "1.0.0",
+      "limitations": [
+        "Complementary to FNIR; reported alongside it, never as a replacement."
+      ],
+      "warnings": [
+        "TPIR must name its FPIR operating point and candidate list length."
+      ]
+    },
+    {
+      "metric_id": "biometric.identification.rank-k",
+      "definition_version": "1.0.0",
+      "canonical_name": "Rank-k identification rate",
+      "aliases": [
+        "rank-k",
+        "rank-1 hit rate"
+      ],
+      "domain": "IDENTIFICATION",
+      "metric_type": "RATE",
+      "definition": "For closed-set evaluation over mated searches, the proportion whose true mate appears at rank k or better in the candidate list ordered by descending score, reported for the recorded k values (1, 5, 10, 20, 100 where the gallery size supports them).",
+      "formula": {
+        "kind": "RANK_RATE",
+        "formula_version": "1.0.0",
+        "numerator_population": "MATED_SEARCHES",
+        "numerator_event": "TRUE_MATE_RANK_LE_K",
+        "denominator_population": "INCLUDED_MATED_SEARCHES",
+        "denominator_policy": "RECORDED_FAILURE_POLICY",
+        "rank_values": "RECORDED_WITH_RESULT"
+      },
+      "higher_or_lower_is_better": "HIGHER",
+      "required_inputs": [
+        "identification_protocol",
+        "search_mode",
+        "candidate_list_length",
+        "score_direction",
+        "threshold_equality_rule",
+        "processing_failure_policy",
+        "true_mate_identity",
+        "rank_values"
+      ],
+      "aggregation_unit": "IDENTIFICATION_SEARCH",
+      "threshold_semantics": {
+        "threshold_kind": "MATCHER_THRESHOLD_ON_CANDIDATE_SCORES",
+        "decision_rule_source": "RECORDED_PROTOCOL",
+        "score_direction_required": true,
+        "equality_rule_required": true,
+        "threshold_reestimation": "FORBIDDEN_ACROSS_OPERATING_POINTS"
+      },
+      "confidence_interval_methods": [
+        "CLOPPER_PEARSON_EXACT_BINOMIAL",
+        "SUBJECT_AWARE_BOOTSTRAP"
+      ],
+      "source_standard": "QUALSIGHT_PRD",
+      "source_version": "0.3",
+      "references": [
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:634-661"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:55"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:57"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:84"
+        }
+      ],
+      "source_requirements": [
+        "QS-REQ-016",
+        "QS-REQ-017B",
+        "QS-REQ-029",
+        "QS-REQ-043"
+      ],
+      "implementation": {
+        "kind": "DEFINITION_ONLY",
+        "artifact": "metrics/metric-registry.json"
+      },
+      "implementation_version": "1.0.0",
+      "limitations": [
+        "Ranks beyond the gallery size are not reported; ties in score are ranked by the recorded deterministic order."
+      ],
+      "warnings": [
+        "Rank-k rates are closed-set quantities and are not FPIR-controlled."
+      ]
+    },
+    {
+      "metric_id": "biometric.identification.cmc",
+      "definition_version": "1.0.0",
+      "canonical_name": "Cumulative match characteristic",
+      "aliases": [
+        "CMC",
+        "CMC curve"
+      ],
+      "domain": "IDENTIFICATION",
+      "metric_type": "CURVE",
+      "definition": "The rank-k identification rate as a function of k from 1 to the recorded candidate list length, together with the true-mate rank distribution it summarises.",
+      "formula": {
+        "kind": "RANK_CURVE",
+        "formula_version": "1.0.0",
+        "x_quantity": "RANK",
+        "y_metric_id": "biometric.identification.rank-k",
+        "y_definition_version": "1.0.0",
+        "rank_sweep": "ONE_TO_RECORDED_CANDIDATE_LIST_LENGTH"
+      },
+      "higher_or_lower_is_better": "NOT_APPLICABLE_TO_CURVE",
+      "required_inputs": [
+        "identification_protocol",
+        "search_mode",
+        "candidate_list_length",
+        "score_direction",
+        "threshold_equality_rule",
+        "processing_failure_policy",
+        "true_mate_identity"
+      ],
+      "aggregation_unit": "IDENTIFICATION_SEARCH",
+      "threshold_semantics": {
+        "threshold_kind": "MATCHER_THRESHOLD_ON_CANDIDATE_SCORES",
+        "decision_rule_source": "RECORDED_PROTOCOL",
+        "score_direction_required": true,
+        "equality_rule_required": true,
+        "threshold_reestimation": "FORBIDDEN_ACROSS_OPERATING_POINTS"
+      },
+      "confidence_interval_methods": [
+        "CLOPPER_PEARSON_EXACT_BINOMIAL",
+        "SUBJECT_AWARE_BOOTSTRAP"
+      ],
+      "source_standard": "QUALSIGHT_PRD",
+      "source_version": "0.3",
+      "references": [
+        {
+          "source_id": "prd-0.3",
+          "locator": "PRD.md:634-661"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:57"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:70"
+        },
+        {
+          "source_id": "requirements-0.2",
+          "locator": "REQUIREMENTS.md:84"
+        }
+      ],
+      "source_requirements": [
+        "QS-REQ-017B",
+        "QS-REQ-029",
+        "QS-REQ-043"
+      ],
+      "implementation": {
+        "kind": "DEFINITION_ONLY",
+        "artifact": "metrics/metric-registry.json"
+      },
+      "implementation_version": "1.0.0",
+      "limitations": [
+        "The curve is bounded by the recorded candidate list length, not the gallery size."
+      ],
+      "warnings": [
+        "Curves from galleries of different sizes are not comparable without the gallery-size effect analysis."
       ]
     }
   ]

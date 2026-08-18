@@ -150,6 +150,36 @@ $QS reproduce-bundle "$BUNDLE" > "$WORK/reproduction.json"
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["state"], d["compared_values"]); sys.exit(0 if d["state"] in ("EXACT","WITHIN_TOLERANCE") else 1)' "$WORK/reproduction.json"
 ```
 
+## 7b. Advanced analysis (post-beta): 1:N identification, controlled degradation, container execution
+
+*1:N identification (console: Advanced → Freeze 1:N protocol → Search).* The LFW identification
+protocol enrols every subject with ≥ 2 images (first image) and probes the rest; single-image
+subjects are open-set non-mated probes. The search embeds gallery and probes with the frozen matcher
+on the GPU, computes the full probe × gallery similarity there, keeps rank-depth candidate lists, and
+records closed-set rank-k/CMC/true-mate rank, open-set FPIR/FNIR/TPIR at target FPIR (thresholds from
+the non-mated searches; unsupported precision flagged), gallery-size effects, and the probe-quality
+effect when a quality job is given (`biometric.identification.*@1.0.0`, registry v1.2.0).
+
+```sh gate
+$QS identification --project-id "$PROJECT_ID" --dataset-id "$DATASET_ID" --matcher-id adaface-ir101-local-candidate --selection subset_fixture --rank-depth 20 --quality-job-id "$JOB_ID" > "$WORK/identification.json"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["search_id"], d["summary"]["gallery_size"], d["summary"]["mated_searches"], d["summary"]["nonmated_searches"], d["rank_k"])' "$WORK/identification.json"
+```
+
+*Controlled degradation (console: Advanced → Create derived set → OFIQ over derived → Analyse response).*
+`POST /api/projects/{id}/datasets/{did}/transformations` derives JPEG / Gaussian-blur / downscale /
+gamma / contrast / rotation / occlusion levels from registered real samples with a complete chain
+(root resource, parent sample and hash, operator kind/version/parameters, encoding); the derived
+dataset is measured by the registered OFIQ engine (the batch engine admits derived samples only when
+the store records their chain), and `POST /api/projects/{id}/degradation-analyses` records the
+quality, matcher-score, FNMR/FMR responses per level with slope, area, threshold crossing, and failure
+onset. Derived images inherit the source restrictions and never leave the workstation.
+
+*Container execution (QS-X64).* `batch --execution container` (API: `"execution": "container"`) runs the
+same registered OFIQ runtime inside a `FROM scratch` image that QualSight builds from the registered
+binary tree plus the workstation's own C/C++ runtime libraries (hashed and recorded), with
+`--network none`, a read-only root filesystem, no capabilities, and the caller's uid; the Run records
+the image id and rootfs manifest hash. Results equal the host adapter's byte for byte.
+
 ## 8. Reading the records
 
 * `GET /api/runs/{run_id}` — the immutable Run (bindings, model hashes, environment, metrics, artifacts).

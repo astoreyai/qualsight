@@ -54,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     batch.add_argument("--selection", default="all", help="all | subset_fixture | subject:<id>")
     batch.add_argument("--chunks", type=int, default=1)
     batch.add_argument("--scope", default="QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1")
+    batch.add_argument("--execution", default="host", choices=["host", "container"], help="run the registered engine on the host or inside the QualSight-built network-less container (QS-X64)")
     freeze = sub.add_parser("freeze-lfw-protocol", help="freeze the registered LFW View 2 protocol over an imported dataset")
     freeze.add_argument("--project-id", required=True)
     freeze.add_argument("--dataset-id", required=True)
@@ -97,6 +98,14 @@ def main(argv: list[str] | None = None) -> int:
     ext.add_argument("--project-id", required=True)
     ext.add_argument("--protocol-id", required=True)
     ext.add_argument("--resource-id", required=True)
+    ident = sub.add_parser("identification", help="freeze the LFW 1:N protocol (if needed) and run an open-set search with a frozen matcher on the GPU (QS-X60)")
+    ident.add_argument("--project-id", required=True)
+    ident.add_argument("--dataset-id", required=True)
+    ident.add_argument("--matcher-id", required=True)
+    ident.add_argument("--condition-id", default="SCRFD10G_ADAPTIVE_LARGEST_ARCFACE112_JPEG95_V1")
+    ident.add_argument("--selection", default="all", choices=["all", "subset_fixture"])
+    ident.add_argument("--rank-depth", type=int, default=20)
+    ident.add_argument("--quality-job-id", default=None)
     args = parser.parse_args(argv)
 
     settings = Settings.from_environment()
@@ -193,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
             job = OFIQBatchJob(
                 engine=engine, store=store, project=project, dataset=dataset, samples=[s for s in samples if s is not None],
                 purpose_scope=args.scope, job_root=settings.data_dir / "jobs", chunks=args.chunks, selection_rule=rule,
+                execution=args.execution,
             )
             print(json.dumps({"job_id": job.job_id, "total": len(job.samples), "chunks_requested": job.chunks_requested, "job_dir": str(job.job_dir)}, indent=2), file=sys.stderr, flush=True)
             progress = job.run()
@@ -281,6 +291,26 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             result = job.run()
             print(json.dumps({"analysis_id": result.analysis_id, "run_id": result.run.run_id, "directory": str(result.directory), "summary": result.summary}, indent=2))
+            return 0
+        if args.command == "identification":
+            from .identification.protocol import freeze_lfw_identification
+            from .identification.search import IdentificationSearchJob
+            from .matchers.upstream import UpstreamSources
+            from .projects import ProjectService
+
+            engine = _engine(settings)
+            service = ProjectService(store, engine)
+            project = service.require_writable(args.project_id)
+            dataset = store.dataset(args.dataset_id)
+            if dataset is None:
+                raise SystemExit("dataset is not recorded")
+            protocol = freeze_lfw_identification(store, project=project, dataset=dataset, selection=args.selection, rank_depth=args.rank_depth, repository_root=settings.repository_root, actor=service.actor)
+            print(json.dumps({"protocol_id": protocol["protocol_id"], "gallery": protocol["gallery_count"], "mated_probes": protocol["mated_probe_count"], "nonmated_probes": protocol["nonmated_probe_count"]}, indent=2), file=sys.stderr, flush=True)
+            upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir)
+            upstream.acquire()
+            job = IdentificationSearchJob(store=store, registry=engine.registry, upstream=upstream, repository_root=settings.repository_root, project=project, protocol=protocol, entries=store.identification_entries(protocol["protocol_id"]), matcher_id=args.matcher_id, condition_id=args.condition_id, job_root=settings.data_dir / "identification", actor=service.actor, quality_job_id=args.quality_job_id)
+            result = job.run()
+            print(json.dumps({"search_id": result.search_id, "run_id": result.run.run_id, "protocol_id": protocol["protocol_id"], "summary": result.summary, "gallery_effects": result.metrics["gallery_effects"]["gallery_sizes"], "operating_points": result.metrics["open_set"]["EXCLUDE_FAILED_TRIALS"]["operating_points"], "rank_k": {k: v["rate"] for k, v in result.metrics["closed_set"]["EXCLUDE_FAILED_TRIALS"]["rank_k"].items()}}, indent=2))
             return 0
         if args.command == "import-external-scores":
             from .importers.external_scores import ExternalScoreImporter

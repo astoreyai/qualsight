@@ -28,6 +28,13 @@ PHASE3_IDS = {
     "biometric.quality.utility.failure-predictor",
     "biometric.policy.threshold-analysis",
 }
+IDENTIFICATION_IDS = {
+    "biometric.identification.fpir",
+    "biometric.identification.fnir",
+    "biometric.identification.tpir",
+    "biometric.identification.rank-k",
+    "biometric.identification.cmc",
+}
 
 
 def sha256(path: Path) -> str:
@@ -51,11 +58,11 @@ class MetricRegistryTests(unittest.TestCase):
             validate_registry_file(REGISTRY_PATH),
             {
                 "registry_id": "qualsight-core-metrics",
-                "registry_version": "1.1.0",
-                "metrics": 14,
+                "registry_version": "1.2.0",
+                "metrics": 19,
                 "definition_versions": ["1.0.0"],
                 "authorities": 2,
-                "requirements": 9,
+                "requirements": 10,
             },
         )
 
@@ -82,8 +89,10 @@ class MetricRegistryTests(unittest.TestCase):
             },
         )
 
-    def test_registry_contains_the_six_core_and_eight_phase3_definitions(self) -> None:
-        self.assertEqual(set(self.metrics), CORE_IDS | PHASE3_IDS)
+    def test_registry_contains_the_core_phase3_and_identification_definitions(self) -> None:
+        self.assertEqual(set(self.metrics), CORE_IDS | PHASE3_IDS | IDENTIFICATION_IDS)
+        for metric_id in IDENTIFICATION_IDS:
+            self.assertEqual(self.metrics[metric_id]["domain"], "IDENTIFICATION")
         self.assertEqual(
             {metric["definition_version"] for metric in self.metrics.values()},
             {"1.0.0"},

@@ -757,6 +757,8 @@ def _validate_current_output_hashes(records: list[dict[str, Any]]) -> int:
         "atg/evidence/2026-08-18-offline-gate-02.json": PROJECT_ROOT / "atg/evidence/2026-08-18-offline-gate-02.json",
         "atg/evidence/2026-08-18-docs-workflow-gate-02.json": PROJECT_ROOT / "atg/evidence/2026-08-18-docs-workflow-gate-02.json",
         "resources/authorizations/qualsight-owner-external-scores-option-a-2026-08-17.json": PROJECT_ROOT / "resources/authorizations/qualsight-owner-external-scores-option-a-2026-08-17.json",
+        "atg/evidence/2026-08-18-console-observation-09.json": PROJECT_ROOT / "atg/evidence/2026-08-18-console-observation-09.json",
+        "atg/evidence/2026-08-18-docs-workflow-gate-03.json": PROJECT_ROOT / "atg/evidence/2026-08-18-docs-workflow-gate-03.json",
         "resources/authorizations/qualsight-owner-phase2-amendment-2026-08-17.json": PROJECT_ROOT / "resources/authorizations/qualsight-owner-phase2-amendment-2026-08-17.json",
     }
     for label, path in expected.items():

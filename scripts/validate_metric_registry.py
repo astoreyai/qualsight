@@ -38,7 +38,15 @@ PHASE3_METRIC_IDS = {
     "biometric.quality.utility.failure-predictor",
     "biometric.policy.threshold-analysis",
 }
+IDENTIFICATION_METRIC_IDS = {
+    "biometric.identification.fpir",
+    "biometric.identification.fnir",
+    "biometric.identification.tpir",
+    "biometric.identification.rank-k",
+    "biometric.identification.cmc",
+}
 REQUIRED_SOURCE_REQUIREMENTS = {
+    "QS-REQ-017B",
     "QS-REQ-015",
     "QS-REQ-016",
     "QS-REQ-018",
@@ -589,6 +597,140 @@ PHASE3_CONTRACTS = {'biometric.policy.threshold-analysis': {'aggregation_unit': 
                                                                      'threshold_reestimation': 'FORBIDDEN_ACROSS_ANALYSIS'}}}
 
 
+IDENTIFICATION_CONTRACTS = {'biometric.identification.cmc': {'aggregation_unit': 'IDENTIFICATION_SEARCH',
+                                  'aliases': ('CMC', 'CMC curve'),
+                                  'canonical_name': 'Cumulative match characteristic',
+                                  'confidence_interval_methods': ('CLOPPER_PEARSON_EXACT_BINOMIAL',
+                                                                  'SUBJECT_AWARE_BOOTSTRAP'),
+                                  'prose_sha256': '48933d6e2b61ff9fc8e3bfd27333185e0a3e16dc338ca5eff3bd5b030f269589',
+                                  'references': (('prd-0.3', 'PRD.md:634-661'),
+                                                 ('requirements-0.2', 'REQUIREMENTS.md:57'),
+                                                 ('requirements-0.2', 'REQUIREMENTS.md:70'),
+                                                 ('requirements-0.2', 'REQUIREMENTS.md:84')),
+                                  'required_inputs': ('identification_protocol',
+                                                      'search_mode',
+                                                      'candidate_list_length',
+                                                      'score_direction',
+                                                      'threshold_equality_rule',
+                                                      'processing_failure_policy',
+                                                      'true_mate_identity'),
+                                  'source_requirements': ('QS-REQ-017B', 'QS-REQ-029', 'QS-REQ-043'),
+                                  'threshold_semantics': {'decision_rule_source': 'RECORDED_PROTOCOL',
+                                                          'equality_rule_required': True,
+                                                          'score_direction_required': True,
+                                                          'threshold_kind': 'MATCHER_THRESHOLD_ON_CANDIDATE_SCORES',
+                                                          'threshold_reestimation': 'FORBIDDEN_ACROSS_OPERATING_POINTS'}},
+ 'biometric.identification.fnir': {'aggregation_unit': 'IDENTIFICATION_SEARCH',
+                                   'aliases': ('FNIR',),
+                                   'canonical_name': 'False negative identification rate',
+                                   'confidence_interval_methods': ('CLOPPER_PEARSON_EXACT_BINOMIAL',
+                                                                   'SUBJECT_AWARE_BOOTSTRAP'),
+                                   'prose_sha256': '7e48e6199ed7f59e6748ee4e9e92a0d2164f23579047ddea8ecc94b5fcf4d2e8',
+                                   'references': (('prd-0.3', 'PRD.md:634-661'),
+                                                  ('prd-0.3', 'PRD.md:608-632'),
+                                                  ('requirements-0.2', 'REQUIREMENTS.md:55'),
+                                                  ('requirements-0.2', 'REQUIREMENTS.md:57'),
+                                                  ('requirements-0.2', 'REQUIREMENTS.md:70'),
+                                                  ('requirements-0.2', 'REQUIREMENTS.md:84')),
+                                   'required_inputs': ('identification_protocol',
+                                                       'search_mode',
+                                                       'candidate_list_length',
+                                                       'score_direction',
+                                                       'threshold_equality_rule',
+                                                       'processing_failure_policy',
+                                                       'fixed_matcher_threshold',
+                                                       'true_mate_identity'),
+                                   'source_requirements': ('QS-REQ-016',
+                                                           'QS-REQ-017B',
+                                                           'QS-REQ-029',
+                                                           'QS-REQ-043'),
+                                   'threshold_semantics': {'decision_rule_source': 'RECORDED_PROTOCOL',
+                                                           'equality_rule_required': True,
+                                                           'score_direction_required': True,
+                                                           'threshold_kind': 'MATCHER_THRESHOLD_ON_CANDIDATE_SCORES',
+                                                           'threshold_reestimation': 'FORBIDDEN_ACROSS_OPERATING_POINTS'}},
+ 'biometric.identification.fpir': {'aggregation_unit': 'IDENTIFICATION_SEARCH',
+                                   'aliases': ('FPIR',),
+                                   'canonical_name': 'False positive identification rate',
+                                   'confidence_interval_methods': ('CLOPPER_PEARSON_EXACT_BINOMIAL',
+                                                                   'SUBJECT_AWARE_BOOTSTRAP'),
+                                   'prose_sha256': '14c98931e45a88c20ff09bd97f858246c59aaffb17684c1c13339ae97bf74608',
+                                   'references': (('prd-0.3', 'PRD.md:634-661'),
+                                                  ('prd-0.3', 'PRD.md:608-632'),
+                                                  ('requirements-0.2', 'REQUIREMENTS.md:55'),
+                                                  ('requirements-0.2', 'REQUIREMENTS.md:57'),
+                                                  ('requirements-0.2', 'REQUIREMENTS.md:70'),
+                                                  ('requirements-0.2', 'REQUIREMENTS.md:84')),
+                                   'required_inputs': ('identification_protocol',
+                                                       'search_mode',
+                                                       'candidate_list_length',
+                                                       'score_direction',
+                                                       'threshold_equality_rule',
+                                                       'processing_failure_policy',
+                                                       'fixed_matcher_threshold'),
+                                   'source_requirements': ('QS-REQ-016',
+                                                           'QS-REQ-017B',
+                                                           'QS-REQ-029',
+                                                           'QS-REQ-043'),
+                                   'threshold_semantics': {'decision_rule_source': 'RECORDED_PROTOCOL',
+                                                           'equality_rule_required': True,
+                                                           'score_direction_required': True,
+                                                           'threshold_kind': 'MATCHER_THRESHOLD_ON_CANDIDATE_SCORES',
+                                                           'threshold_reestimation': 'FORBIDDEN_ACROSS_OPERATING_POINTS'}},
+ 'biometric.identification.rank-k': {'aggregation_unit': 'IDENTIFICATION_SEARCH',
+                                     'aliases': ('rank-k', 'rank-1 hit rate'),
+                                     'canonical_name': 'Rank-k identification rate',
+                                     'confidence_interval_methods': ('CLOPPER_PEARSON_EXACT_BINOMIAL',
+                                                                     'SUBJECT_AWARE_BOOTSTRAP'),
+                                     'prose_sha256': 'f2726b408d16eb6384c8e9696c2b5160a5d8c1844e201e2d525b600e00fbf0ba',
+                                     'references': (('prd-0.3', 'PRD.md:634-661'),
+                                                    ('requirements-0.2', 'REQUIREMENTS.md:55'),
+                                                    ('requirements-0.2', 'REQUIREMENTS.md:57'),
+                                                    ('requirements-0.2', 'REQUIREMENTS.md:70'),
+                                                    ('requirements-0.2', 'REQUIREMENTS.md:84')),
+                                     'required_inputs': ('identification_protocol',
+                                                         'search_mode',
+                                                         'candidate_list_length',
+                                                         'score_direction',
+                                                         'threshold_equality_rule',
+                                                         'processing_failure_policy',
+                                                         'true_mate_identity',
+                                                         'rank_values'),
+                                     'source_requirements': ('QS-REQ-016',
+                                                             'QS-REQ-017B',
+                                                             'QS-REQ-029',
+                                                             'QS-REQ-043'),
+                                     'threshold_semantics': {'decision_rule_source': 'RECORDED_PROTOCOL',
+                                                             'equality_rule_required': True,
+                                                             'score_direction_required': True,
+                                                             'threshold_kind': 'MATCHER_THRESHOLD_ON_CANDIDATE_SCORES',
+                                                             'threshold_reestimation': 'FORBIDDEN_ACROSS_OPERATING_POINTS'}},
+ 'biometric.identification.tpir': {'aggregation_unit': 'IDENTIFICATION_SEARCH',
+                                   'aliases': ('TPIR',),
+                                   'canonical_name': 'True positive identification rate',
+                                   'confidence_interval_methods': ('CLOPPER_PEARSON_EXACT_BINOMIAL',
+                                                                   'SUBJECT_AWARE_BOOTSTRAP'),
+                                   'prose_sha256': '2ec59f75904f93a54a4e8da6456089d99543af1b71b1ea8dfe2af42effcc0432',
+                                   'references': (('prd-0.3', 'PRD.md:634-661'),
+                                                  ('requirements-0.2', 'REQUIREMENTS.md:57'),
+                                                  ('requirements-0.2', 'REQUIREMENTS.md:70'),
+                                                  ('requirements-0.2', 'REQUIREMENTS.md:84')),
+                                   'required_inputs': ('identification_protocol',
+                                                       'search_mode',
+                                                       'candidate_list_length',
+                                                       'score_direction',
+                                                       'threshold_equality_rule',
+                                                       'processing_failure_policy',
+                                                       'fixed_matcher_threshold',
+                                                       'true_mate_identity'),
+                                   'source_requirements': ('QS-REQ-017B', 'QS-REQ-029', 'QS-REQ-043'),
+                                   'threshold_semantics': {'decision_rule_source': 'RECORDED_PROTOCOL',
+                                                           'equality_rule_required': True,
+                                                           'score_direction_required': True,
+                                                           'threshold_kind': 'MATCHER_THRESHOLD_ON_CANDIDATE_SCORES',
+                                                           'threshold_reestimation': 'FORBIDDEN_ACROSS_OPERATING_POINTS'}}}
+
+
 class MetricRegistryValidationError(ValueError):
     """Raised when a registry violates the frozen declarative contract."""
 
@@ -985,6 +1127,24 @@ def _validate_formula(value: Any, metric_id: str, location: str) -> dict[str, An
             _fail(f"{location}.statistics", "predictor statistics set is frozen")
         if formula["cutoff_source"] != "RECORDED_QUALITY_POLICY_THRESHOLD":
             _fail(f"{location}.cutoff_source", "must equal RECORDED_QUALITY_POLICY_THRESHOLD")
+    elif kind == "IDENTIFICATION_RATE":
+        _strict_keys(formula, location, {"kind", "formula_version", "numerator_population", "numerator_event", "denominator_population", "denominator_policy"})
+        expected = {"biometric.identification.fpir": ("NON_MATED_SEARCHES", "ANY_CANDIDATE_AT_OR_ABOVE_THRESHOLD", "INCLUDED_NON_MATED_SEARCHES"),
+                    "biometric.identification.fnir": ("MATED_SEARCHES", "TRUE_MATE_NOT_RETURNED_AT_OR_ABOVE_THRESHOLD_WITHIN_LIST", "INCLUDED_MATED_SEARCHES"),
+                    "biometric.identification.tpir": ("MATED_SEARCHES", "TRUE_MATE_RETURNED_AT_OR_ABOVE_THRESHOLD_WITHIN_LIST", "INCLUDED_MATED_SEARCHES")}.get(metric_id)
+        if expected is None:
+            _fail(location, "IDENTIFICATION_RATE is not valid for this metric")
+        if (formula["numerator_population"], formula["numerator_event"], formula["denominator_population"]) != expected or formula["denominator_policy"] != "RECORDED_FAILURE_POLICY":
+            _fail(location, "identification rate populations and event do not match the metric definition")
+    elif kind == "RANK_RATE":
+        _strict_keys(formula, location, {"kind", "formula_version", "numerator_population", "numerator_event", "denominator_population", "denominator_policy", "rank_values"})
+        if metric_id != "biometric.identification.rank-k" or formula["numerator_event"] != "TRUE_MATE_RANK_LE_K" or formula["rank_values"] != "RECORDED_WITH_RESULT":
+            _fail(location, "RANK_RATE must be the closed-set rank-k definition with recorded rank values")
+    elif kind == "RANK_CURVE":
+        _strict_keys(formula, location, {"kind", "formula_version", "x_quantity", "y_metric_id", "y_definition_version", "rank_sweep"})
+        if metric_id != "biometric.identification.cmc" or formula["y_metric_id"] != "biometric.identification.rank-k" or formula["x_quantity"] != "RANK":
+            _fail(location, "RANK_CURVE must sweep rank over the registered rank-k definition")
+        _semver(formula["y_definition_version"], f"{location}.y_definition_version")
     elif kind == "POLICY_OPERATING_POINT":
         _strict_keys(formula, location, {"kind", "formula_version", "matcher_threshold_kind", "quality_threshold_kind", "reported_quantities", "matcher_threshold_reestimation"})
         if metric_id != "biometric.policy.threshold-analysis":
@@ -1107,7 +1267,7 @@ def _validate_metric(
         _fail(f"{location}.implementation_version", "must equal definition_version")
     if not set(requirements) <= REQUIRED_SOURCE_REQUIREMENTS:
         _fail(f"{location}.source_requirements", "contains a requirement outside this registry slice")
-    expected_contract = CORE_CONTRACTS.get(metric_id) or PHASE3_CONTRACTS.get(metric_id)
+    expected_contract = CORE_CONTRACTS.get(metric_id) or PHASE3_CONTRACTS.get(metric_id) or IDENTIFICATION_CONTRACTS.get(metric_id)
     if expected_contract is None:
         _fail(location, "has no versioned semantic contract")
     observed_contract = {
@@ -1158,7 +1318,7 @@ def validate_registry(registry: dict[str, Any]) -> dict[str, Any]:
         _fail("registry.schema_version", "unsupported schema version")
     if _string(registry["registry_id"], "registry.registry_id", 128) != "qualsight-core-metrics":
         _fail("registry.registry_id", "must equal qualsight-core-metrics")
-    if _semver(registry["registry_version"], "registry.registry_version") != "1.1.0":
+    if _semver(registry["registry_version"], "registry.registry_version") != "1.2.0":
         _fail("registry.registry_version", "unsupported registry version")
     authorities = _validate_authorities(registry["authority_documents"])
     requirements = _validate_requirements(registry["source_requirements"], "registry.source_requirements")
@@ -1171,8 +1331,8 @@ def validate_registry(registry: dict[str, Any]) -> dict[str, Any]:
     metric_ids = [metric["metric_id"] for metric in metrics]
     if len(metric_ids) != len(set(metric_ids)):
         _fail("registry.metrics", "contains duplicate metric IDs")
-    if set(metric_ids) != CORE_METRIC_IDS | PHASE3_METRIC_IDS:
-        _fail("registry.metrics", "must contain the six Phase-0 core metrics and the eight Phase-3 quality-utility metrics")
+    if set(metric_ids) != CORE_METRIC_IDS | PHASE3_METRIC_IDS | IDENTIFICATION_METRIC_IDS:
+        _fail("registry.metrics", "must contain the six Phase-0 core metrics, the eight Phase-3 quality-utility metrics, and the five identification metrics")
     versions_by_id = {metric["metric_id"]: metric["definition_version"] for metric in metrics}
     for index, metric in enumerate(metrics):
         formula = metric["formula"]
@@ -1202,7 +1362,7 @@ def validate_registry(registry: dict[str, Any]) -> dict[str, Any]:
         _fail("registry.metrics", "canonical names and aliases must be globally unique")
     versions = {metric["definition_version"] for metric in metrics}
     if versions != {"1.0.0"}:
-        _fail("registry.metrics", "the Phase-0 core and Phase-3 utility definitions must use version 1.0.0")
+        _fail("registry.metrics", "the core, utility, and identification definitions must use version 1.0.0")
     return {
         "registry_id": registry["registry_id"],
         "registry_version": registry["registry_version"],

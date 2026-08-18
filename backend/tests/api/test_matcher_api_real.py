@@ -514,6 +514,173 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertEqual(markers["QS-C22.AS"], "QUALSIGHT_EXECUTED")
         self.assertNotEqual(leaf["matrix_id"], self.matrix_id)
 
+    def test_identification_protocol_and_open_set_search_on_the_real_fixture(self) -> None:
+        """QS-X60: a frozen 1:N protocol over the fixture subjects and an open-set search Run with registered identification definitions."""
+
+        fixture = json.loads((ROOT / "resources" / "manifests" / "lfw-subset-fixture-v1.json").read_text(encoding="utf-8"))
+        subjects: dict[str, list[str]] = {}
+        for image in fixture["images"]:
+            subjects.setdefault(image["path"].split("/")[0], []).append(image["path"])
+        expected_gallery = sum(1 for paths in subjects.values() if len(paths) >= 2)
+        expected_mated = sum(len(paths) - 1 for paths in subjects.values() if len(paths) >= 2)
+        expected_nonmated = sum(1 for paths in subjects.values() if len(paths) == 1)
+        frozen = self.client.post(f"/api/projects/{self.project_id}/datasets/{self.dataset_id}/protocols/freeze-lfw-identification", json={"selection": "subset_fixture", "rank_depth": 20})
+        self.assertEqual(frozen.status_code, 201, frozen.text)
+        protocol = frozen.json()
+        self.assertEqual(protocol["mode"], "OPEN_SET")
+        self.assertEqual(protocol["gallery_count"], expected_gallery)
+        self.assertEqual(protocol["mated_probe_count"], expected_mated)
+        self.assertEqual(protocol["nonmated_probe_count"], expected_nonmated)
+        self.assertEqual(protocol["rank_depth"], 20)
+        started = self.client.post(f"/api/projects/{self.project_id}/identification-protocols/{protocol['protocol_id']}/search", json={"matcher_id": "adaface-ir101-local-candidate", "condition_id": "SCRFD10G_ADAPTIVE_LARGEST_ARCFACE112_JPEG95_V1"})
+        self.assertEqual(started.status_code, 202, started.text)
+        search_id = started.json()["search_id"]
+        deadline = time.monotonic() + 900
+        while time.monotonic() < deadline:
+            status = self.client.get(f"/api/identification-searches/{search_id}").json()
+            if status["state"] in {"COMPLETED", "FAILED"}:
+                break
+            time.sleep(1)
+        self.assertEqual(status["state"], "COMPLETED", status)
+        metrics = status["metrics"]
+        self.assertEqual(metrics["definitions"]["fnir"], ["biometric.identification.fnir", "1.0.0"])
+        self.assertEqual(metrics["definitions"]["cmc"], ["biometric.identification.cmc", "1.0.0"])
+        self.assertEqual(metrics["counts"]["gallery_templates"] + metrics["counts"]["gallery_template_failures"], expected_gallery)
+        self.assertEqual(metrics["counts"]["mated_searches"], expected_mated)
+        self.assertEqual(metrics["counts"]["nonmated_searches"], expected_nonmated)
+        closed = metrics["closed_set"]["EXCLUDE_FAILED_TRIALS"]
+        available = [k for k in (1, 5, 10, 20, 100) if k <= min(20, expected_gallery)]
+        self.assertEqual(sorted(int(k) for k in closed["rank_k"]), available)
+        ranks = [closed["rank_k"][str(k)]["rate"] for k in available]
+        self.assertTrue(all(0.0 <= r <= 1.0 for r in ranks if r is not None))
+        cmc = closed["cmc"]["points"]
+        self.assertTrue(all(cmc[i]["rate"] <= cmc[i + 1]["rate"] for i in range(len(cmc) - 1)))
+        self.assertIn("ci_lower", closed["rank_k"]["1"])
+        open_set = metrics["open_set"]["EXCLUDE_FAILED_TRIALS"]
+        self.assertEqual([p["target_fpir"] for p in open_set["operating_points"]], [0.1, 0.01, 0.001])
+        for point in open_set["operating_points"]:
+            if point["threshold"] is None:
+                self.assertIn("reason", point)  # a small non-mated population cannot reach the target FPIR; said so, not invented
+            else:
+                self.assertIn("fnir", point); self.assertIn("tpir", point); self.assertIn("fnir_ci95", point)
+        self.assertIn("true_mate_rank_distribution", closed)
+        self.assertTrue(metrics["gallery_effects"]["gallery_sizes"])
+        # The Run is immutable, GPU-embedded by the frozen matcher, and lists candidates that resolve to real samples.
+        run = self.client.get(f"/api/runs/{status['run_id']}").json()["run"]
+        self.assertEqual(run["matcher"]["component_id"], "adaface-ir101-local-candidate")
+        self.assertEqual(run["pair_search_protocol"]["component_id"], protocol["protocol_id"])
+        candidates = self.client.get(f"/api/identification-searches/{search_id}/candidates", params={"limit": 1000}).json()
+        self.assertGreater(candidates["total"], 0)
+        self.assertTrue(all(row["rank"] <= 20 for row in candidates["rows"]))
+        self.assertEqual(self.client.get(candidates["rows"][0]["links"]["probe_sample"]).status_code, 200)
+        # Independent recomputation of rank-1 identification and FNIR at the recorded FPIR-0.1 threshold from the candidate lists.
+        by_probe: dict[str, list[dict]] = {}
+        for row in candidates["rows"]:
+            by_probe.setdefault(row["probe_sample_id"], []).append(row)
+        mated_probes = [rows for rows in by_probe.values() if rows[0]["probe_kind"] == "MATED"]
+        rank1 = sum(1 for rows in mated_probes if any(r["rank"] == 1 and r["is_true_mate"] for r in rows)) / len(mated_probes)
+        self.assertAlmostEqual(closed["rank_k"]["1"]["rate"], rank1, places=12)
+        point = open_set["operating_points"][0]
+        if point.get("threshold") is not None:
+            misses = sum(1 for rows in mated_probes if not any(r["is_true_mate"] and r["score"] >= point["threshold"] for r in rows))
+            self.assertAlmostEqual(point["fnir"], misses / len(mated_probes), places=12)
+        # Metrics survive the store round trip and the search is listed for the project.
+        listed = self.client.get(f"/api/projects/{self.project_id}/identification-searches").json()
+        self.assertIn(search_id, [item["search_id"] for item in listed])
+
+    def test_controlled_transformations_of_real_inputs_carry_full_provenance_and_feed_degradation_analysis(self) -> None:
+        """QS-X61: derived images from registered real inputs (JPEG, blur, downscale) with complete chains; OFIQ and the frozen matcher respond per degradation level."""
+
+        spec = {"selection": "subset_fixture", "transforms": [{"kind": "jpeg", "parameters": [90, 50, 20]}, {"kind": "gaussian_blur", "parameters": [1.0, 2.0]}, {"kind": "downscale", "parameters": [0.5]}]}
+        created = self.client.post(f"/api/projects/{self.project_id}/datasets/{self.dataset_id}/transformations", json=spec)
+        self.assertEqual(created.status_code, 201, created.text)
+        derived = created.json()
+        self.assertEqual(derived["source_count"], 16)
+        self.assertEqual(derived["derived_count"], 16 * 6)
+        self.assertEqual(derived["levels"], 6)
+        listing = self.client.get(f"/api/derived-sets/{derived['derived_set_id']}").json()
+        self.assertEqual(len(listing["samples"]), 96)
+        first = listing["samples"][0]
+        self.assertTrue(first["parent_sample_id"].startswith("sample:sha256:"))
+        self.assertEqual(first["chain"][0]["root_resource_id"], "lfw-funneled-local-candidate")
+        self.assertIn("kind", first["chain"][-1]); self.assertIn("parameters", first["chain"][-1]); self.assertIn("version", first["chain"][-1])
+        self.assertTrue(Path(first["path"]).exists())
+        self.assertEqual(self.client.get(f"/api/samples/{first['parent_sample_id']}").status_code, 200)
+        self.assertEqual(self.client.get(f"/api/samples/{first['derived_sample_id']}").status_code, 200)
+        # OFIQ runs over the derived dataset through the registered engine (the batch engine admits derived samples whose chain roots at a registered input).
+        started = self.client.post(f"/api/projects/{self.project_id}/datasets/{derived['derived_dataset_id']}/quality-batch", json={"selection": {"kind": "all"}, "chunks": 1})
+        self.assertEqual(started.status_code, 202, started.text)
+        job_id = started.json()["job_id"]
+        deadline = time.monotonic() + 600
+        while time.monotonic() < deadline:
+            job = self.client.get(f"/api/jobs/{job_id}").json()
+            if job["ended_at"]:
+                break
+            time.sleep(0.5)
+        self.assertEqual(job["state"], "COMPLETED", job)
+        self.assertEqual(job["assessed"], 96)
+        # Degradation analysis: quality response, matcher score/FNMR response, slope, area, threshold crossing — recorded as a Run.
+        analysis = self.client.post(f"/api/projects/{self.project_id}/degradation-analyses", json={"derived_set_id": derived["derived_set_id"], "quality_job_id": job_id, "baseline_quality_job_id": self._quality_job()["job_id"], "matcher_id": "adaface-ir101-local-candidate", "condition_id": "SCRFD10G_ADAPTIVE_LARGEST_ARCFACE112_JPEG95_V1", "matcher_threshold": 0.8})
+        self.assertEqual(analysis.status_code, 202, analysis.text)
+        analysis_id = analysis.json()["analysis_id"]
+        deadline = time.monotonic() + 900
+        while time.monotonic() < deadline:
+            status = self.client.get(f"/api/degradation-analyses/{analysis_id}").json()
+            if status["state"] in {"COMPLETED", "FAILED"}:
+                break
+            time.sleep(1)
+        self.assertEqual(status["state"], "COMPLETED", status)
+        document = status["document"]
+        self.assertEqual({r["transform"] for r in document["responses"]}, {"jpeg", "gaussian_blur", "downscale"})
+        jpeg = next(r for r in document["responses"] if r["transform"] == "jpeg")
+        self.assertEqual([lvl["parameter"] for lvl in jpeg["levels"]], [90, 50, 20])
+        for level in jpeg["levels"]:
+            self.assertIn("quality", level); self.assertIn("UnifiedQualityScore", level["quality"])
+            self.assertIn("mated_score_mean", level); self.assertIn("fnmr", level); self.assertIn("fmr", level)
+            self.assertGreaterEqual(level["mated_pairs"], 5)  # every recorded protocol pair whose left image is a source, not only the fixture's own five
+            self.assertEqual(len(level["pair_scores"]), level["mated_pairs"] + level["nonmated_pairs"])
+            self.assertTrue(all(ps["derived_sample_id"] for ps in level["pair_scores"]))
+        self.assertIn("baseline", jpeg)
+        self.assertIn("area_under_response", jpeg["derived_summaries"]["fnmr"])
+        self.assertIn("threshold_crossing", jpeg["derived_summaries"]["fnmr"])
+        run = self.client.get(f"/api/runs/{status['run_id']}").json()["run"]
+        self.assertEqual(run["matcher"]["component_id"], "adaface-ir101-local-candidate")
+        self.assertIsNotNone(run["quality_engine"])
+        self.assertTrue(any("derived" in limit.lower() or "transform" in limit.lower() for limit in run["provenance_limits"]))
+
+    def test_container_execution_adapter_runs_the_registered_ofiq_runtime_in_an_immutable_container(self) -> None:
+        """QS-X64: the batch engine can execute the registered OFIQ runtime inside a network-less container built from registered bytes; results equal the host adapter's."""
+
+        import pyarrow.parquet as pq
+
+        host_job = self._quality_job()
+        started = self.client.post(f"/api/projects/{self.project_id}/datasets/{self.dataset_id}/quality-batch", json={"selection": {"kind": "subset_fixture"}, "chunks": 1, "execution": "container"})
+        self.assertEqual(started.status_code, 202, started.text)
+        job_id = started.json()["job_id"]
+        deadline = time.monotonic() + 600
+        while time.monotonic() < deadline:
+            job = self.client.get(f"/api/jobs/{job_id}").json()
+            if job["ended_at"]:
+                break
+            time.sleep(0.5)
+        self.assertEqual(job["state"], "COMPLETED", job)
+        self.assertEqual(job["assessed"], 16)
+        run = self.client.get(f"/api/runs/{job['run_id']}").json()["run"]
+        configuration = json.loads(run["configuration"]["text"]) if isinstance(run["configuration"], dict) and "text" in run["configuration"] else run["configuration"]
+        environment = configuration.get("execution_environment") or {}
+        self.assertEqual(environment.get("kind"), "CONTAINER")
+        self.assertTrue(str(environment.get("image_id", "")).startswith("sha256:"))
+        self.assertEqual(environment.get("network"), "none")
+        self.assertTrue(environment.get("rootfs_manifest_sha256"))
+        # Same measures as the host adapter over the same samples.
+        host = {r["sample_id"]: r for r in pq.read_table(host_job["parquet_path"]).to_pylist()}
+        container = {r["sample_id"]: r for r in pq.read_table(job["parquet_path"]).to_pylist()}
+        self.assertEqual(set(host), set(container))
+        measure_columns = [c for c in next(iter(host.values())) if c.endswith(".native") or c.endswith(".scalar") or c.endswith(".failed")]
+        for sample_id, row in host.items():
+            for column in measure_columns:
+                self.assertEqual(row[column], container[sample_id][column], (sample_id, column))
+
 
 if __name__ == "__main__":
     unittest.main()

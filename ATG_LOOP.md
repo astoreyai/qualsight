@@ -2,7 +2,7 @@
 
 **Control contract:** v1.6  
 **Date:** August 17, 2026  
-**State:** Active controller; the beta DAG is complete — all 41 whole capabilities QS-A00 through QS-H74 accepted (Phase 2 under decision 28, QS-C21 under decision 29); current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 and QS-C25 remain BLOCKED on a real external score artifact; no whole capability is dependency-ready; execution of the registered installed OFIQ v1.1.2 runtime and of the frozen matcher runtime (registered SCRFD-10G, AdaFace, ElasticFace, TransFace bytes) on registered inputs is authorized by the owner use-permission receipt  
+**State:** Active controller; the beta DAG is complete — all 41 whole capabilities QS-A00 through QS-H74 accepted (Phase 2 under decision 28, QS-C21 under decision 29); post-beta cycle C25 accepted QS-X60 (1:N identification), QS-X61 (controlled transformations), and QS-X64 (container adapter), while QS-X59/X62/X63/X65–X68 are BLOCKED_BY_OWNER_INPUT (approved demographic/PAD/non-face data, capture devices, identity provider, commercial SDK); current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 and QS-C25 remain BLOCKED on a real external score artifact; no whole capability is dependency-ready; execution of the registered installed OFIQ v1.1.2 runtime and of the frozen matcher runtime (registered SCRFD-10G, AdaFace, ElasticFace, TransFace bytes) on registered inputs is authorized by the owner use-permission receipt  
 **Companion graph:** [ATG_PLAN.md](./ATG_PLAN.md)  
 **Product authority:** [PRD.md](./PRD.md)
 
@@ -256,4 +256,4 @@ Every cycle closes with:
 - dirty/committed/pushed state;
 - one claim most likely to be wrong when runtime coverage is incomplete.
 
-The next cycle starts from that persisted state as a new DAG execution. In v1.6, the beta DAG is closed (cycles C20–C24); further cycles belong to the post-beta branch; QS-C21 stays parked until the owner registers a real external score artifact, and no substitute artifact may be generated to close it.
+The next cycle starts from that persisted state as a new DAG execution. In v1.6, the beta DAG is closed (cycles C20–C24); post-beta cycle C25 accepted QS-X60/X61/X64 with real evidence, and the remaining post-beta nodes wait for owner inputs named in ATG_PLAN.md; QS-C21 stays parked until the owner registers a real external score artifact, and no substitute artifact may be generated to close it.

@@ -218,6 +218,7 @@ class OFIQBatchJob:
         chunks: int = 1,
         selection_rule: str,
         actor_id: str | None = None,
+        execution: str = "host",
     ) -> None:
         if not samples:
             raise BatchJobError("a batch job needs at least one sample")
@@ -254,8 +255,41 @@ class OFIQBatchJob:
         self.engine_version: str | None = None
         self.initialization_ms: list[int] = []
         self._input_resource, _ = self._input_resource_for(samples[0].source_path)
+        if execution not in ("host", "container"):
+            raise BatchJobError("execution must be host or container")
+        self.execution = execution
+        self.container_adapter = None
+        if execution == "container":
+            from ...execution.container_runtime import ContainerCLIAdapter, ContainerRuntimeError, build_runtime_image
+
+            try:
+                image = build_runtime_image(runtime_resource=engine.runtime, work_dir=job_root / ".images")
+            except ContainerRuntimeError as error:
+                raise BatchJobError(f"container execution unavailable: {error}") from error
+            mounts = {Path(engine.configuration.path).parent, Path(engine.runtime.artifact("BINARY").identity.path).parent}
+            for resource in engine.input_resources:
+                for artifact in resource.artifacts:
+                    if artifact.role == "DATA" and artifact.identity.path:
+                        mounts.add(Path(artifact.identity.path).parent)
+                    if artifact.role == "MANIFEST" and artifact.identity.path and artifact.identity.path.endswith("lfw-funneled-images-v1.jsonl"):
+                        mounts.add(Path("/mnt/projects/datasets/lfw/lfw_funneled"))
+            derived_root = job_root.parent / "derived"
+            if derived_root.exists():
+                mounts.add(derived_root)
+            self.container_adapter = ContainerCLIAdapter(inner=engine.adapters[self._input_resource.resource_id], image=image, read_only_mounts=tuple(sorted(mounts)))
 
     def _input_resource_for(self, path: str):
+        # Derived samples (QS-X61): admitted only when the store records the exact path and hash with a
+        # transformation chain rooting at a bound registered input resource.
+        derived = self.store.derived_sample_by_path(path) if hasattr(self.store, "derived_sample_by_path") else None
+        if derived is not None:
+            root_id = derived["chain"][0].get("root_resource_id")
+            for resource in self.engine.input_resources:
+                if resource.resource_id == root_id:
+                    if sha256_file(Path(path)) != derived["sha256"]:
+                        raise BatchJobError(f"derived sample {path} drifted from its recorded hash")
+                    return resource, None
+            raise BatchJobError(f"derived sample {path} roots at {root_id}, which is not a bound input resource")
         for resource in self.engine.input_resources:
             for artifact in resource.artifacts:
                 if artifact.role == "MANIFEST" and artifact.identity.path and artifact.identity.path.endswith("lfw-funneled-images-v1.jsonl"):
@@ -304,7 +338,7 @@ class OFIQBatchJob:
     # -- execution -------------------------------------------------------------
 
     def _launch(self, chunk: ChunkState) -> None:
-        adapter = self.engine.adapters[self._input_resource.resource_id]
+        adapter = self.container_adapter or self.engine.adapters[self._input_resource.resource_id]
         list_identity = ArtifactIdentity.from_file(chunk.list_path)
         request = adapter.create_request(
             arguments=("-c", self.engine.configuration.path, "-i", str(chunk.list_path), "-o", str(chunk.output_path)),
@@ -523,6 +557,7 @@ class OFIQBatchJob:
         models = tuple(_to_domain(item.identity) for item in self.engine.runtime.artifacts_with_role("MODEL"))
         selection_manifest = CanonicalJson.from_value(
             {
+                "execution_environment": self.container_adapter.environment_record() if self.container_adapter else {"kind": "HOST", "network": "not-restricted-by-adapter"},
                 "dataset_id": self.dataset.dataset_id,
                 "dataset_manifest_sha256": self.dataset.manifest.sha256,
                 "selection_rule": self.selection_rule,

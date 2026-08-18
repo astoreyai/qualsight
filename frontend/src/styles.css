@@ -47,6 +47,7 @@ button.primary:disabled { opacity: 0.55; cursor: progress; }
 .utility { grid-column: 1 / span 3; }
 .crossmatcher { grid-column: 1 / span 3; }
 .reports { grid-column: 1 / span 3; }
+.advanced { grid-column: 1 / span 3; }
 .runs { grid-column: 1 / span 2; }
 .status { color: var(--accent); }
 .error { color: var(--danger); border: 1px solid rgba(248, 113, 113, 0.4); border-radius: 8px; padding: 0.7rem; }

@@ -381,18 +381,34 @@ These nodes have no edge into QS-H74:
 
 | ID | PRD source | Capability | State |
 |---|---|---|---|
-| QS-X59 | §56 Phase 6 | Advanced-analysis release gate | POST_BETA |
-| QS-X60 | §17, Phase 6 | 1:N identification execution and metrics | POST_BETA |
-| QS-X61 | §27, Phase 6 | Controlled transformations of approved real inputs with complete derived-data provenance | POST_BETA |
-| QS-X62 | §25, Phase 6 | Demographic analysis with approved data, metadata, research authorization, and uncertainty | POST_BETA |
-| QS-X63 | §26, Phase 6 | PAD adapter and evaluation | POST_BETA |
-| QS-X64 | §51.9 | Container and REST adapters | POST_BETA |
-| QS-X65 | §§5, 46 | Mobile, kiosk, and remote capture clients | POST_BETA |
-| QS-X66 | §§5–6 | Enterprise SSO/OIDC and hosted multi-user identity | POST_BETA |
-| QS-X67 | §§5, 54 Tier 4 | Commercial matcher SDK adapters | POST_BETA |
-| QS-X68 | §§10, 51.11 | Non-face modality execution | POST_BETA |
+| QS-X59 | §56 Phase 6 | Advanced-analysis release gate | BLOCKED_BY_QS-X62_QS-X63 (1:N, degradation, advanced statistics, and container execution accepted; demographic and PAD modules wait for approved data — see below) |
+| QS-X60 | §17, Phase 6 | 1:N identification execution and metrics | ACCEPTED (cycle C25) |
+| QS-X61 | §27, Phase 6 | Controlled transformations of approved real inputs with complete derived-data provenance | ACCEPTED (cycle C25) |
+| QS-X62 | §25, Phase 6 | Demographic analysis with approved data, metadata, research authorization, and uncertainty | BLOCKED_BY_OWNER_INPUT — no registered dataset carries approved demographic metadata; LFW has none. A candidate exists on the workstation (`/mnt/projects/datasets/fairface`, CC BY 4.0 with age/gender/race labels) but needs an owner authorization receipt and registry entry before any group-wise analysis is executed |
+| QS-X63 | §26, Phase 6 | PAD adapter and evaluation | BLOCKED_BY_OWNER_INPUT — no PAD dataset or PAD model is registered or present |
+| QS-X64 | §51.9 | Container and REST adapters | ACCEPTED for the container adapter (cycle C25); a REST *client* adapter is deferred until a real remote engine exists (QualSight's own API is the REST contract) |
+| QS-X65 | §§5, 46 | Mobile, kiosk, and remote capture clients | BLOCKED_BY_OWNER_INPUT — no capture device or client platform is available or authorized |
+| QS-X66 | §§5–6 | Enterprise SSO/OIDC and hosted multi-user identity | BLOCKED_BY_OWNER_INPUT — no identity provider chosen; the beta's single-user attribution (QS-H71) stands |
+| QS-X67 | §§5, 54 Tier 4 | Commercial matcher SDK adapters | BLOCKED_BY_OWNER_INPUT — no commercial SDK licensed or present |
+| QS-X68 | §§10, 51.11 | Non-face modality execution | BLOCKED_BY_OWNER_INPUT — no fingerprint/iris/voice data registered; the schema carries `modality` from day one |
 
 QS-X61 never authorizes fabricated identities, labels, scores, or source samples. Any derived transformation must begin from a registered real input and preserve its full transformation chain.
+
+### QS-X60 — 1:N identification (accepted 2026-08-18, cycle C25)
+
+`qualsight.identification`: frozen open-set protocol over the recorded LFW subjects (every subject with ≥ 2 images enrols its first image; the rest are mated probes; single-image subjects are non-mated probes; content-addressed manifest), GPU search with the frozen matcher (embeddings and the probe × gallery similarity on the matcher device), rank-depth candidate lists, and `qualsight.metrics.identification` (registry v1.2.0: `biometric.identification.fpir/fnir/tpir/rank-k/cmc@1.0.0`) with two failure policies, Clopper–Pearson intervals, unsupported-precision flags, deterministic gallery-size subsets, and the probe-quality effect. Real evidence: protocol `identification-protocol:sha256:44990d70…` (gallery 1,680; 7,484 mated and 4,069 non-mated searches), search `identification-search:sha256:31e54597…` / Run `run:sha256:455fc6de…` (AdaFace IR-101, shared crop, cuda, 173 s): rank-1 97.17 %, rank-5 98.02 %; FNIR 2.10 % at FPIR 10 %, 2.32 % at FPIR 1 % (threshold 0.374), FPIR 0.1 % unsupported (4 expected false positives; the four highest non-mated scores ≥ 0.85 point at LFW label noise); gallery-size effect rank-1 98.6 % (100) → 98.9 % (500) → 98.3 % (1,000) → 97.2 % (1,680); probe UQS effect rank-1 92.9 % (<20) → 98.5 % (≥80). API test on the fixture recomputes rank-1 and FNIR from the candidate lists.
+
+### QS-X61 — Controlled transformations (accepted 2026-08-18, cycle C25)
+
+`qualsight.transforms`: deterministic versioned operators (JPEG quality, Gaussian blur, downscale-and-restore, gamma, contrast, rotation, occlusion), derived sets recorded as derived Datasets whose samples carry the full chain (root resource, parent sample id/hash, operator kind/version/parameters, encoding), the batch engine admitting derived samples only when the store records their chain rooting at a bound registered input, and degradation-response analysis Runs (quality response per measure, matcher score / FNMR / FMR response per level with the frozen matcher on the GPU, slope, area, threshold crossing, failure onset). Real evidence: derived set `derived-set:sha256:c6c6c275…` (149 real sources × 13 levels = 1,937 derived images), OFIQ job `job:sha256:3a1abab2…` (1,937 measured, 0 failures, 805 s), analysis `analysis:sha256:6d8ba448…` / Run `run:sha256:d016f130…` (AdaFace, T = 0.194): UQS 52.8 → 25.5 at JPEG 15, 7.0 at blur σ 3, 15.3 at downscale 0.25, 5.8 at 15 % occlusion; mated score 0.694 → 0.585 (blur 3) and 0.485 (occlusion, FNMR 4.2 %, 8 template failures); FNMR crossing at blur σ 3 and occlusion 0.15.
+
+### QS-X64 — Container adapter (accepted 2026-08-18, cycle C25)
+
+`qualsight.execution.container_runtime`: a `FROM scratch` image built by QualSight from the registered OFIQ runtime tree plus the workstation's own eight C/C++ runtime libraries (each hashed and recorded; rootfs manifest sha `7e328160…`), run with `--network none`, read-only root, no capabilities, `no-new-privileges`, the caller's uid, and only registered roots mounted read-only; the batch engine's `execution="container"` swaps the launcher while keeping the CLI adapter's request contract; the Run records the image id, manifest hash, host libraries, and launcher argv. Real evidence: fixture batch job `job:sha256:548d56ab…` / Run `run:sha256:34b7bb53…` — 16 images × 84 measure columns identical to the host full-batch results (0 differences). The API test repeats the equality on the fixture.
+
+### QS-X59 — Advanced-analysis release gate
+
+BLOCKED_BY_QS-X62_QS-X63: the gate's demographic and PAD limbs need approved data (owner input named above); 1:N, degradation, advanced statistics (Phase 3), and container execution are accepted.
 
 ## Current atomic frontier
 

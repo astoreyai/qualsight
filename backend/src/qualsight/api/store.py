@@ -246,6 +246,77 @@ CREATE TABLE IF NOT EXISTS bundles (
     manifest_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS identification_protocols (
+    protocol_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(project_id),
+    dataset_id TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    rank_depth INTEGER NOT NULL,
+    gallery_count INTEGER NOT NULL,
+    mated_probe_count INTEGER NOT NULL,
+    nonmated_probe_count INTEGER NOT NULL,
+    record_json TEXT NOT NULL,
+    evidence_sha256 TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS identification_entries (
+    protocol_id TEXT NOT NULL REFERENCES identification_protocols(protocol_id),
+    source_order INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    sample_id TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    PRIMARY KEY (protocol_id, source_order)
+);
+CREATE TABLE IF NOT EXISTS identification_searches (
+    search_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    protocol_id TEXT NOT NULL,
+    matcher_id TEXT NOT NULL,
+    condition_id TEXT NOT NULL,
+    directory TEXT NOT NULL,
+    candidates_parquet TEXT NOT NULL,
+    candidates_sha256 TEXT NOT NULL,
+    metrics_json TEXT NOT NULL,
+    metrics_sha256 TEXT NOT NULL,
+    summary_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS derived_sets (
+    derived_set_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    source_dataset_id TEXT NOT NULL,
+    source_resource_id TEXT NOT NULL,
+    derived_dataset_id TEXT NOT NULL,
+    directory TEXT NOT NULL,
+    record_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS derived_samples (
+    derived_sample_id TEXT PRIMARY KEY,
+    derived_set_id TEXT NOT NULL REFERENCES derived_sets(derived_set_id),
+    parent_sample_id TEXT NOT NULL,
+    transform TEXT NOT NULL,
+    parameter REAL NOT NULL,
+    level_index INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    chain_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS derived_samples_by_set ON derived_samples(derived_set_id, level_index);
+CREATE TABLE IF NOT EXISTS degradation_analyses (
+    analysis_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    derived_set_id TEXT NOT NULL,
+    quality_job_id TEXT NOT NULL,
+    matcher_id TEXT NOT NULL,
+    condition_id TEXT NOT NULL,
+    directory TEXT NOT NULL,
+    document_sha256 TEXT NOT NULL,
+    summary_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS purges (
     purge_id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
@@ -1024,6 +1095,116 @@ class RunStore:
             self._connection.execute("INSERT INTO reproductions (reproduction_id, project_id, original_run_id, reproduction_run_id, bundle_sha256, state, report_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                                      (record["reproduction_id"], record.get("project_id"), record["original_run_id"], record.get("reproduction_run_id"), record.get("bundle_sha256"), record["state"], json.dumps(record, sort_keys=True, default=str), record["created_at"]))
             self._connection.commit()
+
+    def record_identification_protocol(self, record: dict[str, Any], entries: list[Any]) -> None:
+        text = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        with self._lock:
+            existing = self._connection.execute("SELECT record_json FROM identification_protocols WHERE protocol_id = ?", (record["protocol_id"],)).fetchone()
+            if existing is not None:
+                return  # content-addressed: same protocol id ⇒ same manifest
+            self._connection.execute("BEGIN")
+            try:
+                self._connection.execute("INSERT INTO identification_protocols (protocol_id, project_id, dataset_id, mode, rank_depth, gallery_count, mated_probe_count, nonmated_probe_count, record_json, evidence_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                         (record["protocol_id"], record["project_id"], record["dataset_id"], record["mode"], record["rank_depth"], record["gallery_count"], record["mated_probe_count"], record["nonmated_probe_count"], text, _evidence(text), record["created_at"]))
+                self._connection.executemany("INSERT INTO identification_entries (protocol_id, source_order, role, sample_id, subject_id) VALUES (?, ?, ?, ?, ?)", [(record["protocol_id"], e.source_order, e.role, e.sample_id, e.subject_id) for e in entries])
+            except BaseException:
+                self._connection.execute("ROLLBACK")
+                raise
+            self._connection.execute("COMMIT")
+
+    def identification_protocol(self, protocol_id: str) -> dict[str, Any] | None:
+        row = self._connection.execute("SELECT record_json FROM identification_protocols WHERE protocol_id = ?", (protocol_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def identification_protocols(self, *, project_id: str) -> list[dict[str, Any]]:
+        return [json.loads(row[0]) for row in self._connection.execute("SELECT record_json FROM identification_protocols WHERE project_id = ? ORDER BY created_at", (project_id,)).fetchall()]
+
+    def identification_entries(self, protocol_id: str) -> list[dict[str, Any]]:
+        cursor = self._connection.execute("SELECT source_order, role, sample_id, subject_id FROM identification_entries WHERE protocol_id = ? ORDER BY source_order", (protocol_id,))
+        return [{"source_order": r[0], "role": r[1], "sample_id": r[2], "subject_id": r[3]} for r in cursor.fetchall()]
+
+    def record_identification_search(self, result: Any, protocol: dict[str, Any]) -> None:
+        run = result.run
+        metrics_text = json.dumps(result.metrics, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        summary_text = json.dumps(result.summary, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        with self._lock:
+            self._connection.execute("BEGIN")
+            try:
+                self._record_analysis_run(run, result.experiment, {"analysis_kind": "IDENTIFICATION_SEARCH", "search_id": result.search_id, "protocol_id": protocol["protocol_id"], "matcher_id": result.summary["matcher_id"], "condition_id": result.summary["condition_id"]})
+                self._connection.execute("UPDATE runs SET run_kind = 'IDENTIFICATION' WHERE run_id = ?", (run.run_id,))
+                self._connection.execute("INSERT INTO identification_searches (search_id, run_id, project_id, protocol_id, matcher_id, condition_id, directory, candidates_parquet, candidates_sha256, metrics_json, metrics_sha256, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                         (result.search_id, run.run_id, run.project_id, protocol["protocol_id"], result.summary["matcher_id"], result.summary["condition_id"], str(result.directory), str(result.candidates_parquet), hashlib.sha256(result.candidates_parquet.read_bytes()).hexdigest(), metrics_text, _evidence(metrics_text), summary_text, run.end_time.isoformat()))
+            except BaseException:
+                self._connection.execute("ROLLBACK")
+                raise
+            self._connection.execute("COMMIT")
+
+    def identification_search(self, search_id: str) -> dict[str, Any] | None:
+        cursor = self._connection.execute("SELECT * FROM identification_searches WHERE search_id = ? OR run_id = ?", (search_id, search_id))
+        row = cursor.fetchone()
+        return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
+
+    def identification_searches(self, *, project_id: str) -> list[dict[str, Any]]:
+        cursor = self._connection.execute("SELECT * FROM identification_searches WHERE project_id = ? ORDER BY created_at", (project_id,))
+        return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
+
+    def record_derived_set(self, result: Any) -> None:
+        dataset_json = result.dataset.model_dump_json()
+        with self._lock:
+            self._connection.execute("BEGIN")
+            try:
+                self._insert_once("datasets", "dataset_id", result.dataset.dataset_id, byte_exact=True, columns={
+                    "dataset_id": result.dataset.dataset_id, "project_id": result.dataset.project_id, "evidence_sha256": _evidence(dataset_json), "record_json": dataset_json})
+                for sample in result.samples:
+                    sample_json = sample.model_dump_json()
+                    self._connection.execute("INSERT INTO samples (sample_id, dataset_id, source_path, sha256, evidence_sha256, record_json) VALUES (?, ?, ?, ?, ?, ?)",
+                                             (sample.sample_id, sample.dataset_id, sample.source_path, sample.sha256, _evidence(sample_json), sample_json))
+                self._connection.execute("INSERT INTO derived_sets (derived_set_id, project_id, source_dataset_id, source_resource_id, derived_dataset_id, directory, record_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                         (result.derived_set_id, result.record["project_id"], result.record["source_dataset_id"], result.record["source_resource_id"], result.record["derived_dataset_id"], result.record["directory"], json.dumps(result.record, sort_keys=True), result.record["created_at"]))
+                self._connection.executemany("INSERT INTO derived_samples (derived_sample_id, derived_set_id, parent_sample_id, transform, parameter, level_index, path, sha256, chain_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                             [(r["derived_sample_id"], result.derived_set_id, r["parent_sample_id"], r["transform"], r["parameter"], r["level_index"], r["path"], r["sha256"], json.dumps(r["chain"], sort_keys=True)) for r in result.rows])
+            except BaseException:
+                self._connection.execute("ROLLBACK")
+                raise
+            self._connection.execute("COMMIT")
+
+    def derived_set(self, derived_set_id: str) -> dict[str, Any] | None:
+        row = self._connection.execute("SELECT record_json FROM derived_sets WHERE derived_set_id = ? OR derived_dataset_id = ?", (derived_set_id, derived_set_id)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def derived_sets(self, *, project_id: str) -> list[dict[str, Any]]:
+        return [json.loads(row[0]) for row in self._connection.execute("SELECT record_json FROM derived_sets WHERE project_id = ? ORDER BY created_at", (project_id,)).fetchall()]
+
+    def derived_samples(self, derived_set_id: str) -> list[dict[str, Any]]:
+        cursor = self._connection.execute("SELECT derived_sample_id, parent_sample_id, transform, parameter, level_index, path, sha256, chain_json FROM derived_samples WHERE derived_set_id = ? ORDER BY level_index, parent_sample_id", (derived_set_id,))
+        return [{"derived_sample_id": r[0], "parent_sample_id": r[1], "transform": r[2], "parameter": r[3], "level_index": r[4], "path": r[5], "sha256": r[6], "chain": json.loads(r[7])} for r in cursor.fetchall()]
+
+    def derived_sample_by_path(self, path: str) -> dict[str, Any] | None:
+        row = self._connection.execute("SELECT derived_sample_id, derived_set_id, parent_sample_id, sha256, chain_json FROM derived_samples WHERE path = ?", (path,)).fetchone()
+        return {"derived_sample_id": row[0], "derived_set_id": row[1], "parent_sample_id": row[2], "sha256": row[3], "chain": json.loads(row[4])} if row else None
+
+    def record_degradation_analysis(self, result: Any) -> None:
+        run = result.run
+        summary_text = json.dumps(result.summary, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        with self._lock:
+            self._connection.execute("BEGIN")
+            try:
+                self._record_analysis_run(run, result.experiment, {"analysis_kind": "DEGRADATION_RESPONSE", "analysis_id": result.analysis_id, "derived_set_id": result.summary["derived_set_id"], "matcher_id": result.summary["matcher_id"]})
+                self._connection.execute("INSERT INTO degradation_analyses (analysis_id, run_id, project_id, derived_set_id, quality_job_id, matcher_id, condition_id, directory, document_sha256, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                         (result.analysis_id, run.run_id, run.project_id, result.summary["derived_set_id"], result.document["sources"]["quality_job_id"], result.summary["matcher_id"], result.summary["condition_id"], str(result.directory), hashlib.sha256(result.document_path.read_bytes()).hexdigest(), summary_text, run.end_time.isoformat()))
+            except BaseException:
+                self._connection.execute("ROLLBACK")
+                raise
+            self._connection.execute("COMMIT")
+
+    def degradation_analysis(self, analysis_id: str) -> dict[str, Any] | None:
+        cursor = self._connection.execute("SELECT * FROM degradation_analyses WHERE analysis_id = ? OR run_id = ?", (analysis_id, analysis_id))
+        row = cursor.fetchone()
+        return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
+
+    def degradation_analyses(self, *, project_id: str) -> list[dict[str, Any]]:
+        cursor = self._connection.execute("SELECT * FROM degradation_analyses WHERE project_id = ? ORDER BY created_at", (project_id,))
+        return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
     def record_purge(self, record: dict[str, Any]) -> None:
         with self._lock:
