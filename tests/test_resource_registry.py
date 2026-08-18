@@ -19,6 +19,7 @@ OWNER_AUTHORIZATION_PATH = (
     / "authorizations"
     / "qualsight-local-noncommercial-research-2026-08-14.json"
 )
+EXTERNAL_SCORES_RECEIPT_PATH = ROOT / "resources" / "authorizations" / "qualsight-owner-external-scores-option-a-2026-08-17.json"
 USE_PERMISSION_RECEIPT_PATH = (
     ROOT
     / "resources"
@@ -111,12 +112,12 @@ class ResourceRegistryTests(unittest.TestCase):
 
     def test_real_registry_validates_recorded_bytes(self) -> None:
         summary = validate_registry_file(REGISTRY_PATH)
-        self.assertEqual(summary["resources"], 9)
-        self.assertEqual(summary["artifacts"], 187)
-        self.assertEqual(summary["checks"], 17)
+        self.assertEqual(summary["resources"], 10)
+        self.assertEqual(summary["artifacts"], 192)
+        self.assertEqual(summary["checks"], 18)
         self.assertEqual(
             summary["states"],
-            {"APPROVED_LOCAL_RESEARCH_USE": 6, "BLOCKED": 2, "VERIFIED_LIMITED_USE": 1},
+            {"APPROVED_LOCAL_RESEARCH_USE": 7, "BLOCKED": 2, "VERIFIED_LIMITED_USE": 1},
         )
 
     def test_ofiq_runtime_records_exact_configured_model_closure(self) -> None:
@@ -181,6 +182,7 @@ class ResourceRegistryTests(unittest.TestCase):
                 "elasticface-arc-r100-local-candidate",
                 "transface-s-glint360k-local-candidate",
                 "insightface-scrfd-10g-local-candidate",
+                "external-scores-lfw-view2-insightface-buffalo-l",
             },
         )
         self.assertEqual(
@@ -196,12 +198,14 @@ class ResourceRegistryTests(unittest.TestCase):
                 continue
             with self.subTest(resource=resource_id):
                 self.assertEqual(resource["state"], "APPROVED_LOCAL_RESEARCH_USE")
-                if resource_id != "ofiq-v1-1-2-linux-runtime":
+                if resource_id == "external-scores-lfw-view2-insightface-buffalo-l":
+                    self.assertEqual(resource["approved_scopes"], ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"])
+                elif resource_id != "ofiq-v1-1-2-linux-runtime":
                     self.assertEqual(resource["approved_scopes"], LOCAL_RESEARCH_SCOPES)
                 authorization = resource["owner_authorization"]
                 self.assertEqual(
                     authorization["evidence_artifact_path"],
-                    str(USE_PERMISSION_RECEIPT_PATH),
+                    str(EXTERNAL_SCORES_RECEIPT_PATH if resource_id == "external-scores-lfw-view2-insightface-buffalo-l" else USE_PERMISSION_RECEIPT_PATH),
                 )
                 self.assertLessEqual(
                     set(resource["approved_scopes"]), set(authorization["scopes"])

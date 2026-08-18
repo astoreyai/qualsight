@@ -227,6 +227,7 @@ export interface SampleQualityOut {
 }
 
 export interface MatcherLeaf {
+  provenance_marker?: string;
   run_id: string;
   matrix_id: string;
   leaf_id: string;
@@ -506,6 +507,8 @@ export const api = {
   startMatrix: (project_id: string, protocol_id: string, fixturePairsOnly: boolean) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/protocols/${encodeURIComponent(protocol_id)}/matrix?fixture_pairs_only=${fixturePairsOnly}`, { method: "POST" }).then((r) => readJson<{ matrix_id: string; pairs: number; samples: number }>(r)),
   matrix: (matrix_id: string) => fetch(`/api/matrices/${encodeURIComponent(matrix_id)}`).then((r) => readJson<MatrixStatus>(r)),
+  importExternalScores: (project_id: string, protocol_id: string, resource_id: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/protocols/${encodeURIComponent(protocol_id)}/import-external-scores`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ resource_id }) }).then((r) => readJson<MatcherLeaf & { provenance_marker: string; mapping: any }>(r)),
   matcherLeaves: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/matcher-leaves`).then((r) => readJson<MatcherLeaf[]>(r)),
   matcherMetrics: (run_id: string) => fetch(`/api/matcher-runs/${encodeURIComponent(run_id)}/metrics`).then((r) => readJson<{ metrics: any }>(r)),
   matcherErrors: (run_id: string, threshold?: number) =>

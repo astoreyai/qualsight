@@ -65,7 +65,7 @@ class RealMatcherApiTests(unittest.TestCase):
             self.assertIsNone(run.json()["run"]["quality_engine"])
             self.assertEqual(run.json()["run"]["matcher"]["component_id"], leaf["matcher_id"])
         listed = self.client.get(f"/api/projects/{self.project_id}/matcher-leaves").json()
-        self.assertEqual(len(listed), 6)
+        self.assertEqual(sum(1 for item in listed if item["provenance_marker"] == "QUALSIGHT_EXECUTED"), 6)
 
     def test_metrics_comparisons_and_errors_resolve_to_real_pairs_and_samples(self) -> None:
         leaf = self.status["leaves"][0]
@@ -473,6 +473,46 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertEqual(purges[-1]["purge_id"], record["purge_id"])
         after = self.client.get(f"/api/projects/{self.project_id}/audit").json()
         self.assertTrue(any(event["event_type"] == "DATASET_PURGED" and event["actor_id"] == actor for event in after))
+
+    def test_external_score_artifact_imports_as_an_externally_computed_run_without_row_invention(self) -> None:
+        """QS-C21: the registered option-A artifact (insightface buffalo_l, computed outside QualSight) maps to the frozen protocol; refusals are typed; the Run carries the marker."""
+
+        resources = self.client.get("/api/resources").json()
+        external = [item for item in resources if item["kind"] == "EXTERNAL_SCORE_ARTIFACT"]
+        self.assertEqual(len(external), 1, external)
+        resource_id = external[0]["resource_id"]
+        self.assertEqual(self.client.post(f"/api/projects/{self.project_id}/protocols/{self.protocol_id}/import-external-scores", json={"resource_id": "lfw-funneled-local-candidate"}).status_code, 409)
+        imported = self.client.post(f"/api/projects/{self.project_id}/protocols/{self.protocol_id}/import-external-scores", json={"resource_id": resource_id})
+        self.assertEqual(imported.status_code, 201, imported.text)
+        leaf = imported.json()
+        self.assertEqual(leaf["leaf_id"], "QS-C21.EXTERNAL")
+        self.assertEqual(leaf["provenance_marker"], "EXTERNALLY_COMPUTED")
+        self.assertEqual(leaf["condition_id"], "EXTERNALLY_COMPUTED")
+        self.assertEqual(leaf["matcher_id"], resource_id)
+        self.assertEqual(leaf["comparison_count"], 6000)
+        self.assertEqual(leaf["mapping"]["artifact_rows"], 6000)
+        self.assertEqual(leaf["mapping"]["mapped_pairs"], 6000)
+        self.assertEqual(leaf["scored_count"] + leaf["failed_count"], 6000)
+        self.assertGreater(leaf["scored_count"], 5900)
+        self.assertIn("EXCLUDE_FAILED_TRIALS", leaf["eer"])
+        run = self.client.get(leaf["links"]["run"]).json()["run"]
+        self.assertEqual(run["matcher"]["component_id"], resource_id)
+        self.assertEqual(run["matcher_preprocessing"]["component_id"], "EXTERNALLY_COMPUTED")
+        self.assertTrue(any("EXTERNALLY COMPUTED" in limit for limit in run["provenance_limits"]))
+        self.assertIsNone(run["quality_engine"])
+        self.assertTrue(any(h["path"].endswith("external_scores.csv") for h in run["model_hashes"]))
+        # The imported Run behaves like any other leaf: comparisons resolve to real pairs and metrics are served.
+        comparisons = self.client.get(leaf["links"]["comparisons"], params={"limit": 5}).json()
+        self.assertEqual(comparisons["total"], 6000)
+        self.assertEqual(self.client.get(leaf["links"]["metrics"]).json()["metrics"]["counts"]["trials"], 6000)
+        # Importing the same artifact twice into the same project/protocol is refused (no duplicate Runs).
+        self.assertEqual(self.client.post(f"/api/projects/{self.project_id}/protocols/{self.protocol_id}/import-external-scores", json={"resource_id": resource_id}).status_code, 409)
+        # The external leaf is listed with its marker and does not enter the QualSight-executed matrix.
+        listed = self.client.get(f"/api/projects/{self.project_id}/matcher-leaves").json()
+        markers = {item["leaf_id"]: item["provenance_marker"] for item in listed}
+        self.assertEqual(markers["QS-C21.EXTERNAL"], "EXTERNALLY_COMPUTED")
+        self.assertEqual(markers["QS-C22.AS"], "QUALSIGHT_EXECUTED")
+        self.assertNotEqual(leaf["matrix_id"], self.matrix_id)
 
 
 if __name__ == "__main__":

@@ -5,8 +5,9 @@ qualsight.cli serve`` — console + API on 127.0.0.1:8480) with the runtime
 network guard enabled (``QUALSIGHT_NETWORK_GUARD=1``), then runs the canonical
 workflow through the API against the installed data directory: health, console
 page, project, LFW import, single-image assessment, fixture-pair quality batch,
-protocol freeze, fixture-pair matcher matrix, utility analysis, figure, report,
-bundle, reproduction, purge-scope listing. Every non-loopback connection the
+protocol freeze, external score import (QS-C21), fixture-pair matcher matrix,
+utility analysis, cross-matcher contrasts and disagreement drilldown, figure,
+dashboard save/reload, report, bundle, reproduction, purge-scope listing, audit. Every non-loopback connection the
 runtime attempts is refused by the guard and counted; the gate passes only when
 every step succeeds and the guard counted zero attempts.
 
@@ -106,6 +107,8 @@ def main() -> int:
         step("batch-completed", job["state"] == "COMPLETED", measured=job["assessed"], failed=job["failed"])
         status, protocol = _http("POST", f"/api/projects/{project_id}/datasets/{dataset_id}/protocols/freeze-lfw-view2", {})
         step("protocol-frozen", status in (200, 201), protocol_id=protocol.get("protocol_id"), pairs=protocol.get("pair_count"))
+        status, external = _http("POST", f"/api/projects/{project_id}/protocols/{protocol['protocol_id']}/import-external-scores", {"resource_id": "external-scores-lfw-view2-insightface-buffalo-l"})
+        step("external-scores-imported", status == 201 and external.get("provenance_marker") == "EXTERNALLY_COMPUTED", leaf_id=external.get("leaf_id"), run_id=external.get("run_id"), scored=external.get("scored_count"), failed=external.get("failed_count"), eer=(external.get("eer") or {}).get("EXCLUDE_FAILED_TRIALS", {}).get("eer"), mapping=external.get("mapping"))
         status, matrix = _http("POST", f"/api/projects/{project_id}/protocols/{protocol['protocol_id']}/matrix?fixture_pairs_only=true", {})
         step("matrix-started", status == 202, matrix_id=matrix.get("matrix_id"))
         matrix = _poll(f"/api/matrices/{matrix['matrix_id']}", lambda body: body["progress"]["phase"] in {"completed", "failed"}, 1800)
@@ -115,9 +118,19 @@ def main() -> int:
         step("utility-started", status in (200, 202), analysis_id=utility.get("analysis_id"))
         utility = _poll(f"/api/utility-analyses/{utility['analysis_id']}", lambda body: body["state"] in {"COMPLETED", "FAILED"}, 600)
         step("utility-completed", utility["state"] == "COMPLETED", run_id=utility.get("summary", {}).get("run_id"))
+        status, cross = _http("POST", f"/api/projects/{project_id}/cross-matcher", {"matrix_id": matrix["matrix_id"], "quality_job_id": job["job_id"], "bootstrap_replicates": 100, "seed": 5})
+        step("cross-matcher-started", status in (200, 202), analysis_id=cross.get("analysis_id"))
+        cross = _poll(f"/api/cross-matcher/{cross['analysis_id']}", lambda body: body["state"] in {"COMPLETED", "FAILED"}, 900)
+        step("cross-matcher-completed", cross["state"] == "COMPLETED" and len(cross["document"]["contrasts"]) == 9, contrasts=len(cross.get("document", {}).get("contrasts", [])))
+        first_contrast = cross["document"]["contrasts"][0]["contrast_id"]
+        status, disagreements = _http("GET", f"/api/cross-matcher/{cross['analysis_id']}/pairs?contrast_id={first_contrast}&limit=5")
+        step("disagreements-resolve-to-pairs", status == 200 and disagreements["total"] > 0 and all(row["links"]["left_sample"] and row["links"]["run_a"] for row in disagreements["rows"]), contrast=first_contrast, pairs=disagreements.get("total"))
         status, figure = _http("POST", f"/api/projects/{project_id}/figures", {"kind": "det_overlay", "parameters": {"matrix_id": matrix["matrix_id"]}})
         step("figure-rendered", status == 201, figure_id=figure.get("figure_id"), sha256=figure.get("sha256"))
-        status, report = _http("POST", f"/api/projects/{project_id}/reports", {"spec": {"title": "Offline gate report", "dataset_id": dataset_id, "protocol_id": protocol["protocol_id"], "quality_job_id": job["job_id"], "matrix_id": matrix["matrix_id"], "utility_analysis_ids": [utility["analysis_id"]], "figure_ids": [figure["figure_id"]], "image_policy": "EXCLUDE"}})
+        status, dashboard = _http("POST", f"/api/projects/{project_id}/dashboards", {"name": "Offline gate dashboard", "template": "Cross-Matcher Evaluation", "columns": 2, "panels": [{"kind": "figure", "ref": figure["figure_id"]}, {"kind": "operating_points", "ref": leaf["run_id"]}, {"kind": "operating_points", "ref": external["run_id"]}, {"kind": "cross_contrasts", "ref": cross["analysis_id"]}, {"kind": "policy_table", "ref": utility["analysis_id"]}]})
+        status2, reloaded = _http("GET", f"/api/dashboards/{dashboard.get('dashboard_id', '')}") if status == 201 else (0, {})
+        step("dashboard-saved-and-reloaded", status == 201 and status2 == 200 and reloaded.get("layout_sha256") == dashboard.get("layout_sha256"), dashboard_id=dashboard.get("dashboard_id"), panels=len(reloaded.get("panels", [])))
+        status, report = _http("POST", f"/api/projects/{project_id}/reports", {"spec": {"title": "Offline gate report", "dataset_id": dataset_id, "protocol_id": protocol["protocol_id"], "quality_job_id": job["job_id"], "matrix_id": matrix["matrix_id"], "utility_analysis_ids": [utility["analysis_id"]], "cross_matcher_analysis_id": cross["analysis_id"], "figure_ids": [figure["figure_id"]], "failure_examples": {"analysis_id": cross["analysis_id"], "contrast_id": first_contrast, "category": "NEITHER", "limit": 2}, "image_policy": "INCLUDE_PERMITTED"}})
         step("report-built", status == 201, report_id=report.get("report_id"), pdf_sha256=report.get("files", {}).get("pdf", {}).get("sha256"))
         status, bundle = _http("POST", f"/api/projects/{project_id}/bundles", {"run_id": utility["summary"]["run_id"]})
         step("bundle-exported", status == 201, bundle_id=bundle.get("bundle_id"), sha256=bundle.get("sha256"))

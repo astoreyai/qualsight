@@ -148,8 +148,8 @@
   "resource_boundary": {
     "registry": {
       "path": "/mnt/projects/ofiqgui/resources/resource-registry.json",
-      "sha256": "a07904c77fbd3ec8393f147970ca1774651def966f97f5a123fab22b480f61ce",
-      "size_bytes": 140200
+      "sha256": "3107fe4caf14c14c94786d658defa848a934bc77b57f3acd2f4b785cfc77fb0f",
+      "size_bytes": 146558
     },
     "pair_manifest": {
       "path": "/mnt/projects/ofiqgui/resources/manifests/lfw-local-pairs-v1.jsonl",

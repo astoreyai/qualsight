@@ -79,8 +79,32 @@ export function Matchers({ projectId, datasetId, onMessage }: MatchersProps) {
   }, [matrix, refresh]);
 
   // Load DET curves for the currently listed leaves (latest matrix only).
-  const latestMatrixId = useMemo(() => (leaves.length ? leaves[leaves.length - 1]!.matrix_id : null), [leaves]);
-  const shownLeaves = useMemo(() => leaves.filter((leaf) => leaf.matrix_id === latestMatrixId), [leaves, latestMatrixId]);
+  const executedLeaves = useMemo(() => leaves.filter((leaf) => leaf.condition_id !== "EXTERNALLY_COMPUTED"), [leaves]);
+  const externalLeaves = useMemo(() => leaves.filter((leaf) => leaf.condition_id === "EXTERNALLY_COMPUTED"), [leaves]);
+  const latestMatrixId = useMemo(() => (executedLeaves.length ? executedLeaves[executedLeaves.length - 1]!.matrix_id : null), [executedLeaves]);
+  const shownLeaves = useMemo(() => executedLeaves.filter((leaf) => leaf.matrix_id === latestMatrixId), [executedLeaves, latestMatrixId]);
+  const [externalResources, setExternalResources] = useState<Array<{ resource_id: string; name: string; state: string }>>([]);
+  const [externalResource, setExternalResource] = useState<string>("");
+  useEffect(() => {
+    api.resources().then((items) => {
+      const external = items.filter((item) => item.kind === "EXTERNAL_SCORE_ARTIFACT");
+      setExternalResources(external);
+      setExternalResource((current) => current || (external[0]?.resource_id ?? ""));
+    }).catch(() => setExternalResources([]));
+  }, []);
+  const importExternal = useCallback(async () => {
+    if (!projectId || !protocolId || !externalResource) return;
+    setBusy(true);
+    try {
+      const leaf = await api.importExternalScores(projectId, protocolId, externalResource);
+      onMessage(`Imported external scores as ${leaf.leaf_id} (${leaf.provenance_marker}; ${leaf.scored_count} scored, ${leaf.failed_count} without score) · run ${shortHash(leaf.run_id)}`);
+      refresh();
+    } catch (error) {
+      onMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }, [projectId, protocolId, externalResource, onMessage, refresh]);
   useEffect(() => {
     let cancelled = false;
     Promise.all(
@@ -271,6 +295,34 @@ export function Matchers({ projectId, datasetId, onMessage }: MatchersProps) {
           <ErrorList title="Processing failures (no score)" rows={errors.processing_failures} />
         </div>
       )}
+      <div className="errors" data-testid="external-scores">
+        <h3>Externally computed scores (QS-C21) — imported, never re-scored; marker EXTERNALLY_COMPUTED travels with every result</h3>
+        <div className="controls-row">
+          <select value={externalResource} onChange={(event) => setExternalResource(event.target.value)} data-testid="external-resource" aria-label="external score artifact">
+            {externalResources.length === 0 && <option value="">no registered external score artifact</option>}
+            {externalResources.map((item) => (
+              <option key={item.resource_id} value={item.resource_id}>{item.name} · {item.state}</option>
+            ))}
+          </select>
+          <button type="button" className="secondary" disabled={!protocolId || !externalResource || busy} onClick={() => void importExternal()} data-testid="external-import">Import over the frozen protocol</button>
+        </div>
+        {externalLeaves.length > 0 && (
+          <table className="compact" data-testid="external-table">
+            <thead><tr><th>Leaf</th><th>Artifact</th><th>Marker</th><th>Comparisons</th><th>Scored</th><th>No score</th><th>EER</th><th>FNMR @ FMR ≤ 10⁻³</th><th>Run</th></tr></thead>
+            <tbody>
+              {externalLeaves.map((leaf) => (
+                <tr key={leaf.run_id} data-testid="external-leaf">
+                  <td className="mono">{leaf.leaf_id}</td><td className="mono">{leaf.matcher_id}</td><td>{leaf.provenance_marker ?? "EXTERNALLY_COMPUTED"}</td>
+                  <td className="mono">{leaf.comparison_count}</td><td className="mono">{leaf.scored_count}</td><td className="mono">{leaf.failed_count}</td>
+                  <td className="mono">{pct(leaf.eer[POLICY]?.eer)}</td>
+                  <td className="mono">{pct(leaf.operating_points[POLICY]?.find((p) => p.target_fmr === 0.001)?.fnmr)}</td>
+                  <td><button type="button" className="cell" onClick={() => void showErrors(leaf)} data-testid={`leaf-${leaf.leaf_id}`}><span className="mono">{shortHash(leaf.run_id, 10)}</span></button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </section>
   );
 }

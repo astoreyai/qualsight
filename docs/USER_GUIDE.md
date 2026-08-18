@@ -90,6 +90,21 @@ echo "$MATRIX_ID $AS_RUN"
 Read the six-leaf metrics (EER, FNMR at FMR ≤ 10⁻¹/10⁻²/10⁻³ with Clopper–Pearson intervals, ROC/DET,
 View-2 ten-fold accuracy) in the console's matrix table, or export them (step 7).
 
+## 4b. Import externally computed scores (console: *Verification → Externally computed scores*)
+
+QualSight can also evaluate scores that some other system produced over the same frozen protocol
+(a vendor SDK, a collaborator's pipeline, or an independent open-source pipeline run outside
+QualSight). The artifact must be registered (`kind: EXTERNAL_SCORE_ARTIFACT`; one CSV with at least
+`pair_id,score`, optionally `left_path,right_path,label,failure`, plus a provenance sidecar). The
+importer maps rows to protocol pairs by id, refuses unknown/duplicate rows or paths and labels that
+disagree with the protocol, keeps uncovered pairs as `NOT_EXECUTED`, and records an
+`EXTERNALLY_COMPUTED` Run evaluated with the same registered definitions — never re-scored.
+
+```sh gate
+$QS import-external-scores --project-id "$PROJECT_ID" --protocol-id "$PROTOCOL_ID" --resource-id external-scores-lfw-view2-insightface-buffalo-l > "$WORK/external.json"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["leaf"], d["provenance_marker"], d["scored"], d["failed"], d["eer"])' "$WORK/external.json"
+```
+
 ## 5. Quality → utility (console: *Quality → utility*)
 
 A utility analysis joins one matcher Run with one quality job under an explicit pair-quality policy

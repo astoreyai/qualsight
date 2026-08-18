@@ -2641,6 +2641,120 @@
         }
       ],
       "checks": []
+    },
+    {
+      "resource_id": "external-scores-lfw-view2-insightface-buffalo-l",
+      "kind": "EXTERNAL_SCORE_ARTIFACT",
+      "name": "External matcher scores over the frozen LFW View 2 pairs (insightface buffalo_l, computed outside QualSight)",
+      "state": "APPROVED_LOCAL_RESEARCH_USE",
+      "version": "sha256:8ca7e08d1a503b284057fa56a8fef83eb5afa715b84089c13194d09e966864e0",
+      "source": {
+        "uri": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/scores/lfw-view2-insightface-buffalo_l",
+        "local_root": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/scores/lfw-view2-insightface-buffalo_l",
+        "evidence_artifacts": [
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/data/scores/lfw-view2-insightface-buffalo_l/external_scores.csv",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/data/scores/lfw-view2-insightface-buffalo_l/external_scores.provenance.json",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/data/scores/lfw-view2-insightface-buffalo_l/pairs.csv",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/data/scores/lfw-view2-insightface-buffalo_l/ext_scores.py"
+        ],
+        "notes": [
+          "Computed 2026-08-17 by the project owner's separate virtual environment (~/venvs/extscore) with insightface 0.7.3 FaceAnalysis buffalo_l; not by QualSight's frozen matcher runtime.",
+          "5957 of 6000 pairs scored; 43 pairs without a score (image failures recorded in the sidecar).",
+          "INDEPENDENT_OPEN_SOURCE_PIPELINE evidence: weaker than a genuinely third-party vendor artifact; the buffalo_l detector file coincides with the registered SCRFD-10G model, the recognition model and pipeline code differ."
+        ]
+      },
+      "licenses": [],
+      "use_restrictions": [
+        "Owner-approved local noncommercial research use on the QualSight workstation only; never bundle, publish, commit, or redistribute these derived biometric scores.",
+        "Import only through the QS-C21 importer over the frozen protocol; rows are mapped by pair id and never re-scored or altered.",
+        "Always present results from this artifact with the EXTERNALLY_COMPUTED marker and name the producer (insightface buffalo_l, run outside QualSight)."
+      ],
+      "redistribution_status": "NOT_APPROVED_FOR_QUALSIGHT_DISTRIBUTION",
+      "research_use_status": "OWNER_APPROVED_LOCAL_NONCOMMERCIAL_RESEARCH_OWNER_GENERATED_DERIVED_DATA",
+      "citations": [
+        "https://github.com/deepinsight/insightface/tree/v0.7 (buffalo_l model pack; non-commercial research use)"
+      ],
+      "installation_or_access_method": "Read the score table and its provenance sidecar in place at the registered absolute paths; regenerate with ext_scores.py in the separate insightface environment if the bytes are lost (a regenerated file gets a new registered hash).",
+      "data_classification": "SENSITIVE_BIOMETRIC_DERIVED",
+      "runtime_requirements": {
+        "platform": "local-filesystem",
+        "environment": {},
+        "notes": [
+          "external_scores.csv is 770379 bytes with 6,000 data rows.",
+          "The importer needs only the CSV and the sidecar; the producing environment is not required at import time."
+        ]
+      },
+      "owner_authorization": {
+        "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+        "authority": "QualSight project owner (interactive user)",
+        "recorded_at": "2026-08-17T20:05:00-05:00",
+        "scopes": [
+          "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+        ],
+        "redistribution_allowed": false,
+        "evidence_artifact_path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-external-scores-option-a-2026-08-17.json"
+      },
+      "third_party_rights_status": "RESEARCH_NOTICE_ONLY",
+      "consumers": [
+        "QS-C21",
+        "QS-H74"
+      ],
+      "approved_scopes": [
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ],
+      "blocked_reasons": [],
+      "artifacts": [
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-external-scores-option-a-2026-08-17.json",
+          "sha256": "dc4cc587d94332c9b9e929168ae4824cc2e501ebad9ff8ce0a3ae146adde8bdd",
+          "size_bytes": 2602,
+          "mtime_ns": 1787081265402945690
+        },
+        {
+          "role": "DATA",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/scores/lfw-view2-insightface-buffalo_l/external_scores.csv",
+          "sha256": "8ca7e08d1a503b284057fa56a8fef83eb5afa715b84089c13194d09e966864e0",
+          "size_bytes": 770379,
+          "mtime_ns": 1787081177676655735
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/scores/lfw-view2-insightface-buffalo_l/external_scores.provenance.json",
+          "sha256": "99b28730743245440a91438d0090db2d42aa097dce1486c96681dafe930bf9b6",
+          "size_bytes": 4100,
+          "mtime_ns": 1787081177676655735
+        },
+        {
+          "role": "MANIFEST",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/scores/lfw-view2-insightface-buffalo_l/pairs.csv",
+          "sha256": "857a9f5d628c8be2c0cd3373f42683605ab1970c3514c2aeb8e6ce8f1a705c5d",
+          "size_bytes": 691165,
+          "mtime_ns": 1787023297074937970
+        },
+        {
+          "role": "CONFIGURATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/scores/lfw-view2-insightface-buffalo_l/ext_scores.py",
+          "sha256": "ce3e5661c9a7f7ea55c4370f160b1261099cd1ae21a880ebb45f0fbed9d36b31",
+          "size_bytes": 5540,
+          "mtime_ns": 1787081046621239168
+        }
+      ],
+      "checks": [
+        {
+          "type": "manifest",
+          "base_path": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/scores/lfw-view2-insightface-buffalo_l",
+          "relative_to": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/scores/lfw-view2-insightface-buffalo_l",
+          "expected_count": 4,
+          "sha256": "84b5735972969242b90f9ff5db7935137b69bd8114f0b36a87b983622f5d8cf6",
+          "relative_paths": [
+            "external_scores.csv",
+            "external_scores.provenance.json",
+            "pairs.csv",
+            "ext_scores.py"
+          ]
+        }
+      ]
     }
   ]
 }

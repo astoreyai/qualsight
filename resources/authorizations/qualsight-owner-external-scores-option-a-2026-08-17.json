@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0.0",
+  "authorization_id": "qualsight-owner-external-scores-option-a-2026-08-17",
+  "authority": "QualSight project owner (interactive user)",
+  "recorded_at": "2026-08-17T20:05:00-05:00",
+  "decision_evidence": [
+    "Interactive owner instruction on 2026-08-17 (Claude session 8e2f9bb1-b00a-4d9f-9a42-74b1d318c22b): asked 'how to create a score file' for QS-C21; offered (A) an independent open-source pipeline run outside QualSight in its own virtual environment or (B) a third-party/vendor file; owner replied verbatim: 'option a'.",
+    "Option A as executed: insightface 0.7.3 FaceAnalysis(name='buffalo_l', det_size=640) — insightface's own detection, alignment, face selection (highest det_score), and w600k_r50 recognition model — run from ~/venvs/extscore over the 6,000 frozen LFW View 2 pairs (pairs.csv exported from the recorded protocol), writing external_scores.csv and a provenance sidecar with model file hashes.",
+    "Honesty note: the artifact is genuinely computed outside QualSight's frozen matcher runtime (different software stack and recognition model), but it is not a foreign vendor file; the plan records it as INDEPENDENT_OPEN_SOURCE_PIPELINE evidence, weaker than a genuinely third-party artifact. The buffalo_l detector file coincides byte-for-byte with QualSight's registered SCRFD-10G model; the recognition model and pipeline code differ.",
+    "Third-party rights note: insightface buffalo_l models are released for non-commercial research use; the artifact is derived biometric data over the LFW funneled release and stays local; redistribution is not allowed."
+  ],
+  "grants": [
+    {
+      "resource_id": "external-scores-lfw-view2-insightface-buffalo-l",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": [
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ]
+    }
+  ],
+  "permitted_actions": [
+    "Register the score table and its provenance sidecar as an EXTERNAL_SCORE_ARTIFACT resource with pinned hashes.",
+    "Import it through the QS-C21 importer over the frozen protocol, marked EXTERNALLY_COMPUTED, and evaluate it with the registered verification definitions.",
+    "Run the beta terminal gate QS-H74 with this artifact as the external-score step of the section-57 chain."
+  ],
+  "prohibited_actions": [
+    "Do not present the artifact as a vendor or third-party result.",
+    "Do not redistribute the score table or bundle it with QualSight.",
+    "Do not re-score it inside QualSight or alter its rows to fit the protocol; unmapped rows are refused."
+  ],
+  "redistribution_allowed": false
+}

@@ -107,6 +107,8 @@ CURRENT_ACCEPTED_WHOLE = {
     "QS-H71",
     "QS-H72",
     "QS-H73",
+    "QS-C21",
+    "QS-H74",
 }
 CURRENT_ACCEPTED_REFINEMENTS = {"QS-A00.R8", "QS-A05.R1"}
 CURRENT_ACCEPTED_CHILDREN = {
@@ -137,7 +139,7 @@ SUPERSEDED_HISTORICAL_CHILDREN = {
     "QS-A06.R0",
     "QS-A06.R1M",
 }
-BLOCKED_PARENT_CAPABILITIES = {"QS-C21"}
+BLOCKED_PARENT_CAPABILITIES: set[str] = set()
 BLOCKED_REFINEMENT_PARENTS: set[str] = set()
 ACCEPTED_REFINEMENT_PARENTS = {"QS-A02.LFW"}
 CURRENT_OUTPUT_AUTHORITY_NODE = "QS-B14"
@@ -457,7 +459,7 @@ def _validate_controller_snapshot(
                 f"{label} differs: count={count}, ids={sorted(observed)}",
             )
     if rows.get("Dependency-ready whole capabilities") != (0, set()):
-        _fail("ATG_LOOP.md controller snapshot", "no whole capability is dependency-ready while QS-H74 waits for QS-C21")
+        _fail("ATG_LOOP.md controller snapshot", "no whole capability is dependency-ready once the beta DAG is complete")
     if "Authorized OFIQ process executions" not in rows:
         _fail("ATG_LOOP.md controller snapshot", "authorized OFIQ execution row is missing")
 
@@ -752,6 +754,9 @@ def _validate_current_output_hashes(records: list[dict[str, Any]]) -> int:
         "scripts/offline_gate.py": PROJECT_ROOT / "scripts/offline_gate.py",
         "scripts/docs_workflow_gate.py": PROJECT_ROOT / "scripts/docs_workflow_gate.py",
         "scripts/audit_local_data_controls.py": PROJECT_ROOT / "scripts/audit_local_data_controls.py",
+        "atg/evidence/2026-08-18-offline-gate-02.json": PROJECT_ROOT / "atg/evidence/2026-08-18-offline-gate-02.json",
+        "atg/evidence/2026-08-18-docs-workflow-gate-02.json": PROJECT_ROOT / "atg/evidence/2026-08-18-docs-workflow-gate-02.json",
+        "resources/authorizations/qualsight-owner-external-scores-option-a-2026-08-17.json": PROJECT_ROOT / "resources/authorizations/qualsight-owner-external-scores-option-a-2026-08-17.json",
         "resources/authorizations/qualsight-owner-phase2-amendment-2026-08-17.json": PROJECT_ROOT / "resources/authorizations/qualsight-owner-phase2-amendment-2026-08-17.json",
     }
     for label, path in expected.items():

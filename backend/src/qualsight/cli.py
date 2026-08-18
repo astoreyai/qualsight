@@ -93,6 +93,10 @@ def main(argv: list[str] | None = None) -> int:
     figure.add_argument("--params", default="{}", help="JSON object of builder parameters")
     setup = sub.add_parser("setup", help="installation-time acquisition of pinned upstream matcher sources into the data directory (the only sanctioned network use); verifies the registry afterwards")
     setup.add_argument("--verify-registry", action="store_true", help="also stream-verify every registered artifact hash (slow for LFW)")
+    ext = sub.add_parser("import-external-scores", help="import a registered externally computed score artifact over a frozen protocol (QS-C21)")
+    ext.add_argument("--project-id", required=True)
+    ext.add_argument("--protocol-id", required=True)
+    ext.add_argument("--resource-id", required=True)
     args = parser.parse_args(argv)
 
     settings = Settings.from_environment()
@@ -277,6 +281,21 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             result = job.run()
             print(json.dumps({"analysis_id": result.analysis_id, "run_id": result.run.run_id, "directory": str(result.directory), "summary": result.summary}, indent=2))
+            return 0
+        if args.command == "import-external-scores":
+            from .importers.external_scores import ExternalScoreImporter
+            from .projects import ProjectService
+
+            engine = _engine(settings)
+            service = ProjectService(store, engine)
+            project = service.require_writable(args.project_id)
+            protocol = store.protocol(args.protocol_id)
+            if protocol is None:
+                raise SystemExit("protocol is not recorded")
+            importer = ExternalScoreImporter(store=store, registry=engine.registry, repository_root=settings.repository_root, project=project, protocol=protocol, resource_id=args.resource_id, job_root=settings.data_dir / "external", actor=service.actor)
+            result = importer.run()
+            policy = result.metrics["by_policy"]["EXCLUDE_FAILED_TRIALS"]
+            print(json.dumps({"leaf": result.leaf_id, "run_id": result.run.run_id, "provenance_marker": "EXTERNALLY_COMPUTED", "scored": result.scored_count, "failed": result.failed_count, "eer": policy["eer"]["eer"], "fnmr_at_fmr_1e-3": next((p.get("fnmr") for p in policy["operating_points"] if p["target_fmr"] == 0.001), None), "mapping": result.mapping}, indent=2))
             return 0
         if args.command == "setup":
             from .matchers.upstream import UpstreamSources

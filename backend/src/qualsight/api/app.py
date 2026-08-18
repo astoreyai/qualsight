@@ -42,6 +42,7 @@ from ..reporting.dashboards import DashboardError, load_dashboard, save_dashboar
 from ..reporting.exports import ExportError, export_table
 from ..reporting.reports import ReportBuilder, ReportError
 from ..security.network_guard import guard_status, install_network_guard
+from ..importers.external_scores import EXTERNAL_CONDITION_ID, ExternalScoreImportError, ExternalScoreImporter
 from ..security.purge import PurgeError, SCOPE_STATEMENT, purge_project, purge_targets
 from ..matchers.upstream import UpstreamSources
 from ..execution.contracts import ContractValidationError, ExecutionOutcomeError
@@ -134,6 +135,11 @@ class BundleCreate(ApiModel):
 
 class ReproduceRequest(ApiModel):
     bundle_path: str = Field(min_length=1)
+
+
+class ExternalScoreImportRequest(ApiModel):
+    resource_id: str = Field(min_length=1)
+    purpose_scope: str = Field(default="QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1", min_length=1)
 
 
 class ProjectCreate(ApiModel):
@@ -896,6 +902,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         excl = metrics["by_policy"]["EXCLUDE_FAILED_TRIALS"]
         gen = metrics["by_policy"]["FAILURES_AS_REJECT"]
         return {
+            "provenance_marker": "EXTERNALLY_COMPUTED" if row["condition_id"] == EXTERNAL_CONDITION_ID else "QUALSIGHT_EXECUTED",
             "run_id": row["run_id"],
             "matrix_id": row["matrix_id"],
             "leaf_id": row["leaf_id"],
@@ -955,6 +962,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         executor.submit(_run)
         record_action(project_id, AuditEventType.RUN_STARTED, "MatcherMatrix", job.matrix_id, {"protocol_id": protocol_id, "pairs": len(job.pairs), "samples": len(job.sample_ids), "selection_rule": rule})
         return JSONResponse(status_code=202, content={"matrix_id": job.matrix_id, "pairs": len(job.pairs), "samples": len(job.sample_ids), "progress": job.progress})
+
+    @app.post("/api/projects/{project_id}/protocols/{protocol_id}/import-external-scores", status_code=201)
+    def import_external_scores(project_id: str, protocol_id: str, request: ExternalScoreImportRequest) -> JSONResponse:
+        """QS-C21: import a registered, externally computed score artifact over a frozen protocol as an EXTERNALLY_COMPUTED Run."""
+
+        try:
+            project = projects().require_writable(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        protocol = store().protocol(protocol_id)
+        if protocol is None or protocol.project_id != project_id:
+            raise HTTPException(status_code=404, detail="protocol is not recorded in this project")
+        try:
+            importer = ExternalScoreImporter(store=store(), registry=engine().registry, repository_root=settings.repository_root, project=project, protocol=protocol, resource_id=request.resource_id, job_root=settings.data_dir / "external", actor=projects().actor, purpose_scope=request.purpose_scope)
+            result = importer.run()
+        except (ExternalScoreImportError, ContractValidationError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        record_action(project_id, AuditEventType.RUN_COMPLETED, "ExternalScoreImport", result.run.run_id, {"resource_id": request.resource_id, "protocol_id": protocol_id, "provenance_marker": "EXTERNALLY_COMPUTED", "mapping": result.mapping})
+        row = store().matcher_leaf(result.run.run_id)
+        return JSONResponse(status_code=201, content={**leaf_summary(row), "provenance_marker": "EXTERNALLY_COMPUTED", "mapping": result.mapping})
 
     @app.get("/api/matrices/{matrix_id}")
     def matrix_status(matrix_id: str) -> JSONResponse:

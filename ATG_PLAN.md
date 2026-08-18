@@ -2,7 +2,7 @@
 
 **Graph version:** v1.6  
 **Date:** August 17, 2026  
-**State:** Phases 0–5 and 7 are complete (Phase 2 under owner decision 28): QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43, QS-F50 through QS-F54, and QS-H70 through QS-H73 are accepted whole capabilities; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 remains blocked on a real external score artifact and is parked as a direct predecessor of QS-H74; the beta terminal gate QS-H74 waits only for the parked QS-C21 (a real external score artifact); no other whole capability remains  
+**State:** The beta DAG is complete — every whole capability QS-A00 through QS-H74 (41 nodes; Phase 2 under owner decision 28, QS-C21 under decision 29) is accepted; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 remains blocked on a real external score artifact and is parked as a direct predecessor of QS-H74; QS-H74 (beta end-to-end acceptance) executed the section-57 chain offline on 2026-08-18; only the post-beta branch remains outside the DAG  
 **Loop controller:** [ATG_LOOP.md](./ATG_LOOP.md)  
 **Canonical product requirements:** [PRD.md](./PRD.md)  
 **Evidence-only companion:** [PLAN.md](./PLAN.md)
@@ -39,6 +39,7 @@ This is the live dependency graph for developing QualSight. Coarse capability no
 26. Verification metrics are computed with the registry definitions and every required input made explicit — score direction, `ACCEPT_WHEN_SCORE_GE_THRESHOLD`, and two named failure policies (`EXCLUDE_FAILED_TRIALS` with FTA reported; `FAILURES_AS_REJECT`) reported side by side; EER is located by linear interpolation between adjacent recorded thresholds; uncertainty is Clopper–Pearson exact binomial with the stated independence caveat plus the View 2 ten-fold accuracy.
 27. LFW results are reported as QualSight-executed on the funneled release with SCRFD alignment; they are never presented as reproductions of the matchers' published LFW figures.
 28. Owner amendment 2026-08-17 (`resources/authorizations/qualsight-owner-phase2-amendment-2026-08-17.json`): Phase 2 closes on QualSight-executed Runs; QS-C21 (real external score importer) is parked as a required beta node feeding QS-H74 directly and accepts only when a real externally computed score artifact is registered — never a self-generated one. TransFace-S stays in the matrix under local noncommercial research use with setup-time acquisition. Commits to `main` are authorized; pushes are not until a remote is named.
+29. Owner decision 2026-08-17 (`resources/authorizations/qualsight-owner-external-scores-option-a-2026-08-17.json`, verbatim reply "option a"): the QS-C21 artifact is produced by an independent open-source pipeline run outside QualSight (insightface 0.7.3 FaceAnalysis buffalo_l in its own virtual environment) over the frozen LFW View 2 pairs, registered as `external-scores-lfw-view2-insightface-buffalo-l` under local noncommercial research use, and recorded as INDEPENDENT_OPEN_SOURCE_PIPELINE evidence — genuinely computed outside QualSight's runtime, but not a third-party vendor file; never redistributed.
 
 ## Confirmed baseline
 
@@ -349,7 +350,7 @@ Statuses in this table are graph states, not claims of implementation.
 | QS-B13 | §§11, 14, 33–36 | Quality explorer and drilldown | Dataset distributions reconcile to batch rows; selecting a real point resolves to its exact sample, Run, and provenance | QS-A09, QS-B12 | ACCEPTED |
 | QS-B14 | §56 Phase 1 | Phase-1 accepted artifact | Project lifecycle, real import, single and batch quality, visualization, and provenance pass one integrated real-data workflow | QS-B10, QS-B11, QS-B12, QS-B13 | ACCEPTED |
 | QS-C20 | §§15–18, 21, 24 | Verification comparison and protocol schemas | Mated/non-mated labels, pair policy, thresholds, processing failures, and 1:N-compatible entities validate without conflation | QS-B14 | ACCEPTED |
-| QS-C21 | §§12, 51.8, 54 Tier 1 | Real external score importer | A registered real score artifact maps identifiers and labels without row invention and remains marked EXTERNALLY COMPUTED | QS-A04, QS-B14 | BLOCKED_BY_REAL_SCORES_PARKED_TO_QS-H74_BY_DECISION_28 |
+| QS-C21 | §§12, 51.8, 54 Tier 1 | Real external score importer | A registered real score artifact maps identifiers and labels without row invention and remains marked EXTERNALLY COMPUTED | QS-A04, QS-B14 | ACCEPTED |
 | QS-C22 | §§51, 53–54 | Three selected matchers × two preprocessing conditions | AdaFace, ElasticFace, and TransFace each produce separate shared/native immutable Runs over one frozen real protocol; every pair and explicit failure is retained; automatic downloads, random weights, unsafe loads, and unregistered bytes are refused | QS-A04, QS-B14, QS-C20 | ACCEPTED |
 | QS-C23 | §§15–16, 23–24, 28–30 | Verification metric engine | Each of the six result sets reconciles to independently checked calculations over the same real comparisons and reports counts, uncertainty, thresholds, failures, and limitations | QS-A05, QS-C20, QS-C22 | ACCEPTED |
 | QS-C24 | §§24, 33, 35–36 | Verification UI and failure drilldown | The UI displays both preprocessing conditions for all three matchers; every real error links to its comparison, samples, subjects, threshold, condition, transform, and immutable Run | QS-B13, QS-C23 | ACCEPTED |
@@ -372,7 +373,7 @@ Statuses in this table are graph states, not claims of implementation.
 | QS-H71 | §§6, 50, 55 | Single-user attribution and audit | Every meaningful scientific action records configured user and timestamp; optional local-account mode is not required for this gate | QS-F54 | ACCEPTED |
 | QS-H72 | §§46–48, 56 Phase 7 | Offline installation and packaging | Installation on the controlled workstation succeeds from pinned resources and the product runs with network disabled after installation | QS-F54 | ACCEPTED |
 | QS-H73 | §§38, 56 Phase 7 | Operating and scientific documentation | A researcher completes the canonical workflow using only shipped documentation and real registered resources | QS-F54 | ACCEPTED |
-| QS-H74 | §§55, 57–60 | Beta end-to-end acceptance | The complete section-57 workflow runs without manual Python analysis and every reportable result satisfies sections 58 and 60 | QS-C21, QS-H70, QS-H71, QS-H72, QS-H73 | BLOCKED_BY_QS-C21 |
+| QS-H74 | §§55, 57–60 | Beta end-to-end acceptance | The complete section-57 workflow runs without manual Python analysis and every reportable result satisfies sections 58 and 60 | QS-C21, QS-H70, QS-H71, QS-H72, QS-H73 | ACCEPTED |
 
 ## Post-beta branch
 
@@ -395,7 +396,7 @@ QS-X61 never authorizes fabricated identities, labels, scores, or source samples
 
 ## Current atomic frontier
 
-Phases 0–5 and 7 are complete (Phase 2 under owner decision 28): whole capabilities QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43, QS-F50 through QS-F54, and QS-H70 through QS-H73 are ACCEPTED. Current accepted evidence children are QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0. The ledger preserves superseded resource, domain, and execution events as history, but their stale registry and fixture-byte claims are not reused as current evidence. Gates marked *executing* launch the registered installed OFIQ v1.1.2 runtime on registered inputs under the owner use-permission receipt; every other gate is static. Every Node command below assumes `PATH=/usr/bin:$PATH` so that Node 20.20.2 is selected.
+The beta DAG is complete: all 41 whole capabilities QS-A00 through QS-H74 are ACCEPTED (Phase 2 under decision 28; QS-C21 under decision 29). Current accepted evidence children are QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0. The ledger preserves superseded resource, domain, and execution events as history, but their stale registry and fixture-byte claims are not reused as current evidence. Gates marked *executing* launch the registered installed OFIQ v1.1.2 runtime on registered inputs under the owner use-permission receipt; every other gate is static. Every Node command below assumes `PATH=/usr/bin:$PATH` so that Node 20.20.2 is selected.
 
 ### QS-A00 — Authority and requirement registry
 
@@ -1026,17 +1027,39 @@ python3 scripts/docs_workflow_gate.py --observation atg/evidence/2026-08-17-docs
 **Acceptance:** shipped documentation — `docs/USER_GUIDE.md` (canonical workflow with console equivalents and the exact CLI commands), `docs/INSTALL.md`, `docs/SCIENTIFIC_METHODS.md` (definitions, fixed choices, uncertainty, limitations), `docs/THREAT_MODEL.md`. `scripts/docs_workflow_gate.py` extracts every `sh gate` block of the user guide in order and executes them verbatim against a fresh data directory with only the registered resources: eight blocks — setup, project, LFW import, r-01 assessment + fixture batch, protocol freeze + fixture matrix, utility analysis + independent verification (44 checks), cross-matcher + independent verification (234 checks), DET figure + bundle export + reproduction EXACT — exit 0 in 95 s (evidence `atg/evidence/2026-08-17-docs-workflow-gate-01.json`, guide sha recorded).
 **State:** ACCEPTED (cycle 2026-08-17-C23).
 
+### QS-C21 — Real external score importer
+
+**Safe gate**
+
+~~~sh
+env PYTHONPATH=src:.. QUALSIGHT_INPUT_RESOURCE_IDS="ofiq-r-01-conformance-input,lfw-funneled-local-candidate" /home/aaron/.local/bin/uv run --directory backend --frozen --offline python -m qualsight.cli import-external-scores --project-id project:sha256:5564b31f9da7c3b89895a449c07a049a9bafa222d10543ff143ecc0f369b8d52 --protocol-id protocol:sha256:68125d4521f11afff7d0f7be64616974b35ec306c92fcb019a39f5cec3e266ae --resource-id external-scores-lfw-view2-insightface-buffalo-l
+env PYTHONPATH=src:.. /home/aaron/.local/bin/uv run --directory backend --frozen --offline python -m unittest -v tests.api.test_matcher_api_real.RealMatcherApiTests.test_external_score_artifact_imports_as_an_externally_computed_run_without_row_invention
+~~~
+
+**Acceptance:** the registered artifact `external-scores-lfw-view2-insightface-buffalo-l` (decision 29; `external_scores.csv` sha `8ca7e08d…`, provenance sidecar with insightface/onnxruntime versions and buffalo_l model file hashes; computed 2026-08-18 in `~/venvs/extscore` on GPU in 128 s, 7,701 images, 27 image failures) is imported by `qualsight.importers.external_scores.ExternalScoreImporter` over the frozen protocol: 6,000 rows map to the 6,000 protocol pairs by pair id with paths and labels cross-checked, zero refusals, no invented rows (unknown/duplicate rows, mismatched paths or labels, non-numeric scores are refused; uncovered pairs would be NOT_EXECUTED); 5,957 scored, 43 without a score (the producer's detector at 640 misses the same faces as QualSight's native condition); the Run `run:sha256:36b47713…` (leaf `QS-C21.EXTERNAL`, condition `EXTERNALLY_COMPUTED`) carries the marker in its configuration, matcher binding, leaf identity, and provenance limits, binds the artifact and sidecar hashes as model identities, and evaluates with the registered verification definitions: EER 2.32 %, FNMR 2.52 % at FMR ≤ 10⁻³ (EXCLUDE_FAILED_TRIALS). API `POST /api/projects/{id}/protocols/{pid}/import-external-scores`, CLI `import-external-scores`, console section "Externally computed scores"; the fixture test asserts the marker, mapping counts, typed refusals, no duplicate import, and that the external leaf never enters the QualSight-executed matrix.
+**State:** ACCEPTED (cycle 2026-08-18-C24; INDEPENDENT_OPEN_SOURCE_PIPELINE evidence per decision 29).
+
 ### QS-H74 — Beta end-to-end acceptance
 
-**State:** BLOCKED_BY_QS-C21. Every other predecessor (QS-H70–QS-H73) is ACCEPTED and the section-57 chain has been executed end to end on real data by the offline gate and the docs workflow gate; the one remaining input is a registered real externally computed score artifact for QS-C21 (owner input, decision 28). No substitute artifact will be generated.
+**Safe gate**
 
-Historical accepted events QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, and QS-A06.R1M retain their exact recorded counts and hashes in `atg/ledger.jsonl`; current refinements supersede them for reuse without rewriting history. The active accepted evidence set is `{QS-A00, QS-A01, QS-A02, QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03, QS-A03.R1, QS-A04, QS-A04.R1, QS-A04.R2, QS-A05, QS-A06, QS-A06.R1O, QS-A06.R2, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B12.LFW.FULL, QS-B13, QS-B14, QS-C20, QS-C22, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D31.R0, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43, QS-F50, QS-F51, QS-F52, QS-F53, QS-F54, QS-H70, QS-H71, QS-H72, QS-H73}`. Twenty whole capabilities participate in coarse dependency readiness; none is dependency-ready while QS-C21 lacks its real input.
+~~~sh
+python3 scripts/offline_gate.py --observation atg/evidence/2026-08-18-offline-gate-02.json
+python3 scripts/docs_workflow_gate.py --observation atg/evidence/2026-08-18-docs-workflow-gate-02.json
+env PYTHONPATH=src:.. /home/aaron/.local/bin/uv run --directory backend --frozen --offline python -m unittest discover -s tests -q
+python3 -m unittest discover -s tests -q
+~~~
+
+**Acceptance:** the complete section-57 chain ran through the shipped product without manual Python analysis, offline under the network guard (offline gate 02, exit 0, zero refused connections): create project → import the approved identity-labelled real dataset (13,233 samples) → run OFIQ (r-01 assessment UQS 79; fixture batch 16 measured) → inspect quality → import the registered real external score artifact with permanent EXTERNALLY_COMPUTED provenance (5,957 scored / 43 failed, EER 2.32 %) → run AdaFace, ElasticFace, TransFace under both frozen conditions into six immutable Runs with explicit failures → FMR/FNMR/ROC/DET/EER/operating points/uncertainty per Run → ERC with explicit pair-quality and threshold policy → cross-matcher contrasts within fixed condition and preprocessing contrasts within fixed matcher (9 contrasts) → disagreement pairs resolving to permitted images and both Runs → provenance-bearing dashboard saved and reloaded identically (5 panels incl. the external leaf) → report with figures and permitted failure images → bundle → reproduction EXACT → purge scope → 24 audit events attributed to the configured user. The docs workflow gate executed the shipped user guide verbatim (9 blocks incl. the external import; exit 0). Every reportable result carries counts, intervals, method, and threshold kind (§58) and traces to an immutable Run (§60); restricted images stay excluded; both preprocessing conditions are shown and never pooled; the six Runs share the ordered sample ids, subject ids, and pair manifest.
+**State:** ACCEPTED (cycle 2026-08-18-C24). Backend gate 82/82, root gate 37/37 (recorded in the ledger).
+
+Historical accepted events QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, and QS-A06.R1M retain their exact recorded counts and hashes in `atg/ledger.jsonl`; current refinements supersede them for reuse without rewriting history. The active accepted evidence set is `{QS-A00, QS-A01, QS-A02, QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03, QS-A03.R1, QS-A04, QS-A04.R1, QS-A04.R2, QS-A05, QS-A06, QS-A06.R1O, QS-A06.R2, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B12.LFW.FULL, QS-B13, QS-B14, QS-C20, QS-C22, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D31.R0, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43, QS-F50, QS-F51, QS-F52, QS-F53, QS-F54, QS-H70, QS-H71, QS-H72, QS-H73, QS-C21, QS-H74}`. Twenty whole capabilities participate in coarse dependency readiness; none is dependency-ready while QS-C21 lacks its real input.
 
 ## Dependency-ready parallel groups
 
 At the capability level:
 
-- at present: no whole capability is dependency-ready; QS-H74 (beta terminal gate) waits only for the parked QS-C21 — a registered real external score artifact (owner input); every other predecessor is ACCEPTED; QS-C21 stays parked on a registered real external score artifact (owner input) and blocks only QS-H74;
+- at present: no beta whole capability remains; the post-beta branch (outside the DAG) is the only future work; QS-C21 stays parked on a registered real external score artifact (owner input) and blocks only QS-H74;
 - in Phase 5: QS-F51, QS-F52, and QS-F53 may proceed in parallel after their predecessors;
 - in Phase 7: QS-H70, QS-H71, QS-H72, and QS-H73 may proceed in parallel when file ownership is disjoint.
 
@@ -1046,7 +1069,7 @@ Any loop body that mutates shared files is sequential. Parallel analysis does no
 
 The following are real blockers, not empty planning fields:
 
-1. **Real external matcher scores (owner input):** bounded local discovery found no face-relevant score artifact; `/mnt/projects/02_perception_biometrics/ofiq_29794/data/scores` contains only `.gitkeep`. QS-C21 needs one registered real externally computed score artifact over a real protocol. Owner decision 28 (2026-08-17) closed Phase 2 on QualSight-executed Runs and parked QS-C21 as a direct predecessor of QS-H74, so it now blocks only the beta terminal gate; QS-C20, QS-C22, QS-C23, and QS-C24 are accepted.
+1. **Real external matcher scores — resolved 2026-08-18 by owner decision 29:** the artifact `external-scores-lfw-view2-insightface-buffalo-l` (insightface buffalo_l pipeline run outside QualSight, 5,957 of 6,000 pairs scored) is registered and imported (QS-C21 ACCEPTED). It is INDEPENDENT_OPEN_SOURCE_PIPELINE evidence, not a third-party vendor file; a vendor artifact would strengthen but is not required for the beta.
 2. **Matcher training-set identity exclusion:** recorded as each matcher's published claim by owner decision 19; QualSight does not verify it and every LFW report must carry the caveat.
 3. **Native-condition detection failures:** the fixed 640-canvas condition misses 43 protocol pairs' faces on the 250×250 funneled images while the adaptive canvas finds all; the failures are explicit in the six Runs and are a real finding about the condition, not a defect to hide.
 4. **Non-beta authorities:** controlled-data handling requirements and the IJB-C agreement signer remain unresolved. They block those optional data scopes but do not block the open-data beta path unless activated.
@@ -1062,7 +1085,7 @@ create project
 → import approved identity-labeled real dataset
 → run OFIQ
 → inspect quality and components
-→ import one registered real external score artifact with permanent external-computation provenance (QS-C21, parked by decision 28 until a real artifact is registered)
+→ import one registered real external score artifact with permanent external-computation provenance (QS-C21: `external-scores-lfw-view2-insightface-buffalo-l`, marker EXTERNALLY_COMPUTED)
 → run AdaFace, ElasticFace, and TransFace under both frozen preprocessing conditions
 → preserve all official mated and non-mated pairs plus explicit processing failures in six immutable Runs
 → compute FMR, FNMR, ROC, DET, EER, operating points, and uncertainty separately for all six Runs
@@ -1108,7 +1131,7 @@ Known limitation: the accepted evidence children prove only their stated predica
 - **L0:** one product graph from canonical requirements to accepted beta;
 - **L1:** Phase 0 → 1 → 2 → 3 → 4 → 5 → 7 → beta, with Phase 6 post-beta;
 - **L2:** 41-node, 85-edge acyclic capability graph QS-A00 through QS-H74 (v1.6: QS-C21 rewired to feed QS-H74 directly by decision 28); post-beta nodes remain outside the beta DAG;
-- **L3 current frontier:** Phases 0–5 and 7 accepted (Phase 2 under decision 28; QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43, QS-F50 through QS-F54, QS-H70 through QS-H73); QS-H74 waits only for QS-C21 with current accepted evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0; QS-C21 and QS-C25 blocked; superseded resource/domain/execution slices remain in the append-only ledger;
+- **L3 current frontier:** all 41 beta whole capabilities accepted (QS-A00 through QS-H74; Phase 2 under decision 28, QS-C21 under decision 29) with current accepted evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0; QS-C21 and QS-C25 blocked; superseded resource/domain/execution slices remain in the append-only ledger;
 - **future L3 refinements:** created one ready capability at a time by the bounded controller, preserving its L2 input/output interface.
 
 Only the minimal historical subgraph is replaced when a leaf fails. Accepted nodes and their evidence remain frozen.
