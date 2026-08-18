@@ -13,7 +13,8 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
+import hashlib
 import json
 import mimetypes
 import threading
@@ -24,7 +25,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..domain.entities import DataClassification
+from ..domain.entities import AuditEvent, AuditEventType, DataClassification
+from ..domain.primitives import CanonicalJson
 from ..domain.run import CompletedRun
 from ..engines.ofiq.adapter import OFIQEngineError, OFIQQualityEngine, OFIQSingleSampleResult
 from ..datasets import DatasetImportError, RegisteredDatasetImporter
@@ -39,6 +41,8 @@ from ..reporting import figures as figure_module
 from ..reporting.dashboards import DashboardError, load_dashboard, save_dashboard
 from ..reporting.exports import ExportError, export_table
 from ..reporting.reports import ReportBuilder, ReportError
+from ..security.network_guard import guard_status, install_network_guard
+from ..security.purge import PurgeError, SCOPE_STATEMENT, purge_project, purge_targets
 from ..matchers.upstream import UpstreamSources
 from ..execution.contracts import ContractValidationError, ExecutionOutcomeError
 from ..provenance import artifact_identity
@@ -297,6 +301,12 @@ class HealthOut(ApiModel):
     registry_id: str
     engine: ResourceOut
     database_path: str
+    actor_id: str = ""
+    network_guard: dict[str, Any] = Field(default_factory=dict)
+
+
+class PurgeRequest(ApiModel):
+    confirm: str = Field(min_length=1)
 
 
 class RunSummaryOut(ApiModel):
@@ -332,6 +342,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_environment()
     state: dict[str, Any] = {}
 
+    if settings.network_guard:
+        install_network_guard()
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         state["engine"] = OFIQQualityEngine(
@@ -356,7 +369,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return state["store"]
 
     def projects() -> ProjectService:
-        return ProjectService(store(), engine())
+        return ProjectService(store(), engine(), actor_id=settings.actor)
+
+    def record_action(project_id: str, event_type: AuditEventType, subject_type: str, subject_id: str, details: dict[str, Any]) -> None:
+        """Attribute a meaningful scientific action to the configured user with a timestamp (PRD §§6, 50, 55)."""
+
+        occurred = datetime.now(timezone.utc).astimezone()
+        payload = CanonicalJson.from_value({"event_type": event_type.value, "subject_type": subject_type, "subject_id": subject_id, "occurred_at": occurred.isoformat(), **details})
+        event = AuditEvent(
+            audit_event_id=f"audit-event:sha256:{hashlib.sha256((project_id + subject_id + event_type.value + occurred.isoformat() + payload.sha256).encode('utf-8')).hexdigest()}",
+            project_id=project_id, actor_id=settings.actor, event_type=event_type, subject_type=subject_type, subject_id=subject_id, occurred_at=occurred,
+            details=payload, current_evidence_sha256=payload.sha256, local_only=True,
+        )
+        store().record_audit_event(event)
 
     jobs: dict[str, OFIQBatchJob] = {}
     job_lock = threading.Lock()
@@ -473,6 +498,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 store().finish_job(job.job_id, job.ended_at.isoformat() if job.ended_at else "", job.state)
 
         executor.submit(_run)
+        record_action(project_id, AuditEventType.RUN_STARTED, "QualityBatchJob", job.job_id, {"dataset_id": dataset_id, "samples": len(samples), "selection_rule": rule, "purpose_scope": purpose_scope})
         return job_out(job, None)
 
     @app.get("/api/jobs/{job_id}", response_model=JobOut)
@@ -927,6 +953,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 job.progress = {"phase": "failed", "detail": f"{type(error).__name__}: {error}"}
 
         executor.submit(_run)
+        record_action(project_id, AuditEventType.RUN_STARTED, "MatcherMatrix", job.matrix_id, {"protocol_id": protocol_id, "pairs": len(job.pairs), "samples": len(job.sample_ids), "selection_rule": rule})
         return JSONResponse(status_code=202, content={"matrix_id": job.matrix_id, "pairs": len(job.pairs), "samples": len(job.sample_ids), "progress": job.progress})
 
     @app.get("/api/matrices/{matrix_id}")
@@ -1120,6 +1147,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     analyses[job.analysis_id] = {"state": "FAILED", "error": f"{type(error).__name__}: {error}"}
 
         executor.submit(_run)
+        record_action(project_id, AuditEventType.RUN_STARTED, "UtilityAnalysis", job.analysis_id, {"matcher_run_id": request.matcher_run_id, "quality_job_id": request.quality_job_id, "quality_measure": request.quality_measure, "pair_quality_policy": request.pair_quality_policy})
         return JSONResponse(status_code=202, content={"analysis_id": job.analysis_id, "state": "RUNNING"})
 
     @app.get("/api/projects/{project_id}/utility-analyses")
@@ -1230,6 +1258,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     cross_jobs[job.analysis_id] = {"state": "FAILED", "error": f"{type(error).__name__}: {error}"}
 
         executor.submit(_run)
+        record_action(project_id, AuditEventType.RUN_STARTED, "CrossMatcherAnalysis", job.analysis_id, {"matrix_id": request.matrix_id, "quality_job_id": request.quality_job_id})
         return JSONResponse(status_code=202, content={"analysis_id": job.analysis_id, "state": "RUNNING"})
 
     @app.get("/api/projects/{project_id}/cross-matcher")
@@ -1304,6 +1333,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ProjectLifecycleError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         note = store().record_annotation(project_id=request.project_id, subject_type=request.subject_type, subject_id=request.subject_id, actor_id=projects().actor, text=request.text, context=request.context)
+        record_action(request.project_id, AuditEventType.ANNOTATION_MODIFIED, request.subject_type, request.subject_id, {"annotation_id": note["annotation_id"], "evidence_sha256": note["evidence_sha256"]})
         return JSONResponse(status_code=201, content=note)
 
     @app.get("/api/annotations")
@@ -1332,6 +1362,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except figure_module.FigureError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         store().record_figure(record)
+        record_action(project_id, AuditEventType.ARTIFACT_EXPORTED, "Figure", record["figure_id"], {"kind": request.kind, "source_run_ids": record["source_run_ids"], "files": {name: item["sha256"] for name, item in record["files"].items()}})
         row = store().figure(record["figure_id"])
         return JSONResponse(status_code=201, content=figure_summary(row))
 
@@ -1373,6 +1404,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(error)) from error
         except DashboardError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+        record_action(project_id, AuditEventType.CONFIGURATION_CHANGED, "Dashboard", record["dashboard_id"], {"name": request.name, "template": request.template, "version": record["version"], "layout_sha256": record["layout_sha256"], "panel_run_ids": record["panel_run_ids"]})
         return JSONResponse(status_code=201, content={k: v for k, v in record.items() if k != "layout_text"})
 
     @app.get("/api/projects/{project_id}/dashboards")
@@ -1398,6 +1430,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(error)) from error
         except ReportError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+        record_action(project_id, AuditEventType.ARTIFACT_EXPORTED, "Report", record["report_id"], {"title": record["title"], "image_policy": record["image_policy"], "images_embedded": record["images_embedded"], "images_withheld": record["images_withheld"], "html_sha256": record["files"]["html"]["sha256"], "pdf_sha256": record["files"]["pdf"]["sha256"]})
         return JSONResponse(status_code=201, content={**record, "links": {"html": f"/api/reports/{record['report_id']}/file?format=html", "pdf": f"/api/reports/{record['report_id']}/file?format=pdf", "json": f"/api/reports/{record['report_id']}/file?format=json"}})
 
     @app.get("/api/projects/{project_id}/reports")
@@ -1414,6 +1447,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         media = {"html": "text/html", "pdf": "application/pdf", "json": "application/json", "provenance": "application/json"}[format]
         return FileResponse(str(path), media_type=media, filename=f"{report_id.replace(':', '_')}-{name}")
 
+    def _project_of_ref(category: str, ref: str) -> str | None:
+        if category == "quality_results":
+            job = store().job(ref)
+            return job["project_id"] if job else None
+        if category in ("matcher_scores", "comparison_records", "embeddings", "metric_tables"):
+            row = store().matcher_leaf(ref)
+            return row["project_id"] if row else None
+        if category == "statistical_results":
+            row = store().utility_analysis(ref)
+            return row["project_id"] if row else None
+        if category == "annotations":
+            return ref
+        return None
+
     @app.get("/api/exports/{category}")
     def export_category(category: str, ref: str = Query(min_length=1), format: Literal["csv", "json", "parquet"] = Query(default="csv")) -> FileResponse:
         try:
@@ -1421,6 +1468,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ExportError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         media = {"csv": "text/csv", "json": "application/json", "parquet": "application/vnd.apache.parquet"}[format]
+        project_of_export = record["source"].get("project_id") or _project_of_ref(category, ref)
+        if project_of_export:
+            record_action(project_of_export, AuditEventType.ARTIFACT_EXPORTED, "Export", record["export_id"], {"category": category, "ref": ref, "format": format, "rows": record["rows"], "sha256": record["sha256"], "classification": record["classification"]})
         return FileResponse(record["path"], media_type=media, filename=f"{category}-{ref[-12:]}.{format}", headers={"X-QualSight-Export-Id": record["export_id"], "X-QualSight-Export-Sha256": record["sha256"], "X-QualSight-Export-Rows": str(record["rows"]), "X-QualSight-Classification": record["classification"]})
 
     @app.post("/api/projects/{project_id}/bundles", status_code=201)
@@ -1432,6 +1482,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             record = bundle_module.export_bundle(store(), run_id=request.run_id, root=settings.data_dir / "bundles", repository_root=settings.repository_root)
         except bundle_module.BundleError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+        record_action(project_id, AuditEventType.ARTIFACT_EXPORTED, "Bundle", record["bundle_id"], {"run_id": request.run_id, "sha256": record["sha256"], "size_bytes": record["size_bytes"]})
         return JSONResponse(status_code=201, content={**record, "links": {"download": f"/api/bundles/{record['bundle_id']}/file"}})
 
     @app.get("/api/projects/{project_id}/bundles")
@@ -1451,6 +1502,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not path.exists():
             raise HTTPException(status_code=404, detail="bundle file does not exist")
         result = bundle_module.reproduce_bundle(path, store=store(), registry=engine().registry, repository_root=settings.repository_root, work_root=settings.data_dir / "reproductions", project_service=projects(), engine=engine())
+        original = store().run(result.original_run_id)
+        if original is not None:
+            record_action(original[0].project_id, AuditEventType.RUN_COMPLETED, "Reproduction", result.reproduction_id, {"original_run_id": result.original_run_id, "state": result.state, "compared_values": result.compared_values, "bundle_sha256": result.bundle_sha256})
         return JSONResponse(status_code=201, content=asdict(result))
 
     @app.get("/api/reproductions")
@@ -1486,7 +1540,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             registry_id=eng.registry.registry_id,
             engine=_resource_out(eng, eng.runtime.resource_id),
             database_path=str(settings.database_path),
+            actor_id=settings.actor,
+            network_guard=guard_status(),
         )
+
+    @app.get("/api/projects/{project_id}/purge-scope")
+    def project_purge_scope(project_id: str) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
+        return JSONResponse(content={"project_id": project_id, "scope": SCOPE_STATEMENT, "targets": purge_targets(store(), settings.data_dir, project_id)})
+
+    @app.post("/api/projects/{project_id}/purge", status_code=201)
+    def project_purge(project_id: str, request: PurgeRequest) -> JSONResponse:
+        try:
+            record = purge_project(store(), data_dir=settings.data_dir, project_id=project_id, actor=settings.actor, confirm=request.confirm)
+        except PurgeError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        record_action(project_id, AuditEventType.DATASET_PURGED, "Project", project_id, {"purge_id": record["purge_id"], "deleted": len(record["deleted"]), "already_absent": len(record["already_absent"]), "failed": len(record["failed"]), "verified": record["verified"], "scope": SCOPE_STATEMENT})
+        return JSONResponse(status_code=201, content=record)
+
+    @app.get("/api/projects/{project_id}/purges")
+    def project_purges(project_id: str) -> JSONResponse:
+        return JSONResponse(content=store().purges(project_id=project_id))
 
     @app.get("/api/resources", response_model=list[ResourceOut])
     def resources() -> list[ResourceOut]:
@@ -1666,6 +1741,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="sample is not recorded")
         return JSONResponse(content=found.model_dump(mode="json"))
 
+    # Shipped console: serve the built frontend from the same local origin when it exists (offline product; API routes take precedence).
+    dist = settings.repository_root / "frontend" / "dist"
+    if (dist / "index.html").exists():
+        from fastapi.staticfiles import StaticFiles
+
+        app.mount("/", StaticFiles(directory=str(dist), html=True), name="console")
     return app
 
 

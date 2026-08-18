@@ -39,10 +39,13 @@ class UpstreamSource:
 
 
 class UpstreamSources:
-    def __init__(self, manifest_path: Path, data_dir: Path) -> None:
+    def __init__(self, manifest_path: Path, data_dir: Path, cache_root: Path | None = None) -> None:
         self.manifest_path = manifest_path
         self.manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.root = data_dir / "upstream"
+        # Installed copy (repository var/upstream) reused byte-verified before any network is touched, so a
+        # fresh data directory works offline once `qualsight setup` has run on the workstation.
+        self.cache_root = cache_root if cache_root is not None else manifest_path.resolve().parents[2] / "var" / "upstream"
         self.sources = {
             item["key"]: UpstreamSource(
                 key=item["key"],
@@ -85,6 +88,13 @@ class UpstreamSources:
                 except UpstreamSourceError:
                     path.unlink()
             path.parent.mkdir(parents=True, exist_ok=True)
+            cached = self.cache_root / path.relative_to(self.root) if self.cache_root != self.root else None
+            if cached is not None and cached.is_file():
+                data = cached.read_bytes()
+                if hashlib.sha256(data).hexdigest() == source.sha256 and len(data) == source.size_bytes:
+                    path.write_bytes(data)
+                    acquired[key] = path
+                    continue
             request = urllib.request.Request(source.url, headers={"User-Agent": "QualSight-setup/0.1"})
             with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310 - pinned https URL
                 data = response.read()

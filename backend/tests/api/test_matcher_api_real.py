@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import shutil
 import tempfile
@@ -405,6 +406,73 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertEqual(blocked["state"], "BLOCKED")
         listed = self.client.get("/api/reproductions", params={"original_run_id": run_id}).json()
         self.assertGreaterEqual(len(listed), 2)
+
+    def test_network_guard_refuses_non_loopback_and_admits_loopback_in_a_fresh_process(self) -> None:
+        """QS-H70: the runtime network guard is real — checked in a subprocess so this test process stays unguarded."""
+
+        import subprocess
+        import sys
+
+        code = (
+            "import socket, json\n"
+            "from qualsight.security.network_guard import NetworkGuardViolation, guard_status, install_network_guard\n"
+            "install_network_guard()\n"
+            "refused = False\n"
+            "try:\n"
+            "    socket.create_connection(('192.0.2.1', 9), timeout=1)\n"
+            "except NetworkGuardViolation:\n"
+            "    refused = True\n"
+            "except OSError:\n"
+            "    refused = False\n"
+            "server = socket.socket(); server.bind(('127.0.0.1', 0)); server.listen(1)\n"
+            "client = socket.create_connection(server.getsockname(), timeout=2)\n"
+            "client.close(); server.close()\n"
+            "print(json.dumps({'refused': refused, 'status': guard_status()}))\n"
+        )
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False, cwd=str(ROOT / "backend"), env={**__import__("os").environ, "PYTHONPATH": "src:.."})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout.strip().splitlines()[-1])
+        self.assertTrue(report["refused"], report)
+        self.assertEqual(len(report["status"]["refused_attempts"]), 1)
+
+    def test_zz_audit_attribution_and_verified_purge(self) -> None:
+        """QS-H70/QS-H71: every meaningful action carries the configured user and a timestamp; purge removes and re-verifies derived artifacts and is itself audited."""
+
+        import subprocess
+        import sys
+
+        health = self.client.get("/api/health").json()
+        actor = health["actor_id"]
+        self.assertTrue(actor)
+        events = self.client.get(f"/api/projects/{self.project_id}/audit").json()
+        types = {event["event_type"] for event in events}
+        for expected in ("PROJECT_CREATED", "DATASET_IMPORTED", "RUN_STARTED", "RUN_COMPLETED", "ARTIFACT_EXPORTED", "ANNOTATION_MODIFIED", "CONFIGURATION_CHANGED"):
+            self.assertIn(expected, types, sorted(types))
+        self.assertTrue(all(event["actor_id"] == actor and event["occurred_at"] for event in events))
+        subjects = {event["subject_type"] for event in events}
+        for expected_subject in ("Figure", "Report", "Bundle", "Dashboard", "Reproduction", "MatcherMatrix", "QualityBatchJob"):
+            self.assertIn(expected_subject, subjects, sorted(subjects))
+        # Local data controls audit over this test's data directory finds no secrets and the sanctioned network posture.
+        audit = subprocess.run([sys.executable, str(ROOT / "scripts" / "audit_local_data_controls.py"), "--data-dir", str(self.data_dir)], capture_output=True, text=True, check=False)
+        self.assertEqual(audit.returncode, 0, audit.stdout[-800:] + audit.stderr[-400:])
+        # Purge: scope is listed, confirmation is required, files are deleted and re-verified, records remain as tombstones, and the action is audited.
+        scope = self.client.get(f"/api/projects/{self.project_id}/purge-scope").json()
+        self.assertGreater(len(scope["targets"]["files"]) + len(scope["targets"]["directories"]), 5)
+        self.assertIn("not scrubbed", scope["scope"])
+        self.assertEqual(self.client.post(f"/api/projects/{self.project_id}/purge", json={"confirm": "wrong"}).status_code, 409)
+        before = [path for path in scope["targets"]["files"] + scope["targets"]["directories"] if Path(path).exists()]
+        self.assertTrue(before)
+        purged = self.client.post(f"/api/projects/{self.project_id}/purge", json={"confirm": self.project_id})
+        self.assertEqual(purged.status_code, 201, purged.text)
+        record = purged.json()
+        self.assertTrue(record["verified"], record)
+        self.assertEqual(record["remaining_after_purge"], [])
+        self.assertFalse(any(Path(path).exists() for path in before))
+        self.assertIsNotNone(self.client.get(f"/api/runs/{self.status['leaves'][0]['run_id']}").json()["run"])  # tombstone metadata remains
+        purges = self.client.get(f"/api/projects/{self.project_id}/purges").json()
+        self.assertEqual(purges[-1]["purge_id"], record["purge_id"])
+        after = self.client.get(f"/api/projects/{self.project_id}/audit").json()
+        self.assertTrue(any(event["event_type"] == "DATASET_PURGED" and event["actor_id"] == actor for event in after))
 
 
 if __name__ == "__main__":

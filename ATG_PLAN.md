@@ -2,7 +2,7 @@
 
 **Graph version:** v1.6  
 **Date:** August 17, 2026  
-**State:** Phases 0–5 are complete (Phase 2 under owner decision 28): QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43, and QS-F50 through QS-F54 are accepted whole capabilities; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 remains blocked on a real external score artifact and is parked as a direct predecessor of QS-H74; QS-H70 through QS-H73 are dependency-ready and Phase 7 is the owner-selected next work  
+**State:** Phases 0–5 and 7 are complete (Phase 2 under owner decision 28): QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43, QS-F50 through QS-F54, and QS-H70 through QS-H73 are accepted whole capabilities; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 remains blocked on a real external score artifact and is parked as a direct predecessor of QS-H74; the beta terminal gate QS-H74 waits only for the parked QS-C21 (a real external score artifact); no other whole capability remains  
 **Loop controller:** [ATG_LOOP.md](./ATG_LOOP.md)  
 **Canonical product requirements:** [PRD.md](./PRD.md)  
 **Evidence-only companion:** [PLAN.md](./PLAN.md)
@@ -368,11 +368,11 @@ Statuses in this table are graph states, not claims of implementation.
 | QS-F52 | §§38–40 | Reports and exports | PDF, HTML, print, CSV, JSON, Parquet, SVG, PNG, and PDF outputs enforce data classification and reconcile to source results | QS-F50 | ACCEPTED |
 | QS-F53 | §§41–42 | Reproduction bundle and mode | Bundle checksums validate; restricted images are excluded; rerun status is EXACT, WITHIN_TOLERANCE, DIFFERENT, MISSING_DEPENDENCY, MISSING_DATA, or BLOCKED based on observed evidence | QS-A03, QS-E43 | ACCEPTED |
 | QS-F54 | §56 Phase 5 | Reporting accepted artifact | Real cross-matcher Run produces dashboard, report, figures, tabular exports, and a validated reproduction bundle | QS-F51, QS-F52, QS-F53 | ACCEPTED |
-| QS-H70 | §§48–50, 56 Phase 7 | Threat model and verified local data controls | No runtime cloud/image transmission; secrets absent from logs; purge scope is tested and described as application-level verified purge | QS-F54 | DEPENDENCY_READY |
-| QS-H71 | §§6, 50, 55 | Single-user attribution and audit | Every meaningful scientific action records configured user and timestamp; optional local-account mode is not required for this gate | QS-F54 | DEPENDENCY_READY |
-| QS-H72 | §§46–48, 56 Phase 7 | Offline installation and packaging | Installation on the controlled workstation succeeds from pinned resources and the product runs with network disabled after installation | QS-F54 | DEPENDENCY_READY |
-| QS-H73 | §§38, 56 Phase 7 | Operating and scientific documentation | A researcher completes the canonical workflow using only shipped documentation and real registered resources | QS-F54 | DEPENDENCY_READY |
-| QS-H74 | §§55, 57–60 | Beta end-to-end acceptance | The complete section-57 workflow runs without manual Python analysis and every reportable result satisfies sections 58 and 60 | QS-C21, QS-H70, QS-H71, QS-H72, QS-H73 | BLOCKED_BY_PREDECESSORS |
+| QS-H70 | §§48–50, 56 Phase 7 | Threat model and verified local data controls | No runtime cloud/image transmission; secrets absent from logs; purge scope is tested and described as application-level verified purge | QS-F54 | ACCEPTED |
+| QS-H71 | §§6, 50, 55 | Single-user attribution and audit | Every meaningful scientific action records configured user and timestamp; optional local-account mode is not required for this gate | QS-F54 | ACCEPTED |
+| QS-H72 | §§46–48, 56 Phase 7 | Offline installation and packaging | Installation on the controlled workstation succeeds from pinned resources and the product runs with network disabled after installation | QS-F54 | ACCEPTED |
+| QS-H73 | §§38, 56 Phase 7 | Operating and scientific documentation | A researcher completes the canonical workflow using only shipped documentation and real registered resources | QS-F54 | ACCEPTED |
+| QS-H74 | §§55, 57–60 | Beta end-to-end acceptance | The complete section-57 workflow runs without manual Python analysis and every reportable result satisfies sections 58 and 60 | QS-C21, QS-H70, QS-H71, QS-H72, QS-H73 | BLOCKED_BY_QS-C21 |
 
 ## Post-beta branch
 
@@ -395,7 +395,7 @@ QS-X61 never authorizes fabricated identities, labels, scores, or source samples
 
 ## Current atomic frontier
 
-Phases 0–5 are complete (Phase 2 under owner decision 28): whole capabilities QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43, and QS-F50 through QS-F54 are ACCEPTED. Current accepted evidence children are QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0. The ledger preserves superseded resource, domain, and execution events as history, but their stale registry and fixture-byte claims are not reused as current evidence. Gates marked *executing* launch the registered installed OFIQ v1.1.2 runtime on registered inputs under the owner use-permission receipt; every other gate is static. Every Node command below assumes `PATH=/usr/bin:$PATH` so that Node 20.20.2 is selected.
+Phases 0–5 and 7 are complete (Phase 2 under owner decision 28): whole capabilities QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43, QS-F50 through QS-F54, and QS-H70 through QS-H73 are ACCEPTED. Current accepted evidence children are QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0. The ledger preserves superseded resource, domain, and execution events as history, but their stale registry and fixture-byte claims are not reused as current evidence. Gates marked *executing* launch the registered installed OFIQ v1.1.2 runtime on registered inputs under the owner use-permission receipt; every other gate is static. Every Node command below assumes `PATH=/usr/bin:$PATH` so that Node 20.20.2 is selected.
 
 ### QS-A00 — Authority and requirement registry
 
@@ -986,13 +986,57 @@ python3 -m unittest discover -s tests -q
 **Acceptance:** the console's Figures · dashboards · reports panel (frontend/src/Reports.tsx) renders figures with their provenance facts and export links, saves and reloads a dashboard, builds an HTML+PDF report under the chosen image policy, links CSV/JSON/Parquet exports for every recorded Run, exports bundles, and runs reproductions showing their state. Observation 08 (fixture, real Chromium): two figures rendered, four-panel dashboard saved and reloaded with identical layout, one report row (HTML/PDF/JSON), one bundle, reproduction EXACT; exit 0. The real cross-matcher Run produced dashboard, report, figures, tabular exports, and a validated bundle.
 **State:** ACCEPTED (cycle 2026-08-17-C22). Backend gate 79/79, root gate 37/37 (recorded in the ledger).
 
-Historical accepted events QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, and QS-A06.R1M retain their exact recorded counts and hashes in `atg/ledger.jsonl`; current refinements supersede them for reuse without rewriting history. The active accepted evidence set is `{QS-A00, QS-A01, QS-A02, QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03, QS-A03.R1, QS-A04, QS-A04.R1, QS-A04.R2, QS-A05, QS-A06, QS-A06.R1O, QS-A06.R2, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B12.LFW.FULL, QS-B13, QS-B14, QS-C20, QS-C22, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D31.R0, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43, QS-F50, QS-F51, QS-F52, QS-F53, QS-F54}`. Twenty whole capabilities participate in coarse dependency readiness; none is dependency-ready while QS-C21 lacks its real input.
+### QS-H70 — Threat model and verified local data controls
+
+**Safe gate**
+
+~~~sh
+python3 scripts/audit_local_data_controls.py
+env PYTHONPATH=src:.. /home/aaron/.local/bin/uv run --directory backend --frozen --offline python -m unittest -v tests.api.test_matcher_api_real.RealMatcherApiTests.test_network_guard_refuses_non_loopback_and_admits_loopback_in_a_fresh_process tests.api.test_matcher_api_real.RealMatcherApiTests.test_zz_audit_attribution_and_verified_purge
+~~~
+
+**Acceptance:** `docs/THREAT_MODEL.md` names assets, adversaries, controls, and out-of-scope items. Runtime cloud/image transmission: the control plane binds 127.0.0.1; the backend's only outbound-network code is the installation-time acquisition of pinned upstream sources (`qualsight setup`); `QUALSIGHT_NETWORK_GUARD=1` installs a process-wide guard (`qualsight/security/network_guard.py`) that refuses and counts every non-loopback socket connection, reported by `/api/health`; the subprocess test shows a non-loopback connect refused (`NetworkGuardViolation`) and a loopback connect admitted, and the offline gate ran the whole workflow under the guard with zero refused attempts. Secrets absent from logs: `scripts/audit_local_data_controls.py` scans every stored record, the ledger, and every text file under the data directory for the values of credential-like environment variables and common token shapes — `LOCAL_DATA_CONTROLS_OK` on the real `var/` (206 records/files scanned, 7 credential-like variables considered, no findings). Purge: `POST /api/projects/{id}/purge` (confirmation repeats the project id) deletes every derived artifact file recorded for the project, re-verifies absence, records deleted / already-absent / failed / remaining with the explicit scope statement ("application-level verified purge … SQLite free pages, filesystem journals, and backups are not scrubbed"), keeps immutable metadata as tombstones, never touches source images, and writes a DATASET_PURGED audit event; the backend test purges the fixture project (25+ files and directories → none remaining, verified true, Run metadata still readable).
+**State:** ACCEPTED (cycle 2026-08-17-C23).
+
+### QS-H71 — Single-user attribution and audit
+
+**Acceptance:** `QUALSIGHT_ACTOR` configures the single attributed user (default `local-user:<login>`; shown by `/api/health`); every meaningful scientific action writes an audit event with actor and timezone-aware timestamp — project lifecycle, dataset import, engine/matcher Runs (RUN_STARTED for batch, matrix, utility, cross-matcher; RUN_COMPLETED on record), figures, dashboards, reports, exports, bundles, reproductions (ARTIFACT_EXPORTED / CONFIGURATION_CHANGED / RUN_COMPLETED), annotations (ANNOTATION_MODIFIED), and purges (DATASET_PURGED); `GET /api/projects/{id}/audit` lists them. The backend test asserts every event of the fixture project carries the configured actor and a timestamp and that all subject kinds are present; the offline gate found 19 attributed events across six event types on its project. Optional local-account mode is not required for this gate.
+**State:** ACCEPTED (cycle 2026-08-17-C23).
+
+### QS-H72 — Offline installation and packaging
+
+**Safe gate**
+
+~~~sh
+bash scripts/install.sh
+python3 scripts/offline_gate.py --observation atg/evidence/2026-08-17-offline-gate-01.json
+~~~
+
+**Acceptance:** `scripts/install.sh` installs from pinned resources in one command (toolchain check → `uv sync --frozen` → `pnpm install --frozen-lockfile` + console build → OFIQ v1.1.2 build if the registered runtime does not validate → `qualsight setup` → registry, metric-registry, and governance validation); `qualsight serve` serves the built console and the API from one loopback origin (`frontend/dist` mounted by FastAPI); pinned upstream matcher sources are reused byte-verified from the installed `var/upstream` cache before any network so fresh data directories (and the test suite) run offline after setup. `docs/INSTALL.md` records the workstation preconditions and environment. The offline gate (`scripts/offline_gate.py`, evidence `atg/evidence/2026-08-17-offline-gate-01.json`) started the product with the network guard enabled and completed health → console page → project → LFW import (13,233 samples) → r-01 assessment (UQS 79) → fixture batch (16 measured) → protocol freeze (6,000 pairs) → fixture matrix (6 leaves) → utility analysis → figure → report → bundle → reproduction EXACT (1,026 values) → purge scope → audit; guard installed, zero refused attempts; exit 0 in 36 s.
+**State:** ACCEPTED (cycle 2026-08-17-C23).
+
+### QS-H73 — Operating and scientific documentation
+
+**Safe gate**
+
+~~~sh
+python3 scripts/docs_workflow_gate.py --observation atg/evidence/2026-08-17-docs-workflow-gate-01.json
+~~~
+
+**Acceptance:** shipped documentation — `docs/USER_GUIDE.md` (canonical workflow with console equivalents and the exact CLI commands), `docs/INSTALL.md`, `docs/SCIENTIFIC_METHODS.md` (definitions, fixed choices, uncertainty, limitations), `docs/THREAT_MODEL.md`. `scripts/docs_workflow_gate.py` extracts every `sh gate` block of the user guide in order and executes them verbatim against a fresh data directory with only the registered resources: eight blocks — setup, project, LFW import, r-01 assessment + fixture batch, protocol freeze + fixture matrix, utility analysis + independent verification (44 checks), cross-matcher + independent verification (234 checks), DET figure + bundle export + reproduction EXACT — exit 0 in 95 s (evidence `atg/evidence/2026-08-17-docs-workflow-gate-01.json`, guide sha recorded).
+**State:** ACCEPTED (cycle 2026-08-17-C23).
+
+### QS-H74 — Beta end-to-end acceptance
+
+**State:** BLOCKED_BY_QS-C21. Every other predecessor (QS-H70–QS-H73) is ACCEPTED and the section-57 chain has been executed end to end on real data by the offline gate and the docs workflow gate; the one remaining input is a registered real externally computed score artifact for QS-C21 (owner input, decision 28). No substitute artifact will be generated.
+
+Historical accepted events QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, and QS-A06.R1M retain their exact recorded counts and hashes in `atg/ledger.jsonl`; current refinements supersede them for reuse without rewriting history. The active accepted evidence set is `{QS-A00, QS-A01, QS-A02, QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03, QS-A03.R1, QS-A04, QS-A04.R1, QS-A04.R2, QS-A05, QS-A06, QS-A06.R1O, QS-A06.R2, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B12.LFW.FULL, QS-B13, QS-B14, QS-C20, QS-C22, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D31.R0, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43, QS-F50, QS-F51, QS-F52, QS-F53, QS-F54, QS-H70, QS-H71, QS-H72, QS-H73}`. Twenty whole capabilities participate in coarse dependency readiness; none is dependency-ready while QS-C21 lacks its real input.
 
 ## Dependency-ready parallel groups
 
 At the capability level:
 
-- at present: QS-H70, QS-H71, QS-H72, and QS-H73 are dependency-ready in parallel (disjoint file ownership); QS-H74 waits for them and for the parked QS-C21; QS-C21 stays parked on a registered real external score artifact (owner input) and blocks only QS-H74;
+- at present: no whole capability is dependency-ready; QS-H74 (beta terminal gate) waits only for the parked QS-C21 — a registered real external score artifact (owner input); every other predecessor is ACCEPTED; QS-C21 stays parked on a registered real external score artifact (owner input) and blocks only QS-H74;
 - in Phase 5: QS-F51, QS-F52, and QS-F53 may proceed in parallel after their predecessors;
 - in Phase 7: QS-H70, QS-H71, QS-H72, and QS-H73 may proceed in parallel when file ownership is disjoint.
 
@@ -1064,7 +1108,7 @@ Known limitation: the accepted evidence children prove only their stated predica
 - **L0:** one product graph from canonical requirements to accepted beta;
 - **L1:** Phase 0 → 1 → 2 → 3 → 4 → 5 → 7 → beta, with Phase 6 post-beta;
 - **L2:** 41-node, 85-edge acyclic capability graph QS-A00 through QS-H74 (v1.6: QS-C21 rewired to feed QS-H74 directly by decision 28); post-beta nodes remain outside the beta DAG;
-- **L3 current frontier:** Phases 0–5 accepted (Phase 2 under decision 28; QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43, QS-F50 through QS-F54) with current accepted evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0; QS-C21 and QS-C25 blocked; superseded resource/domain/execution slices remain in the append-only ledger;
+- **L3 current frontier:** Phases 0–5 and 7 accepted (Phase 2 under decision 28; QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43, QS-F50 through QS-F54, QS-H70 through QS-H73); QS-H74 waits only for QS-C21 with current accepted evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0; QS-C21 and QS-C25 blocked; superseded resource/domain/execution slices remain in the append-only ledger;
 - **future L3 refinements:** created one ready capability at a time by the bounded controller, preserving its L2 input/output interface.
 
 Only the minimal historical subgraph is replaced when a leaf fails. Accepted nodes and their evidence remain frozen.

@@ -246,6 +246,14 @@ CREATE TABLE IF NOT EXISTS bundles (
     manifest_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS purges (
+    purge_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    verified INTEGER NOT NULL,
+    record_json TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS reproductions (
     reproduction_id TEXT PRIMARY KEY,
     project_id TEXT,
@@ -1016,6 +1024,17 @@ class RunStore:
             self._connection.execute("INSERT INTO reproductions (reproduction_id, project_id, original_run_id, reproduction_run_id, bundle_sha256, state, report_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                                      (record["reproduction_id"], record.get("project_id"), record["original_run_id"], record.get("reproduction_run_id"), record.get("bundle_sha256"), record["state"], json.dumps(record, sort_keys=True, default=str), record["created_at"]))
             self._connection.commit()
+
+    def record_purge(self, record: dict[str, Any]) -> None:
+        with self._lock:
+            self._connection.execute("INSERT INTO purges (purge_id, project_id, actor_id, created_at, verified, record_json) VALUES (?, ?, ?, ?, ?, ?)",
+                                     (record["purge_id"], record["project_id"], record["actor_id"], record["created_at"], 1 if record["verified"] else 0, json.dumps(record, sort_keys=True, default=str)))
+            self._connection.commit()
+
+    def purges(self, *, project_id: str | None = None) -> list[dict[str, Any]]:
+        where = " WHERE project_id = ?" if project_id is not None else ""
+        cursor = self._connection.execute(f"SELECT record_json FROM purges{where} ORDER BY created_at", (project_id,) if project_id is not None else ())
+        return [json.loads(row[0]) for row in cursor.fetchall()]
 
     def reproductions(self, *, original_run_id: str | None = None, project_id: str | None = None) -> list[dict[str, Any]]:
         clauses, params = [], []

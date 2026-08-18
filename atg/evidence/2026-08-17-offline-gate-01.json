@@ -1,0 +1,133 @@
+{
+  "data_dir": "/mnt/projects/ofiqgui/var",
+  "ended_at": "2026-08-17T19:26:23-0500",
+  "exit_code": 0,
+  "kind": "QUALSIGHT_OFFLINE_GATE",
+  "project_id": "project:sha256:ec4849f3097c2dfe39ab3923c3790c6aab7f74ce41f90fced22e9ea4a76edca9",
+  "server_log_tail": ".cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n/mnt/projects/ofiqgui/var/upstream/danjun6737/vit.fb6cd56d.py:110: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n/mnt/projects/ofiqgui/var/upstream/danjun6737/vit.fb6cd56d.py:57: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n/mnt/projects/ofiqgui/var/upstream/danjun6737/vit.fb6cd56d.py:62: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(False):\n/mnt/projects/ofiqgui/var/upstream/danjun6737/vit.fb6cd56d.py:68: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n/mnt/projects/ofiqgui/var/upstream/danjun6737/vit.fb6cd56d.py:110: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\nINFO:     127.0.0.1:33864 - \"GET /api/matrices/matrix%3Asha256%3Accf099d68c3d8e4b0f26eae73c8fc5f9b57f658cdb2c126ee555803b02b4dba0 HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:33878 - \"POST /api/projects/project%3Asha256%3Aec4849f3097c2dfe39ab3923c3790c6aab7f74ce41f90fced22e9ea4a76edca9/utility-analyses HTTP/1.1\" 202 Accepted\nINFO:     127.0.0.1:33894 - \"GET /api/utility-analyses/analysis%3Asha256%3Ad98ed037cadd82839856b0872a5de7f2ae514b0339702a80ed7cd0fe66791066 HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:33898 - \"GET /api/utility-analyses/analysis%3Asha256%3Ad98ed037cadd82839856b0872a5de7f2ae514b0339702a80ed7cd0fe66791066 HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:33902 - \"POST /api/projects/project%3Asha256%3Aec4849f3097c2dfe39ab3923c3790c6aab7f74ce41f90fced22e9ea4a76edca9/figures HTTP/1.1\" 201 Created\nINFO:     127.0.0.1:33918 - \"POST /api/projects/project%3Asha256%3Aec4849f3097c2dfe39ab3923c3790c6aab7f74ce41f90fced22e9ea4a76edca9/reports HTTP/1.1\" 201 Created\nINFO:     127.0.0.1:33930 - \"POST /api/projects/project%3Asha256%3Aec4849f3097c2dfe39ab3923c3790c6aab7f74ce41f90fced22e9ea4a76edca9/bundles HTTP/1.1\" 201 Created\nINFO:     127.0.0.1:33940 - \"POST /api/reproductions HTTP/1.1\" 201 Created\nINFO:     127.0.0.1:33956 - \"GET /api/projects/project%3Asha256%3Aec4849f3097c2dfe39ab3923c3790c6aab7f74ce41f90fced22e9ea4a76edca9/purge-scope HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:33968 - \"GET /api/projects/project%3Asha256%3Aec4849f3097c2dfe39ab3923c3790c6aab7f74ce41f90fced22e9ea4a76edca9/audit HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:33974 - \"GET /api/health HTTP/1.1\" 200 OK\nINFO:     Shutting down\nINFO:     Waiting for application shutdown.\nINFO:     Application shutdown complete.\nINFO:     Finished server process [251365]\n",
+  "started_at": "2026-08-17T19:25:47-0500",
+  "steps": [
+    {
+      "actor": "local-user:aaron",
+      "application_version": "0.1.0",
+      "network_guard": {
+        "installed": true,
+        "refused_attempts": []
+      },
+      "ok": true,
+      "step": "health"
+    },
+    {
+      "bytes": 559,
+      "ok": true,
+      "step": "console-served-from-product"
+    },
+    {
+      "ok": true,
+      "project_id": "project:sha256:ec4849f3097c2dfe39ab3923c3790c6aab7f74ce41f90fced22e9ea4a76edca9",
+      "step": "project-created"
+    },
+    {
+      "dataset_id": "dataset:sha256:0ad326aad5ee85c1d78486fb3eb1a544e2c3e29039395f02e0923a20b29e0f37",
+      "ok": true,
+      "samples": 13233,
+      "step": "lfw-imported"
+    },
+    {
+      "ok": true,
+      "run_id": "run:sha256:4304d2dfd01715cce786e547ac6f1c49ee1d8a286a5f26a6d6acf967b54238e4",
+      "step": "single-image-assessment",
+      "unified_quality_score": 79
+    },
+    {
+      "job_id": "job:sha256:cdf5864e4d18b7161da1593d6933f2a27de59c2879503e1c6dd2ea2223766ddd",
+      "ok": true,
+      "step": "batch-started"
+    },
+    {
+      "failed": 0,
+      "measured": 16,
+      "ok": true,
+      "step": "batch-completed"
+    },
+    {
+      "ok": true,
+      "pairs": 6000,
+      "protocol_id": "protocol:sha256:6e8386cf6a1e7ab966767dfb91cd6701773ae42ca823c8c74eb15a15c0517542",
+      "step": "protocol-frozen"
+    },
+    {
+      "matrix_id": "matrix:sha256:ccf099d68c3d8e4b0f26eae73c8fc5f9b57f658cdb2c126ee555803b02b4dba0",
+      "ok": true,
+      "step": "matrix-started"
+    },
+    {
+      "leaves": 6,
+      "ok": true,
+      "step": "matrix-completed"
+    },
+    {
+      "analysis_id": "analysis:sha256:d98ed037cadd82839856b0872a5de7f2ae514b0339702a80ed7cd0fe66791066",
+      "ok": true,
+      "step": "utility-started"
+    },
+    {
+      "ok": true,
+      "run_id": "run:sha256:4778932b48e3c22c7e311158cd7d1fc92587d5197cd0afd9ebe5a807e166177c",
+      "step": "utility-completed"
+    },
+    {
+      "figure_id": "figure:sha256:e1e188181f369e974abaa4392f9c3b3bb6503e02a37778768583d641af533594",
+      "ok": true,
+      "sha256": {
+        "csv": "abc6cf3753606ea0e2feddc2798ee9077150916239654b9a26c569e121175bff",
+        "pdf": "f8c34d32dbf88c21f419168052a5b71d7c03ade40f4c5e57f2bb4309ac375610",
+        "png": "87399862cd5bc6090f6671f5dc596c8b3423de3199a0e4443b9122e14fa61e3f",
+        "svg": "bd0189e06100512d521abb740c22f60a67f15a727d87e85e28493ac89e46e60c"
+      },
+      "step": "figure-rendered"
+    },
+    {
+      "ok": true,
+      "pdf_sha256": "9aa0503a5b67d8b0c79602b83ae3a613182e758b30765a4a854155ec0140e768",
+      "report_id": "report:sha256:46bb936679a22de6be51a433e7fba0c7e329fd843f734ad4289c1299cd43c8dc",
+      "step": "report-built"
+    },
+    {
+      "bundle_id": "bundle:sha256:f4e596cc92a6e03eaf5983e5f9781e7738afc722586737e2a4cba745cca8e9a2",
+      "ok": true,
+      "sha256": "bf1f62949f87cc9bc73d8e8f24dabd22d080c10e66cc1ab9b3fde7fc37263124",
+      "step": "bundle-exported"
+    },
+    {
+      "compared_values": 1026,
+      "ok": true,
+      "state": "EXACT",
+      "step": "reproduced"
+    },
+    {
+      "directories": 11,
+      "files": 25,
+      "ok": true,
+      "step": "purge-scope-listed"
+    },
+    {
+      "event_types": [
+        "ARTIFACT_EXPORTED",
+        "CONFIGURATION_CHANGED",
+        "DATASET_IMPORTED",
+        "PROJECT_CREATED",
+        "RUN_COMPLETED",
+        "RUN_STARTED"
+      ],
+      "events": 19,
+      "ok": true,
+      "step": "audit-attributed"
+    },
+    {
+      "ok": true,
+      "refused": [],
+      "step": "network-guard-refused-nothing"
+    }
+  ]
+}

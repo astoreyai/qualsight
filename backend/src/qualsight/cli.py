@@ -91,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
     figure.add_argument("--project-id", required=True)
     figure.add_argument("--kind", required=True)
     figure.add_argument("--params", default="{}", help="JSON object of builder parameters")
+    setup = sub.add_parser("setup", help="installation-time acquisition of pinned upstream matcher sources into the data directory (the only sanctioned network use); verifies the registry afterwards")
+    setup.add_argument("--verify-registry", action="store_true", help="also stream-verify every registered artifact hash (slow for LFW)")
     args = parser.parse_args(argv)
 
     settings = Settings.from_environment()
@@ -188,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
                 engine=engine, store=store, project=project, dataset=dataset, samples=[s for s in samples if s is not None],
                 purpose_scope=args.scope, job_root=settings.data_dir / "jobs", chunks=args.chunks, selection_rule=rule,
             )
-            print(json.dumps({"job_id": job.job_id, "total": len(job.samples), "chunks_requested": job.chunks_requested, "job_dir": str(job.job_dir)}, indent=2), flush=True)
+            print(json.dumps({"job_id": job.job_id, "total": len(job.samples), "chunks_requested": job.chunks_requested, "job_dir": str(job.job_dir)}, indent=2), file=sys.stderr, flush=True)
             progress = job.run()
             store.finish_job(job.job_id, job.ended_at.isoformat() if job.ended_at else "", job.state)
             print(json.dumps({"job_id": progress.job_id, "state": progress.state, "assessed": progress.assessed, "failed": progress.failed, "integrity_failures": progress.integrity_failures, "not_assessed": progress.not_assessed, "run_id": progress.run_id, "resource_use": progress.resource_use, "parquet_path": str(job.parquet_path)}, indent=2))
@@ -230,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
                 registry=engine.registry, registry_path=settings.registry_path, repository_root=settings.repository_root, upstream=upstream,
                 store=store, project=project, dataset=dataset, protocol=protocol, pairs=pairs, job_root=settings.data_dir / "matrix", selection_rule=rule,
             )
-            print(json.dumps({"matrix_id": job.matrix_id, "pairs": len(job.pairs), "samples": len(job.sample_ids), "job_dir": str(job.job_dir)}, indent=2), flush=True)
+            print(json.dumps({"matrix_id": job.matrix_id, "pairs": len(job.pairs), "samples": len(job.sample_ids), "job_dir": str(job.job_dir)}, indent=2), file=sys.stderr, flush=True)
             leaves = job.run()
             summary = []
             for leaf in leaves:
@@ -275,6 +277,19 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             result = job.run()
             print(json.dumps({"analysis_id": result.analysis_id, "run_id": result.run.run_id, "directory": str(result.directory), "summary": result.summary}, indent=2))
+            return 0
+        if args.command == "setup":
+            from .matchers.upstream import UpstreamSources
+
+            upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir)
+            acquired = upstream.acquire()
+            summary = {"upstream_sources": {key: str(path) for key, path in acquired.items()}, "data_dir": str(settings.data_dir), "registry": str(settings.registry_path)}
+            if args.verify_registry:
+                import subprocess
+
+                result = subprocess.run([sys.executable, str(settings.repository_root / "scripts" / "validate_resource_registry.py"), str(settings.registry_path)], capture_output=True, text=True, check=False)
+                summary["registry_validation"] = {"exit_code": result.returncode, "output": result.stdout.strip()[-400:] + result.stderr.strip()[-400:]}
+            print(json.dumps(summary, indent=2))
             return 0
         if args.command == "bundle-export":
             from .reporting.bundle import export_bundle

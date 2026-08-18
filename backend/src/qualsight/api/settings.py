@@ -21,6 +21,8 @@ class Settings:
     data_dir: Path
     runtime_resource_id: str
     input_resource_ids: tuple[str, ...]
+    actor_id: str = ""  # configured single user (QUALSIGHT_ACTOR); empty → local-user:<login>
+    network_guard: bool = False  # QUALSIGHT_NETWORK_GUARD=1 refuses every non-loopback socket connection at runtime
 
     @classmethod
     def from_environment(cls, repository_root: Path | None = None) -> Settings:
@@ -40,7 +42,15 @@ class Settings:
             data_dir=data_dir,
             runtime_resource_id=runtime,
             input_resource_ids=inputs,
+            actor_id=os.environ.get("QUALSIGHT_ACTOR", ""),
+            network_guard=os.environ.get("QUALSIGHT_NETWORK_GUARD", "") in {"1", "true", "TRUE", "yes"},
         )
+
+    @property
+    def actor(self) -> str:
+        import getpass
+
+        return self.actor_id or f"local-user:{getpass.getuser()}"
 
     @property
     def database_path(self) -> Path:
