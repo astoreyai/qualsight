@@ -2,7 +2,7 @@
 
 **Graph version:** v1.6  
 **Date:** August 17, 2026  
-**State:** Phases 0–4 are complete (Phase 2 under owner decision 28): QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, and QS-E40 through QS-E43 are accepted whole capabilities; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 remains blocked on a real external score artifact and is parked as a direct predecessor of QS-H74; QS-F50 is dependency-ready and Phases 5 and 7 are the owner-selected next work  
+**State:** Phases 0–5 are complete (Phase 2 under owner decision 28): QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43, and QS-F50 through QS-F54 are accepted whole capabilities; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 remains blocked on a real external score artifact and is parked as a direct predecessor of QS-H74; QS-H70 through QS-H73 are dependency-ready and Phase 7 is the owner-selected next work  
 **Loop controller:** [ATG_LOOP.md](./ATG_LOOP.md)  
 **Canonical product requirements:** [PRD.md](./PRD.md)  
 **Evidence-only companion:** [PLAN.md](./PLAN.md)
@@ -363,15 +363,15 @@ Statuses in this table are graph states, not claims of implementation.
 | QS-E41 | §22 | Cross-matcher and preprocessing metric engine | Matcher contrasts hold preprocessing fixed; preprocessing contrasts hold matcher and protocol fixed; ERC overlays, differences, error overlap, interactions, and paired uncertainty preserve both identities | QS-D32, QS-E40 | ACCEPTED |
 | QS-E42 | §§22, 33–34 | Cross-matcher failure workbench | Every disagreement resolves to real comparisons, permitted images, quality values, thresholds, matcher provenance, preprocessing provenance, and annotations | QS-C24, QS-E41 | ACCEPTED |
 | QS-E43 | §56 Phase 4 | Cross-matcher accepted artifact | The selected matcher set completes fixed-condition matcher comparisons and fixed-matcher preprocessing comparisons with traceable utility differences and failure evidence | QS-E41, QS-E42 | ACCEPTED |
-| QS-F50 | §§35–36, 40 | Provenance-bearing figure artifacts | PNG, SVG, and PDF outputs link to source rows, Run, metric definition, thresholds, configuration, and exportable values | QS-E43 | DEPENDENCY_READY |
-| QS-F51 | §37 | Saved dashboards | Saved layout reloads exactly and every panel retains the underlying Run and provenance references | QS-F50 | BLOCKED_BY_QS-F50 |
-| QS-F52 | §§38–40 | Reports and exports | PDF, HTML, print, CSV, JSON, Parquet, SVG, PNG, and PDF outputs enforce data classification and reconcile to source results | QS-F50 | BLOCKED_BY_QS-F50 |
-| QS-F53 | §§41–42 | Reproduction bundle and mode | Bundle checksums validate; restricted images are excluded; rerun status is EXACT, WITHIN_TOLERANCE, DIFFERENT, MISSING_DEPENDENCY, MISSING_DATA, or BLOCKED based on observed evidence | QS-A03, QS-E43 | BLOCKED_BY_PREDECESSORS |
-| QS-F54 | §56 Phase 5 | Reporting accepted artifact | Real cross-matcher Run produces dashboard, report, figures, tabular exports, and a validated reproduction bundle | QS-F51, QS-F52, QS-F53 | BLOCKED_BY_PREDECESSORS |
-| QS-H70 | §§48–50, 56 Phase 7 | Threat model and verified local data controls | No runtime cloud/image transmission; secrets absent from logs; purge scope is tested and described as application-level verified purge | QS-F54 | BLOCKED_BY_QS-F54 |
-| QS-H71 | §§6, 50, 55 | Single-user attribution and audit | Every meaningful scientific action records configured user and timestamp; optional local-account mode is not required for this gate | QS-F54 | BLOCKED_BY_QS-F54 |
-| QS-H72 | §§46–48, 56 Phase 7 | Offline installation and packaging | Installation on the controlled workstation succeeds from pinned resources and the product runs with network disabled after installation | QS-F54 | BLOCKED_BY_QS-F54 |
-| QS-H73 | §§38, 56 Phase 7 | Operating and scientific documentation | A researcher completes the canonical workflow using only shipped documentation and real registered resources | QS-F54 | BLOCKED_BY_QS-F54 |
+| QS-F50 | §§35–36, 40 | Provenance-bearing figure artifacts | PNG, SVG, and PDF outputs link to source rows, Run, metric definition, thresholds, configuration, and exportable values | QS-E43 | ACCEPTED |
+| QS-F51 | §37 | Saved dashboards | Saved layout reloads exactly and every panel retains the underlying Run and provenance references | QS-F50 | ACCEPTED |
+| QS-F52 | §§38–40 | Reports and exports | PDF, HTML, print, CSV, JSON, Parquet, SVG, PNG, and PDF outputs enforce data classification and reconcile to source results | QS-F50 | ACCEPTED |
+| QS-F53 | §§41–42 | Reproduction bundle and mode | Bundle checksums validate; restricted images are excluded; rerun status is EXACT, WITHIN_TOLERANCE, DIFFERENT, MISSING_DEPENDENCY, MISSING_DATA, or BLOCKED based on observed evidence | QS-A03, QS-E43 | ACCEPTED |
+| QS-F54 | §56 Phase 5 | Reporting accepted artifact | Real cross-matcher Run produces dashboard, report, figures, tabular exports, and a validated reproduction bundle | QS-F51, QS-F52, QS-F53 | ACCEPTED |
+| QS-H70 | §§48–50, 56 Phase 7 | Threat model and verified local data controls | No runtime cloud/image transmission; secrets absent from logs; purge scope is tested and described as application-level verified purge | QS-F54 | DEPENDENCY_READY |
+| QS-H71 | §§6, 50, 55 | Single-user attribution and audit | Every meaningful scientific action records configured user and timestamp; optional local-account mode is not required for this gate | QS-F54 | DEPENDENCY_READY |
+| QS-H72 | §§46–48, 56 Phase 7 | Offline installation and packaging | Installation on the controlled workstation succeeds from pinned resources and the product runs with network disabled after installation | QS-F54 | DEPENDENCY_READY |
+| QS-H73 | §§38, 56 Phase 7 | Operating and scientific documentation | A researcher completes the canonical workflow using only shipped documentation and real registered resources | QS-F54 | DEPENDENCY_READY |
 | QS-H74 | §§55, 57–60 | Beta end-to-end acceptance | The complete section-57 workflow runs without manual Python analysis and every reportable result satisfies sections 58 and 60 | QS-C21, QS-H70, QS-H71, QS-H72, QS-H73 | BLOCKED_BY_PREDECESSORS |
 
 ## Post-beta branch
@@ -395,7 +395,7 @@ QS-X61 never authorizes fabricated identities, labels, scores, or source samples
 
 ## Current atomic frontier
 
-Phases 0–4 are complete (Phase 2 under owner decision 28): whole capabilities QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, and QS-E40 through QS-E43 are ACCEPTED. Current accepted evidence children are QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0. The ledger preserves superseded resource, domain, and execution events as history, but their stale registry and fixture-byte claims are not reused as current evidence. Gates marked *executing* launch the registered installed OFIQ v1.1.2 runtime on registered inputs under the owner use-permission receipt; every other gate is static. Every Node command below assumes `PATH=/usr/bin:$PATH` so that Node 20.20.2 is selected.
+Phases 0–5 are complete (Phase 2 under owner decision 28): whole capabilities QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43, and QS-F50 through QS-F54 are ACCEPTED. Current accepted evidence children are QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0. The ledger preserves superseded resource, domain, and execution events as history, but their stale registry and fixture-byte claims are not reused as current evidence. Gates marked *executing* launch the registered installed OFIQ v1.1.2 runtime on registered inputs under the owner use-permission receipt; every other gate is static. Every Node command below assumes `PATH=/usr/bin:$PATH` so that Node 20.20.2 is selected.
 
 ### QS-A00 — Authority and requirement registry
 
@@ -939,13 +939,60 @@ python3 scripts/validate_atg_documents.py
 **Acceptance:** the selected matcher set completed the six fixed-condition matcher comparisons and the three fixed-matcher preprocessing comparisons on the real protocol with traceable utility differences (paired AU-ERC intervals) and failure evidence (overlap cells resolving to pairs and images), recorded as an immutable analysis Run and independently verified; the API test exercises the same path on the fixture pairs, including annotation persistence and the verify script.
 **State:** ACCEPTED (cycle 2026-08-17-C21). Backend gate 78/78, root gate 37/37 (recorded in the ledger).
 
-Historical accepted events QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, and QS-A06.R1M retain their exact recorded counts and hashes in `atg/ledger.jsonl`; current refinements supersede them for reuse without rewriting history. The active accepted evidence set is `{QS-A00, QS-A01, QS-A02, QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03, QS-A03.R1, QS-A04, QS-A04.R1, QS-A04.R2, QS-A05, QS-A06, QS-A06.R1O, QS-A06.R2, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B12.LFW.FULL, QS-B13, QS-B14, QS-C20, QS-C22, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D31.R0, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43}`. Twenty whole capabilities participate in coarse dependency readiness; none is dependency-ready while QS-C21 lacks its real input.
+### QS-F50 — Provenance-bearing figure artifacts
+
+**Safe gate**
+
+~~~sh
+env PYTHONPATH=src:.. QUALSIGHT_INPUT_RESOURCE_IDS="ofiq-r-01-conformance-input,lfw-funneled-local-candidate" /home/aaron/.local/bin/uv run --directory backend --frozen --offline python -m qualsight.cli figure --project-id project:sha256:5564b31f9da7c3b89895a449c07a049a9bafa222d10543ff143ecc0f369b8d52 --kind det_overlay --params '{"matrix_id": "matrix:sha256:3769cdafbb28645c5ceeed2abb0774a2a9e2a64921078b9b6002852241d7e3be"}'
+env PYTHONPATH=src:.. /home/aaron/.local/bin/uv run --directory backend --frozen --offline python -m unittest -v tests.api.test_matcher_api_real.RealMatcherApiTests.test_figures_dashboards_reports_exports_and_reproduction_bundles_on_the_real_fixture
+~~~
+
+**Acceptance:** `qualsight.reporting.figures` builds nine figure kinds only from recorded evidence (DET and ROC overlays, operating points, score distributions, ERC overlay, risk-coverage, FNMR | quality bin with hatched unsupported bins, quality histogram, error overlap) and renders each with matplotlib 3.10.7 (Agg; pinned in `backend/pyproject.toml` / `uv.lock`) to `figure.png`, `figure.svg`, `figure.pdf`, `figure.csv` (every plotted point with its series and source Run) and `figure.provenance.json` (content-addressed figure id, sources with Run ids and artifact hashes, metric definitions, thresholds by kind, axes, generator, file hashes). Re-requesting the same specification returns the same figure id and bytes. API: `POST /api/projects/{id}/figures`, `GET /api/figures/{id}[/file?format=png|svg|pdf|csv|provenance]`. Real evidence: nine figures over the real matrix, six utility analyses, the cross-matcher analysis, and the full batch (ids `2295409…`, `930a600…`, `6241a22…`, `9bf42da…`, `c4b4661…`, `0615f61…`, `a14ff50…`, `d1e4cde…`, `0e8ca98…`).
+**State:** ACCEPTED (cycle 2026-08-17-C22).
+
+### QS-F51 — Saved dashboards
+
+**Acceptance:** `qualsight.reporting.dashboards` saves a named, templated, versioned layout of panels (figure, operating_points, utility_summary, policy_table, cross_contrasts, dataset_statistics) as a content-addressed append-only project artifact; every panel reference is validated before saving; `GET /api/dashboards/{id}` reloads the byte-identical layout (`layout_sha256`) and resolves every panel to its current data together with its Run references. Real evidence: dashboard `1e41ab08…` (FIQA Evaluation, 8 panels over the real figures, the AS operating points, a policy table, the cross-matcher contrasts, and the LFW dataset statistics) reloaded with identical layout; the API test asserts layout equality and Run references on the fixture; observation 08 saved and reloaded a four-panel dashboard from the console ("layout identical").
+**State:** ACCEPTED (cycle 2026-08-17-C22).
+
+### QS-F52 — Reports and exports
+
+**Acceptance:** `qualsight.reporting.reports.ReportBuilder` assembles a report from recorded evidence — title, executive summary, dataset, protocol, quality engine, matcher Runs (conditions never pooled), operating points labelled MATCHER THRESHOLD, utility tables labelled with the QUALITY POLICY THRESHOLD, statistical methods and intervals, cross-matcher contrasts, figures (SVG bytes embedded), failure examples, limitations, and provenance (Run ids and evidence hashes, software versions, model hashes, dataset hashes) — as print-ready HTML (`@media print`), PDF (matplotlib PdfPages), and JSON. Data classification is enforced: images are embedded only under `image_policy = INCLUDE_PERMITTED` for PUBLIC/PRIVATE datasets and are always withheld for RESTRICTED sources; the report records images embedded/withheld. `qualsight.reporting.exports` writes quality results, matcher scores / comparison records, embeddings (rows reconciled to the successful-sample order of the leaf), metric tables, statistical results, and annotations as CSV/JSON/Parquet with Run identifiers on every row and a provenance sidecar; RESTRICTED sources are refused. Real evidence: report `931d69a0…` over the six Runs, six utility analyses, the cross-matcher analysis, five figures, and four A-only AN~AS failure pairs with eight LFW images embedded under INCLUDE_PERMITTED (PDF sha `c8a5c1ca…`); 21 exports (7 categories × 3 formats) including 13,233 quality rows and 7,701 × 512 embeddings.
+**State:** ACCEPTED (cycle 2026-08-17-C22).
+
+### QS-F53 — Reproduction bundle and mode
+
+**Safe gate**
+
+~~~sh
+env PYTHONPATH=src:.. QUALSIGHT_INPUT_RESOURCE_IDS="ofiq-r-01-conformance-input,lfw-funneled-local-candidate" /home/aaron/.local/bin/uv run --directory backend --frozen --offline python -m qualsight.cli bundle-export --run-id <run id>
+env PYTHONPATH=src:.. QUALSIGHT_INPUT_RESOURCE_IDS="ofiq-r-01-conformance-input,lfw-funneled-local-candidate" /home/aaron/.local/bin/uv run --directory backend --frozen --offline python -m qualsight.cli reproduce-bundle var/bundles/<bundle>.qsexp
+~~~
+
+**Acceptance:** `qualsight.reporting.bundle.export_bundle` writes a portable `.qsexp` (zip) with manifest.json, experiment.yaml, protocol.yaml, dataset-manifest.json (paths and hashes only — no image bytes), environment.json, metrics.json, results.parquet, figures/, tables/, checksums.sha256, README.md; `reproduce_bundle` follows import → validate checksums → validate dependencies (registry states) → validate model versions (byte hashes) → validate input hashes (source Runs / samples) → execute → compare, and reports EXACT / WITHIN_TOLERANCE / DIFFERENT / MISSING_DEPENDENCY / MISSING_DATA / BLOCKED from observed evidence, never modifying the target. Re-execution is real for every Run kind: utility and cross-matcher analyses re-run their jobs from the recorded sources; matcher-leaf bundles re-detect, re-align, and re-embed the bundled pairs through the frozen matcher runtime (scores compared at 1e-5, metrics at 1e-6); quality bundles re-run the registered OFIQ engine over the bundled samples. Real evidence: bundles `a86d3566…` (utility AS), `9be9b4f0…` (cross-matcher), `ff98d746…` (matcher leaf AS, 15.5 MB); reproductions `ae044f14…` EXACT (2,590 values), `6c706f2a…` EXACT (18,809 values), and `131897af…` EXACT after re-embedding 7,701 images (27,093 values incl. all 6,000 scores, 138 s); the earlier attempts recorded in the same table (`ee1996b5…` DIFFERENT on prose-note text only, `8febac2f…` BLOCKED before matcher re-execution existed, `b3f9c7f6…` DIFFERENT on tuple-vs-list encoding) are kept as history of the comparator's own defects. The API test reproduces a fixture utility bundle (EXACT), a fixture matcher-leaf bundle (EXACT/WITHIN_TOLERANCE), and a tampered bundle (BLOCKED at checksums).
+**State:** ACCEPTED (cycle 2026-08-17-C22).
+
+### QS-F54 — Phase-5 gate (reporting accepted artifact)
+
+**Safe gate**
+
+~~~sh
+python3 scripts/observe_console.py --screenshot-dir <outside the repository> --observation atg/evidence/2026-08-17-console-observation-08.json
+env PYTHONPATH=src:.. /home/aaron/.local/bin/uv run --directory backend --frozen --offline python -m unittest discover -s tests -q
+python3 -m unittest discover -s tests -q
+~~~
+
+**Acceptance:** the console's Figures · dashboards · reports panel (frontend/src/Reports.tsx) renders figures with their provenance facts and export links, saves and reloads a dashboard, builds an HTML+PDF report under the chosen image policy, links CSV/JSON/Parquet exports for every recorded Run, exports bundles, and runs reproductions showing their state. Observation 08 (fixture, real Chromium): two figures rendered, four-panel dashboard saved and reloaded with identical layout, one report row (HTML/PDF/JSON), one bundle, reproduction EXACT; exit 0. The real cross-matcher Run produced dashboard, report, figures, tabular exports, and a validated bundle.
+**State:** ACCEPTED (cycle 2026-08-17-C22). Backend gate 79/79, root gate 37/37 (recorded in the ledger).
+
+Historical accepted events QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, and QS-A06.R1M retain their exact recorded counts and hashes in `atg/ledger.jsonl`; current refinements supersede them for reuse without rewriting history. The active accepted evidence set is `{QS-A00, QS-A01, QS-A02, QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03, QS-A03.R1, QS-A04, QS-A04.R1, QS-A04.R2, QS-A05, QS-A06, QS-A06.R1O, QS-A06.R2, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B12.LFW.FULL, QS-B13, QS-B14, QS-C20, QS-C22, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D31.R0, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43, QS-F50, QS-F51, QS-F52, QS-F53, QS-F54}`. Twenty whole capabilities participate in coarse dependency readiness; none is dependency-ready while QS-C21 lacks its real input.
 
 ## Dependency-ready parallel groups
 
 At the capability level:
 
-- at present: QS-F50 is dependency-ready; QS-F51–QS-F54 and QS-H70–QS-H73 follow in dependency order; QS-C21 stays parked on a registered real external score artifact (owner input) and blocks only QS-H74;
+- at present: QS-H70, QS-H71, QS-H72, and QS-H73 are dependency-ready in parallel (disjoint file ownership); QS-H74 waits for them and for the parked QS-C21; QS-C21 stays parked on a registered real external score artifact (owner input) and blocks only QS-H74;
 - in Phase 5: QS-F51, QS-F52, and QS-F53 may proceed in parallel after their predecessors;
 - in Phase 7: QS-H70, QS-H71, QS-H72, and QS-H73 may proceed in parallel when file ownership is disjoint.
 
@@ -1017,7 +1064,7 @@ Known limitation: the accepted evidence children prove only their stated predica
 - **L0:** one product graph from canonical requirements to accepted beta;
 - **L1:** Phase 0 → 1 → 2 → 3 → 4 → 5 → 7 → beta, with Phase 6 post-beta;
 - **L2:** 41-node, 85-edge acyclic capability graph QS-A00 through QS-H74 (v1.6: QS-C21 rewired to feed QS-H74 directly by decision 28); post-beta nodes remain outside the beta DAG;
-- **L3 current frontier:** Phases 0–4 accepted (Phase 2 under decision 28; QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43) with current accepted evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0; QS-C21 and QS-C25 blocked; superseded resource/domain/execution slices remain in the append-only ledger;
+- **L3 current frontier:** Phases 0–5 accepted (Phase 2 under decision 28; QS-A00 through QS-A10, QS-B10 through QS-B14, QS-C20, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30 through QS-D34, QS-E40 through QS-E43, QS-F50 through QS-F54) with current accepted evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0; QS-C21 and QS-C25 blocked; superseded resource/domain/execution slices remain in the append-only ledger;
 - **future L3 refinements:** created one ready capability at a time by the bounded controller, preserving its L2 input/output interface.
 
 Only the minimal historical subgraph is replaced when a leaf fails. Accepted nodes and their evidence remain frozen.

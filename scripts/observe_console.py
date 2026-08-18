@@ -303,6 +303,38 @@ def main() -> int:
                     "detail_heading": page.inner_text("[data-testid=cross-detail] h3"),
                 }
             )
+            # QS-F50..F53: figures, dashboard save/reload, report build, bundle export, reproduction.
+            page.wait_for_function("() => !document.querySelector('[data-testid=figure-det]')?.disabled", timeout=60_000)
+            page.click("[data-testid=figure-det]")
+            page.wait_for_selector("[data-testid=figure-detail] img", timeout=120_000)
+            page.click("[data-testid=figure-erc]")
+            page.wait_for_function("() => document.querySelectorAll('[data-testid=figure-thumb]').length >= 2", timeout=120_000)
+            page.wait_for_function("() => { const i = document.querySelector('[data-testid=figure-detail] img'); return !!i && i.complete && i.naturalWidth > 0; }", timeout=60_000)
+            figure_facts = page.inner_text("[data-testid=figure-detail] dl")
+            page.click("[data-testid=dashboard-save]")
+            page.wait_for_selector("[data-testid=dashboard-panel]", timeout=120_000)
+            dashboard_panels = page.evaluate("() => document.querySelectorAll('[data-testid=dashboard-panel]').length")
+            dashboard_message = page.inner_text("[data-testid=project-message]") if page.query_selector("[data-testid=project-message]") else None
+            page.select_option("[data-testid=report-image-policy]", "INCLUDE_PERMITTED")
+            page.click("[data-testid=report-build]")
+            page.wait_for_function("() => document.querySelectorAll('[data-testid=report-table] tr').length >= 1", timeout=300_000)
+            report_rows = page.evaluate("() => Array.from(document.querySelectorAll('[data-testid=report-table] tr')).map(r => r.innerText)")
+            page.click("[data-testid=bundle-export-analysis]")
+            page.wait_for_function("() => document.querySelectorAll('[data-testid=bundle-table] tr').length >= 1", timeout=120_000)
+            page.click("[data-testid=reproduce]")
+            page.wait_for_selector("[data-testid=reproduction-state]", timeout=300_000)
+            reproduction_states = page.evaluate("() => Array.from(document.querySelectorAll('[data-testid=reproduction-state]')).map(e => e.innerText)")
+            observation["steps"].append(
+                {
+                    "step": "reports",
+                    "figure_facts": figure_facts,
+                    "figures": page.evaluate("() => document.querySelectorAll('[data-testid=figure-thumb]').length"),
+                    "dashboard_panels": dashboard_panels,
+                    "dashboard_message": dashboard_message,
+                    "report_rows": report_rows,
+                    "reproduction_states": reproduction_states,
+                }
+            )
             projects_api = json.load(urllib.request.urlopen(f"http://127.0.0.1:{API_PORT}/api/projects"))  # noqa: S310
             console_project = next((p for p in projects_api if p["name"] == "Console lifecycle observation"), None)
             observation["console_project"] = (

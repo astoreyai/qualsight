@@ -227,7 +227,7 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertEqual(again.status_code, 200)
         self.assertTrue(again.json()["already_recorded"])
         listed = self.client.get(f"/api/projects/{self.project_id}/utility-analyses").json()
-        self.assertEqual([item["analysis_id"] for item in listed], [analysis_id])
+        self.assertIn(analysis_id, [item["analysis_id"] for item in listed])
 
     def test_cross_matcher_contrasts_hold_identities_fixed_and_resolve_disagreements_to_pairs(self) -> None:
         """QS-E40–QS-E42 on the real fixture: matcher sets, nine contrasts, overlap counts verified, workbench pairs and annotations."""
@@ -303,6 +303,108 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertIn("CROSS_MATCHER_VERIFIED", verified.stdout)
         # Re-posting returns the recorded analysis.
         self.assertTrue(self.client.post(f"/api/projects/{self.project_id}/cross-matcher", json=body).json()["already_recorded"])
+
+    def test_figures_dashboards_reports_exports_and_reproduction_bundles_on_the_real_fixture(self) -> None:
+        """QS-F50–QS-F53: provenance-bearing figures, exact dashboard reload, classified report, traceable exports, bundle + reproduction states."""
+
+        import zipfile
+
+        job = self._quality_job()
+        leaf = self.status["leaves"][0]
+        # A utility analysis to draw from (recorded once per class by the utility test or here).
+        started = self.client.post(f"/api/projects/{self.project_id}/utility-analyses", json={"matcher_run_id": leaf["run_id"], "quality_job_id": job["job_id"], "matcher_threshold": 0.8, "quality_threshold": 40.0, "bootstrap_replicates": 50, "seed": 11})
+        self.assertIn(started.status_code, (200, 202), started.text)
+        analysis_id = started.json()["analysis_id"]
+        deadline = time.monotonic() + 300
+        while time.monotonic() < deadline:
+            status = self.client.get(f"/api/utility-analyses/{analysis_id}").json()
+            if status["state"] in {"COMPLETED", "FAILED"}:
+                break
+            time.sleep(0.5)
+        self.assertEqual(status["state"], "COMPLETED", status)
+        # Figures: PNG/SVG/PDF/CSV + provenance sidecar; content-addressed; every series names its source Run.
+        figures = {}
+        for kind, params in (("det_overlay", {"matrix_id": self.matrix_id}), ("operating_points", {"matrix_id": self.matrix_id}), ("score_distributions", {"run_id": leaf["run_id"], "bins": 10}), ("erc_overlay", {"analysis_ids": [analysis_id]}), ("quality_conditioned_fnmr", {"analysis_id": analysis_id}), ("quality_histogram", {"job_id": job["job_id"], "bins": 10})):
+            response = self.client.post(f"/api/projects/{self.project_id}/figures", json={"kind": kind, "parameters": params})
+            self.assertEqual(response.status_code, 201, response.text)
+            figures[kind] = response.json()
+        det = figures["det_overlay"]
+        self.assertEqual(len(det["source_run_ids"]), 6)
+        for fmt in ("png", "svg", "pdf", "csv", "provenance"):
+            file_response = self.client.get(det["files"][fmt])
+            self.assertEqual(file_response.status_code, 200, fmt)
+        svg = self.client.get(det["files"]["svg"]).text
+        self.assertIn("<svg", svg)
+        provenance = self.client.get(det["files"]["provenance"]).json()
+        self.assertEqual(provenance["metric_definitions"][0], ["biometric.verification.det", "1.0.0"])
+        self.assertTrue(all(t["kind"] == "MATCHER_THRESHOLD" for t in provenance["thresholds"]))
+        again = self.client.post(f"/api/projects/{self.project_id}/figures", json={"kind": "det_overlay", "parameters": {"matrix_id": self.matrix_id}}).json()
+        self.assertEqual(again["figure_id"], det["figure_id"])
+        # Dashboard: saved layout reloads exactly with every panel's Run references.
+        panels = [{"kind": "figure", "ref": det["figure_id"]}, {"kind": "figure", "ref": figures["erc_overlay"]["figure_id"]}, {"kind": "operating_points", "ref": leaf["run_id"]}, {"kind": "policy_table", "ref": analysis_id}]
+        saved = self.client.post(f"/api/projects/{self.project_id}/dashboards", json={"name": "fixture dashboard", "template": "FIQA Evaluation", "columns": 2, "panels": panels})
+        self.assertEqual(saved.status_code, 201, saved.text)
+        loaded = self.client.get(f"/api/dashboards/{saved.json()['dashboard_id']}").json()
+        self.assertEqual(loaded["layout"], saved.json()["layout"])
+        self.assertEqual([p["kind"] for p in loaded["panels"]], [p["kind"] for p in panels])
+        self.assertTrue(all(p["run_ids"] for p in loaded["panels"]))
+        self.assertIn(leaf["run_id"], loaded["panels"][2]["run_ids"])
+        # Report: HTML + PDF + JSON; failure examples with images only under the permitted policy (LFW is PRIVATE), never for RESTRICTED.
+        spec = {"title": "fixture report", "executive_summary": "gate report over the fixture pairs", "dataset_id": self.dataset_id, "protocol_id": self.protocol_id, "quality_job_id": job["job_id"], "matrix_id": self.matrix_id, "utility_analysis_ids": [analysis_id],
+                "figure_ids": [det["figure_id"], figures["erc_overlay"]["figure_id"]], "failure_examples": {"analysis_id": analysis_id, "limit": 3}, "image_policy": "EXCLUDE"}
+        report = self.client.post(f"/api/projects/{self.project_id}/reports", json={"spec": spec})
+        self.assertEqual(report.status_code, 201, report.text)
+        body = report.json()
+        self.assertEqual(body["images_embedded"], 0)
+        html_text = self.client.get(body["links"]["html"]).text
+        self.assertIn("<svg", html_text)
+        self.assertIn("MATCHER THRESHOLD", html_text)
+        self.assertIn(leaf["run_id"], html_text)
+        pdf = self.client.get(body["links"]["pdf"])
+        self.assertEqual(pdf.status_code, 200)
+        self.assertTrue(pdf.content.startswith(b"%PDF"))
+        permitted = self.client.post(f"/api/projects/{self.project_id}/reports", json={"spec": {**spec, "image_policy": "INCLUDE_PERMITTED"}}).json()
+        self.assertGreaterEqual(permitted["images_embedded"] + permitted["images_withheld"], 0)
+        self.assertEqual(permitted["provenance"]["image_policy"], "INCLUDE_PERMITTED")
+        self.assertTrue(permitted["provenance"]["runs"] and all(run["evidence_sha256"] for run in permitted["provenance"]["runs"]))
+        # Exports carry run identifiers and classification headers; every category and format serves a file.
+        for category, ref in (("quality_results", job["job_id"]), ("comparison_records", leaf["run_id"]), ("embeddings", leaf["run_id"]), ("metric_tables", leaf["run_id"]), ("statistical_results", analysis_id), ("annotations", self.project_id)):
+            for fmt in ("csv", "json", "parquet"):
+                response = self.client.get(f"/api/exports/{category}", params={"ref": ref, "format": fmt})
+                self.assertEqual(response.status_code, 200, (category, fmt, response.text[:200]))
+                self.assertIn(response.headers["X-QualSight-Classification"], {"SENSITIVE_BIOMETRIC_DERIVED", "PRIVATE"})
+        embeddings = self.client.get("/api/exports/embeddings", params={"ref": leaf["run_id"], "format": "json"}).json()
+        self.assertTrue(all(row["run_id"] == leaf["run_id"] and len(row["embedding"]) == 512 for row in embeddings["rows"]))
+        # Bundle: portable package with checksums and no image bytes; reproduction re-executes the analysis and reports EXACT.
+        run_id = status["summary"]["run_id"]
+        bundle = self.client.post(f"/api/projects/{self.project_id}/bundles", json={"run_id": run_id})
+        self.assertEqual(bundle.status_code, 201, bundle.text)
+        record = bundle.json()
+        with zipfile.ZipFile(record["path"]) as archive:
+            names = set(archive.namelist())
+            self.assertTrue({"manifest.json", "experiment.yaml", "protocol.yaml", "dataset-manifest.json", "environment.json", "metrics.json", "results.parquet", "checksums.sha256", "README.md"} <= names, names)
+            self.assertFalse(any(name.endswith((".jpg", ".jpeg", ".png")) and not name.startswith("figures/") for name in names))
+        reproduced = self.client.post("/api/reproductions", json={"bundle_path": record["path"]})
+        self.assertEqual(reproduced.status_code, 201, reproduced.text)
+        self.assertEqual(reproduced.json()["state"], "EXACT", reproduced.json())
+        self.assertGreater(reproduced.json()["compared_values"], 100)
+        self.assertEqual([s["step"] for s in reproduced.json()["steps"]], ["validate-checksums", "validate-dependencies", "validate-model-versions", "validate-input-hashes", "execute-and-compare"])
+        # A matcher-leaf bundle re-runs the matcher on the bundled pairs (fixture: ten pairs) and reproduces the recorded scores.
+        leaf_bundle = self.client.post(f"/api/projects/{self.project_id}/bundles", json={"run_id": leaf["run_id"]}).json()
+        leaf_reproduced = self.client.post("/api/reproductions", json={"bundle_path": leaf_bundle["path"]}).json()
+        self.assertIn(leaf_reproduced["state"], {"EXACT", "WITHIN_TOLERANCE"}, leaf_reproduced)
+        # A tampered bundle is BLOCKED at the checksum step; the target results are untouched.
+        tampered = Path(record["path"]).with_name("tampered.qsexp")
+        with zipfile.ZipFile(record["path"]) as source, zipfile.ZipFile(tampered, "w") as target:
+            for item in source.infolist():
+                data = source.read(item.filename)
+                if item.filename == "metrics.json":
+                    data = data.replace(b"1.0.0", b"9.9.9", 1)
+                target.writestr(item, data)
+        blocked = self.client.post("/api/reproductions", json={"bundle_path": str(tampered)}).json()
+        self.assertEqual(blocked["state"], "BLOCKED")
+        listed = self.client.get("/api/reproductions", params={"original_run_id": run_id}).json()
+        self.assertGreaterEqual(len(listed), 2)
 
 
 if __name__ == "__main__":

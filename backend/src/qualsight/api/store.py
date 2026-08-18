@@ -198,6 +198,64 @@ CREATE TABLE IF NOT EXISTS annotations (
     evidence_sha256 TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS annotations_by_subject ON annotations(subject_type, subject_id, created_at);
+CREATE TABLE IF NOT EXISTS figures (
+    figure_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(project_id),
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    directory TEXT NOT NULL,
+    source_run_ids_json TEXT NOT NULL,
+    provenance_json TEXT NOT NULL,
+    provenance_sha256 TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS figures_by_project ON figures(project_id, created_at);
+CREATE TABLE IF NOT EXISTS dashboards (
+    dashboard_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(project_id),
+    name TEXT NOT NULL,
+    template TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    supersedes TEXT,
+    layout_json TEXT NOT NULL,
+    panel_run_ids_json TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    evidence_sha256 TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS dashboards_by_project ON dashboards(project_id, created_at);
+CREATE TABLE IF NOT EXISTS reports (
+    report_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(project_id),
+    title TEXT NOT NULL,
+    directory TEXT NOT NULL,
+    spec_json TEXT NOT NULL,
+    provenance_json TEXT NOT NULL,
+    html_sha256 TEXT NOT NULL,
+    pdf_sha256 TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reports_by_project ON reports(project_id, created_at);
+CREATE TABLE IF NOT EXISTS bundles (
+    bundle_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    manifest_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS reproductions (
+    reproduction_id TEXT PRIMARY KEY,
+    project_id TEXT,
+    original_run_id TEXT NOT NULL,
+    reproduction_run_id TEXT,
+    bundle_sha256 TEXT,
+    state TEXT NOT NULL,
+    report_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS jobs (
     job_id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL REFERENCES projects(project_id),
@@ -874,6 +932,100 @@ class RunStore:
         for row in rows:
             row["context"] = json.loads(row.pop("context_json"))
         return rows
+
+    # -- Phase 5 artifacts: figures, dashboards, reports, bundles, reproductions ------
+
+    def record_figure(self, record: dict[str, Any]) -> None:
+        provenance_text = json.dumps({k: v for k, v in record.items() if k != "provenance_sha256"}, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        with self._lock:
+            existing = self._connection.execute("SELECT figure_id FROM figures WHERE figure_id = ?", (record["figure_id"],)).fetchone()
+            if existing is not None:
+                return
+            self._connection.execute(
+                "INSERT INTO figures (figure_id, project_id, kind, title, directory, source_run_ids_json, provenance_json, provenance_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (record["figure_id"], record["project_id"], record["kind"], record["title"], record["directory"], json.dumps(record["source_run_ids"]), provenance_text, _evidence(provenance_text), record["created_at"]),
+            )
+            self._connection.commit()
+
+    def figure(self, figure_id: str) -> dict[str, Any] | None:
+        cursor = self._connection.execute("SELECT * FROM figures WHERE figure_id = ?", (figure_id,))
+        row = cursor.fetchone()
+        return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
+
+    def figures(self, *, project_id: str) -> list[dict[str, Any]]:
+        cursor = self._connection.execute("SELECT * FROM figures WHERE project_id = ? ORDER BY created_at", (project_id,))
+        return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
+
+    def record_dashboard(self, record: dict[str, Any]) -> None:
+        with self._lock:
+            existing = self._connection.execute("SELECT layout_json FROM dashboards WHERE dashboard_id = ?", (record["dashboard_id"],)).fetchone()
+            if existing is not None:
+                if existing[0] != record["layout_text"]:
+                    raise ImmutableRecordConflict("dashboard identity collides with a different layout")
+                return
+            self._connection.execute(
+                "INSERT INTO dashboards (dashboard_id, project_id, name, template, version, supersedes, layout_json, panel_run_ids_json, created_by, created_at, evidence_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (record["dashboard_id"], record["project_id"], record["name"], record["template"], record["version"], record["supersedes"], record["layout_text"], json.dumps(record["panel_run_ids"]), record["created_by"], record["created_at"], _evidence(record["layout_text"])),
+            )
+            self._connection.commit()
+
+    def dashboard(self, dashboard_id: str) -> dict[str, Any] | None:
+        cursor = self._connection.execute("SELECT * FROM dashboards WHERE dashboard_id = ?", (dashboard_id,))
+        row = cursor.fetchone()
+        return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
+
+    def dashboards(self, *, project_id: str) -> list[dict[str, Any]]:
+        cursor = self._connection.execute("SELECT * FROM dashboards WHERE project_id = ? ORDER BY created_at", (project_id,))
+        return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
+
+    def record_report(self, record: dict[str, Any]) -> None:
+        with self._lock:
+            self._connection.execute(
+                "INSERT INTO reports (report_id, project_id, title, directory, spec_json, provenance_json, html_sha256, pdf_sha256, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (record["report_id"], record["project_id"], record["title"], record["directory"], json.dumps(record["spec"], sort_keys=True), json.dumps(record["provenance"], sort_keys=True), record["files"]["html"]["sha256"], record["files"]["pdf"]["sha256"], record["created_by"], record["created_at"]),
+            )
+            self._connection.commit()
+
+    def report(self, report_id: str) -> dict[str, Any] | None:
+        cursor = self._connection.execute("SELECT * FROM reports WHERE report_id = ?", (report_id,))
+        row = cursor.fetchone()
+        return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
+
+    def reports(self, *, project_id: str) -> list[dict[str, Any]]:
+        cursor = self._connection.execute("SELECT * FROM reports WHERE project_id = ? ORDER BY created_at", (project_id,))
+        return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
+
+    def record_experiment_bundle(self, record: dict[str, Any]) -> None:
+        with self._lock:
+            self._connection.execute("INSERT OR IGNORE INTO bundles (bundle_id, project_id, run_id, path, sha256, manifest_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                     (record["bundle_id"], record["project_id"], record["run_id"], record["path"], record["sha256"], json.dumps(record["manifest"], sort_keys=True), record["created_at"]))
+            self._connection.commit()
+
+    def experiment_bundles(self, *, project_id: str | None = None, run_id: str | None = None) -> list[dict[str, Any]]:
+        clauses, params = [], []
+        if project_id is not None:
+            clauses.append("project_id = ?"); params.append(project_id)
+        if run_id is not None:
+            clauses.append("run_id = ?"); params.append(run_id)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        cursor = self._connection.execute(f"SELECT * FROM bundles{where} ORDER BY created_at", params)
+        return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
+
+    def record_reproduction(self, record: dict[str, Any]) -> None:
+        with self._lock:
+            self._connection.execute("INSERT INTO reproductions (reproduction_id, project_id, original_run_id, reproduction_run_id, bundle_sha256, state, report_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                     (record["reproduction_id"], record.get("project_id"), record["original_run_id"], record.get("reproduction_run_id"), record.get("bundle_sha256"), record["state"], json.dumps(record, sort_keys=True, default=str), record["created_at"]))
+            self._connection.commit()
+
+    def reproductions(self, *, original_run_id: str | None = None, project_id: str | None = None) -> list[dict[str, Any]]:
+        clauses, params = [], []
+        if original_run_id is not None:
+            clauses.append("original_run_id = ?"); params.append(original_run_id)
+        if project_id is not None:
+            clauses.append("project_id = ?"); params.append(project_id)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        cursor = self._connection.execute(f"SELECT * FROM reproductions{where} ORDER BY created_at", params)
+        return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
     def utility_analyses(self, *, project_id: str | None = None, matcher_run_id: str | None = None) -> list[dict[str, Any]]:
         clauses, params = [], []

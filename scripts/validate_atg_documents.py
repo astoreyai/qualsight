@@ -98,6 +98,11 @@ CURRENT_ACCEPTED_WHOLE = {
     "QS-E41",
     "QS-E42",
     "QS-E43",
+    "QS-F50",
+    "QS-F51",
+    "QS-F52",
+    "QS-F53",
+    "QS-F54",
 }
 CURRENT_ACCEPTED_REFINEMENTS = {"QS-A00.R8", "QS-A05.R1"}
 CURRENT_ACCEPTED_CHILDREN = {
@@ -447,8 +452,8 @@ def _validate_controller_snapshot(
                 "ATG_LOOP.md controller snapshot",
                 f"{label} differs: count={count}, ids={sorted(observed)}",
             )
-    if rows.get("Dependency-ready whole capabilities") != (1, {"QS-F50"}):
-        _fail("ATG_LOOP.md controller snapshot", "QS-F50 is the only dependency-ready whole capability after Phase 4")
+    if rows.get("Dependency-ready whole capabilities") != (4, {"QS-H70", "QS-H71", "QS-H72", "QS-H73"}):
+        _fail("ATG_LOOP.md controller snapshot", "QS-H70–QS-H73 are the dependency-ready whole capabilities after Phase 5")
     if "Authorized OFIQ process executions" not in rows:
         _fail("ATG_LOOP.md controller snapshot", "authorized OFIQ execution row is missing")
 
@@ -732,6 +737,7 @@ def _validate_current_output_hashes(records: list[dict[str, Any]]) -> int:
         "scripts/verify_utility_analysis.py": PROJECT_ROOT / "scripts/verify_utility_analysis.py",
         "scripts/verify_cross_matcher.py": PROJECT_ROOT / "scripts/verify_cross_matcher.py",
         "atg/evidence/2026-08-17-console-observation-07.json": PROJECT_ROOT / "atg/evidence/2026-08-17-console-observation-07.json",
+        "atg/evidence/2026-08-17-console-observation-08.json": PROJECT_ROOT / "atg/evidence/2026-08-17-console-observation-08.json",
         "resources/authorizations/qualsight-owner-phase2-amendment-2026-08-17.json": PROJECT_ROOT / "resources/authorizations/qualsight-owner-phase2-amendment-2026-08-17.json",
     }
     for label, path in expected.items():

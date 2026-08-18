@@ -5,6 +5,7 @@ requires-python = "==3.11.*"
 dependencies = [
     "duckdb==1.5.5",
     "fastapi==0.141.1",
+    "matplotlib==3.10.7",
     "numpy==2.4.6",
     "onnxruntime==1.28.0",
     "opencv-python-headless==5.0.0.93",

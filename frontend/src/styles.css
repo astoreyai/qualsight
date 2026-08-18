@@ -46,6 +46,7 @@ button.primary:disabled { opacity: 0.55; cursor: progress; }
 .matchers { grid-column: 1 / span 3; }
 .utility { grid-column: 1 / span 3; }
 .crossmatcher { grid-column: 1 / span 3; }
+.reports { grid-column: 1 / span 3; }
 .runs { grid-column: 1 / span 2; }
 .status { color: var(--accent); }
 .error { color: var(--danger); border: 1px solid rgba(248, 113, 113, 0.4); border-radius: 8px; padding: 0.7rem; }
@@ -135,3 +136,5 @@ button.cell.selected { border-color: var(--ok); }
 button.secondary.selected { border-color: var(--ok); }
 .annotations { list-style: none; margin: 0.2rem 0 0; padding: 0; font-size: 0.75rem; color: var(--muted); }
 .pair-facts input { background: #0d1526; color: var(--text); border: 1px solid var(--panel-border); border-radius: 8px; padding: 0.3rem; width: 220px; }
+.dashboard-grid { display: grid; gap: 0.6rem; }
+.dashboard-panel { background: #0d1526; border: 1px solid var(--panel-border); border-radius: 8px; padding: 0.4rem; display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.78rem; }

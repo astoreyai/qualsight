@@ -83,6 +83,14 @@ def main(argv: list[str] | None = None) -> int:
     cross.add_argument("--partial-interval", type=float, default=0.2)
     cross.add_argument("--replicates", type=int, default=1000)
     cross.add_argument("--seed", type=int, default=20260817)
+    bundle = sub.add_parser("bundle-export", help="export a portable .qsexp reproducibility bundle for one immutable Run")
+    bundle.add_argument("--run-id", required=True)
+    repro = sub.add_parser("reproduce-bundle", help="validate and re-execute a .qsexp bundle; report EXACT/WITHIN_TOLERANCE/DIFFERENT/MISSING_DEPENDENCY/MISSING_DATA/BLOCKED")
+    repro.add_argument("bundle", type=Path)
+    figure = sub.add_parser("figure", help="render a provenance-bearing figure (PNG/SVG/PDF/CSV + provenance sidecar) from recorded Runs")
+    figure.add_argument("--project-id", required=True)
+    figure.add_argument("--kind", required=True)
+    figure.add_argument("--params", default="{}", help="JSON object of builder parameters")
     args = parser.parse_args(argv)
 
     settings = Settings.from_environment()
@@ -267,6 +275,30 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             result = job.run()
             print(json.dumps({"analysis_id": result.analysis_id, "run_id": result.run.run_id, "directory": str(result.directory), "summary": result.summary}, indent=2))
+            return 0
+        if args.command == "bundle-export":
+            from .reporting.bundle import export_bundle
+
+            record = export_bundle(store, run_id=args.run_id, root=settings.data_dir / "bundles", repository_root=settings.repository_root)
+            print(json.dumps({k: v for k, v in record.items() if k != "manifest"}, indent=2))
+            return 0
+        if args.command == "reproduce-bundle":
+            from dataclasses import asdict
+
+            from .projects import ProjectService
+            from .reporting.bundle import reproduce_bundle
+
+            engine = _engine(settings)
+            result = reproduce_bundle(args.bundle, store=store, registry=engine.registry, repository_root=settings.repository_root, work_root=settings.data_dir / "reproductions", project_service=ProjectService(store, engine), engine=engine)
+            print(json.dumps(asdict(result), indent=2, default=str))
+            return 0 if result.state in {"EXACT", "WITHIN_TOLERANCE"} else 3
+        if args.command == "figure":
+            from .reporting import figures as figure_module
+
+            spec = figure_module.build(store, args.project_id, args.kind, json.loads(args.params))
+            record = figure_module.render(spec, settings.data_dir / "figures")
+            store.record_figure(record)
+            print(json.dumps({"figure_id": record["figure_id"], "files": record["files"], "source_run_ids": record["source_run_ids"]}, indent=2))
             return 0
         if args.command == "export-run":
             manifest = export_run_manifest(store, args.run_id, args.out)

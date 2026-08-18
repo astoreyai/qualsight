@@ -409,7 +409,82 @@ export interface CrossPairRow {
   links: { left_sample: string; right_sample: string; left_image: string | null; right_image: string | null; left_quality: string; right_quality: string; run_a: string; run_b: string; analysis_run: string };
 }
 
+
+export interface FigureOut {
+  figure_id: string;
+  kind: string;
+  title: string;
+  created_at: string;
+  source_run_ids: string[];
+  provenance_sha256: string;
+  files: Record<string, string>;
+  sha256: Record<string, string>;
+  metric_definitions: string[][];
+  thresholds: any[];
+}
+
+export interface DashboardOut {
+  dashboard_id: string;
+  name: string;
+  template: string;
+  version: number;
+  supersedes: string | null;
+  created_at: string;
+  layout_sha256?: string;
+  panels: number | any[];
+  layout?: any;
+}
+
+export interface ReportOut {
+  report_id: string;
+  title: string;
+  created_at: string;
+  created_by?: string;
+  html_sha256?: string;
+  pdf_sha256?: string;
+  images_embedded?: number;
+  images_withheld?: number;
+  links: { html: string; pdf: string; json: string };
+}
+
+export interface BundleOut {
+  bundle_id: string;
+  run_id: string;
+  path: string;
+  sha256: string;
+  size_bytes?: number;
+  created_at: string;
+  links: { download: string };
+}
+
+export interface ReproductionOut {
+  reproduction_id: string;
+  original_run_id: string;
+  reproduction_run_id: string | null;
+  state: string;
+  steps: any[];
+  differences: string[];
+  compared_values: number;
+  bundle_sha256: string;
+  created_at: string;
+}
+
 export const api = {
+  figures: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/figures`).then((r) => readJson<FigureOut[]>(r)),
+  createFigure: (project_id: string, kind: string, parameters: Record<string, unknown>) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/figures`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, parameters }) }).then((r) => readJson<FigureOut>(r)),
+  dashboards: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/dashboards`).then((r) => readJson<DashboardOut[]>(r)),
+  saveDashboard: (project_id: string, body: { name: string; template: string; columns: number; panels: Array<{ kind: string; ref: string }> }) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/dashboards`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => readJson<any>(r)),
+  dashboard: (dashboard_id: string) => fetch(`/api/dashboards/${encodeURIComponent(dashboard_id)}`).then((r) => readJson<any>(r)),
+  reports: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/reports`).then((r) => readJson<ReportOut[]>(r)),
+  createReport: (project_id: string, spec: Record<string, unknown>) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/reports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ spec }) }).then((r) => readJson<ReportOut>(r)),
+  bundles: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/bundles`).then((r) => readJson<BundleOut[]>(r)),
+  createBundle: (project_id: string, run_id: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/bundles`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ run_id }) }).then((r) => readJson<BundleOut>(r)),
+  reproduce: (bundle_path: string) => fetch("/api/reproductions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ bundle_path }) }).then((r) => readJson<ReproductionOut>(r)),
+  reproductions: (project_id: string) => fetch(`/api/reproductions?project_id=${encodeURIComponent(project_id)}`).then((r) => readJson<ReproductionOut[]>(r)),
   matrixSets: (matrix_id: string) => fetch(`/api/matrices/${encodeURIComponent(matrix_id)}/sets`).then((r) => readJson<any>(r)),
   crossMatcherAnalyses: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/cross-matcher`).then((r) => readJson<CrossMatcherSummary[]>(r)),
   startCrossMatcher: (project_id: string, body: { matrix_id: string; quality_job_id: string; quality_measure?: string; pair_quality_policy?: string; target_fmr?: number; bootstrap_replicates?: number }) =>

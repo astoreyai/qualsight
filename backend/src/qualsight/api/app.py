@@ -34,6 +34,11 @@ from ..protocols import ProtocolError, ProtocolService
 from ..matchers.matrix import MatcherMatrixJob, MatrixError
 from ..analysis.utility import UtilityAnalysisError, UtilityAnalysisJob, UtilityRequest, pair_quality_policies
 from ..analysis.crossmatcher import CrossMatcherError, CrossMatcherJob, CrossMatcherRequest, matcher_sets
+from ..reporting import bundle as bundle_module
+from ..reporting import figures as figure_module
+from ..reporting.dashboards import DashboardError, load_dashboard, save_dashboard
+from ..reporting.exports import ExportError, export_table
+from ..reporting.reports import ReportBuilder, ReportError
 from ..matchers.upstream import UpstreamSources
 from ..execution.contracts import ContractValidationError, ExecutionOutcomeError
 from ..provenance import artifact_identity
@@ -100,6 +105,31 @@ class AnnotationCreate(ApiModel):
     subject_id: str = Field(min_length=1, max_length=512)
     text: str = Field(min_length=1, max_length=4000)
     context: dict[str, Any] = Field(default_factory=dict)
+
+
+class FigureCreate(ApiModel):
+    kind: str = Field(min_length=1)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+class DashboardCreate(ApiModel):
+    name: str = Field(min_length=1, max_length=200)
+    template: str = Field(default="Custom")
+    columns: int = Field(default=2, ge=1, le=4)
+    panels: list[dict[str, Any]] = Field(min_length=1)
+    supersedes: str | None = None
+
+
+class ReportCreate(ApiModel):
+    spec: dict[str, Any] = Field(default_factory=dict)
+
+
+class BundleCreate(ApiModel):
+    run_id: str = Field(min_length=1)
+
+
+class ReproduceRequest(ApiModel):
+    bundle_path: str = Field(min_length=1)
 
 
 class ProjectCreate(ApiModel):
@@ -1281,6 +1311,152 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if subject_id is None and project_id is None:
             raise HTTPException(status_code=422, detail="subject_id or project_id is required")
         return JSONResponse(content=store().annotations(subject_id=subject_id, project_id=project_id))
+
+    # -- Phase 5: figures, dashboards, reports, exports, bundles, reproduction ------
+
+    def figure_summary(row: dict[str, Any]) -> dict[str, Any]:
+        provenance = json.loads(row["provenance_json"])
+        return {"figure_id": row["figure_id"], "kind": row["kind"], "title": row["title"], "created_at": row["created_at"], "source_run_ids": json.loads(row["source_run_ids_json"]), "provenance_sha256": row["provenance_sha256"],
+                "files": {name: f"/api/figures/{row['figure_id']}/file?format={name}" for name in ("png", "svg", "pdf", "csv", "provenance")}, "sha256": {name: item["sha256"] for name, item in provenance["files"].items()}, "metric_definitions": provenance["metric_definitions"], "thresholds": provenance["thresholds"]}
+
+    @app.post("/api/projects/{project_id}/figures", status_code=201)
+    def create_figure(project_id: str, request: FigureCreate) -> JSONResponse:
+        try:
+            projects().require_writable(project_id)
+            spec = figure_module.build(store(), project_id, request.kind, request.parameters)
+            record = figure_module.render(spec, settings.data_dir / "figures")
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except figure_module.FigureError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        store().record_figure(record)
+        row = store().figure(record["figure_id"])
+        return JSONResponse(status_code=201, content=figure_summary(row))
+
+    @app.get("/api/projects/{project_id}/figures")
+    def project_figures(project_id: str) -> JSONResponse:
+        return JSONResponse(content=[figure_summary(row) for row in store().figures(project_id=project_id)])
+
+    @app.get("/api/figures/{figure_id}")
+    def figure_detail(figure_id: str) -> JSONResponse:
+        row = store().figure(figure_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="figure is not recorded")
+        return JSONResponse(content={**figure_summary(row), "provenance": json.loads(row["provenance_json"])})
+
+    @app.get("/api/figures/{figure_id}/file")
+    def figure_file(figure_id: str, format: Literal["png", "svg", "pdf", "csv", "provenance"] = Query(default="png")) -> FileResponse:
+        row = store().figure(figure_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="figure is not recorded")
+        provenance = json.loads(row["provenance_json"])
+        if format == "provenance":
+            path = Path(row["directory"]) / "figure.provenance.json"
+            media = "application/json"
+        else:
+            path = Path(provenance["files"][format]["path"])
+            media = {"png": "image/png", "svg": "image/svg+xml", "pdf": "application/pdf", "csv": "text/csv"}[format]
+        if not path.exists():
+            raise HTTPException(status_code=410, detail="figure file is missing")
+        return FileResponse(str(path), media_type=media, filename=f"{figure_id.replace(':', '_')}.{'provenance.json' if format == 'provenance' else format}")
+
+    @app.post("/api/projects/{project_id}/dashboards", status_code=201)
+    def create_dashboard(project_id: str, request: DashboardCreate) -> JSONResponse:
+        try:
+            projects().require_writable(project_id)
+            record = save_dashboard(store(), project_id=project_id, name=request.name, template=request.template, panels=request.panels, columns=request.columns, actor=projects().actor, supersedes=request.supersedes)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except DashboardError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return JSONResponse(status_code=201, content={k: v for k, v in record.items() if k != "layout_text"})
+
+    @app.get("/api/projects/{project_id}/dashboards")
+    def project_dashboards(project_id: str) -> JSONResponse:
+        return JSONResponse(content=[{"dashboard_id": row["dashboard_id"], "name": row["name"], "template": row["template"], "version": row["version"], "supersedes": row["supersedes"], "created_at": row["created_at"], "layout_sha256": row["evidence_sha256"], "panels": len(json.loads(row["layout_json"])["panels"])} for row in store().dashboards(project_id=project_id)])
+
+    @app.get("/api/dashboards/{dashboard_id}")
+    def dashboard_detail(dashboard_id: str) -> JSONResponse:
+        try:
+            return JSONResponse(content=load_dashboard(store(), dashboard_id))
+        except DashboardError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.post("/api/projects/{project_id}/reports", status_code=201)
+    def create_report(project_id: str, request: ReportCreate) -> JSONResponse:
+        try:
+            projects().require_writable(project_id)
+            builder = ReportBuilder(store=store(), registry=engine().registry, repository_root=settings.repository_root, project_id=project_id, spec=request.spec, actor=projects().actor, root=settings.data_dir / "reports")
+            record = builder.build()
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ReportError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return JSONResponse(status_code=201, content={**record, "links": {"html": f"/api/reports/{record['report_id']}/file?format=html", "pdf": f"/api/reports/{record['report_id']}/file?format=pdf", "json": f"/api/reports/{record['report_id']}/file?format=json"}})
+
+    @app.get("/api/projects/{project_id}/reports")
+    def project_reports(project_id: str) -> JSONResponse:
+        return JSONResponse(content=[{"report_id": row["report_id"], "title": row["title"], "created_at": row["created_at"], "created_by": row["created_by"], "html_sha256": row["html_sha256"], "pdf_sha256": row["pdf_sha256"], "links": {"html": f"/api/reports/{row['report_id']}/file?format=html", "pdf": f"/api/reports/{row['report_id']}/file?format=pdf", "json": f"/api/reports/{row['report_id']}/file?format=json"}} for row in store().reports(project_id=project_id)])
+
+    @app.get("/api/reports/{report_id}/file")
+    def report_file(report_id: str, format: Literal["html", "pdf", "json", "provenance"] = Query(default="html")) -> FileResponse:
+        row = store().report(report_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="report is not recorded")
+        name = {"html": "report.html", "pdf": "report.pdf", "json": "report.json", "provenance": "report.provenance.json"}[format]
+        path = Path(row["directory"]) / name
+        media = {"html": "text/html", "pdf": "application/pdf", "json": "application/json", "provenance": "application/json"}[format]
+        return FileResponse(str(path), media_type=media, filename=f"{report_id.replace(':', '_')}-{name}")
+
+    @app.get("/api/exports/{category}")
+    def export_category(category: str, ref: str = Query(min_length=1), format: Literal["csv", "json", "parquet"] = Query(default="csv")) -> FileResponse:
+        try:
+            record = export_table(store(), category=category, ref=ref, fmt=format, root=settings.data_dir / "exports")
+        except ExportError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        media = {"csv": "text/csv", "json": "application/json", "parquet": "application/vnd.apache.parquet"}[format]
+        return FileResponse(record["path"], media_type=media, filename=f"{category}-{ref[-12:]}.{format}", headers={"X-QualSight-Export-Id": record["export_id"], "X-QualSight-Export-Sha256": record["sha256"], "X-QualSight-Export-Rows": str(record["rows"]), "X-QualSight-Classification": record["classification"]})
+
+    @app.post("/api/projects/{project_id}/bundles", status_code=201)
+    def create_bundle(project_id: str, request: BundleCreate) -> JSONResponse:
+        found = store().run(request.run_id)
+        if found is None or found[0].project_id != project_id:
+            raise HTTPException(status_code=404, detail="run is not recorded in this project")
+        try:
+            record = bundle_module.export_bundle(store(), run_id=request.run_id, root=settings.data_dir / "bundles", repository_root=settings.repository_root)
+        except bundle_module.BundleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return JSONResponse(status_code=201, content={**record, "links": {"download": f"/api/bundles/{record['bundle_id']}/file"}})
+
+    @app.get("/api/projects/{project_id}/bundles")
+    def project_bundles(project_id: str) -> JSONResponse:
+        return JSONResponse(content=[{**{k: v for k, v in row.items() if k != "manifest_json"}, "manifest": json.loads(row["manifest_json"]), "links": {"download": f"/api/bundles/{row['bundle_id']}/file"}} for row in store().experiment_bundles(project_id=project_id)])
+
+    @app.get("/api/bundles/{bundle_id}/file")
+    def bundle_file(bundle_id: str) -> FileResponse:
+        rows = [row for row in store().experiment_bundles() if row["bundle_id"] == bundle_id]
+        if not rows:
+            raise HTTPException(status_code=404, detail="bundle is not recorded")
+        return FileResponse(rows[0]["path"], media_type="application/zip", filename=Path(rows[0]["path"]).name)
+
+    @app.post("/api/reproductions", status_code=201)
+    def reproduce(request: ReproduceRequest) -> JSONResponse:
+        path = Path(request.bundle_path)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="bundle file does not exist")
+        result = bundle_module.reproduce_bundle(path, store=store(), registry=engine().registry, repository_root=settings.repository_root, work_root=settings.data_dir / "reproductions", project_service=projects(), engine=engine())
+        return JSONResponse(status_code=201, content=asdict(result))
+
+    @app.get("/api/reproductions")
+    def list_reproductions(original_run_id: str | None = Query(default=None), project_id: str | None = Query(default=None)) -> JSONResponse:
+        rows = store().reproductions(original_run_id=original_run_id, project_id=project_id)
+        return JSONResponse(content=[json.loads(row["report_json"]) for row in rows])
 
     @app.get("/api/projects/{project_id}/versions")
     def project_versions(project_id: str) -> JSONResponse:
