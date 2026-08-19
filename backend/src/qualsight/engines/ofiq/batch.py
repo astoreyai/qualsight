@@ -276,9 +276,22 @@ class OFIQBatchJob:
             derived_root = job_root.parent / "derived"
             if derived_root.exists():
                 mounts.add(derived_root)
-            self.container_adapter = ContainerCLIAdapter(inner=engine.adapters[self._input_resource.resource_id], image=image, read_only_mounts=tuple(sorted(mounts)))
+            owner_root = job_root.parent / "owner_supplied"
+            if owner_root.exists():
+                mounts.add(owner_root)
+            inner = engine.owner_adapter if self._input_resource == self.OWNER_SUPPLIED else engine.adapters[self._input_resource.resource_id]
+            self.container_adapter = ContainerCLIAdapter(inner=inner, image=image, read_only_mounts=tuple(sorted(mounts)))
+
+    OWNER_SUPPLIED = "OWNER_SUPPLIED_LOCAL_INPUT"
 
     def _input_resource_for(self, path: str):
+        # Owner-supplied samples (decision 30): admitted only when the store records
+        # exactly this path and the bytes still hash to the admitted identity.
+        owner = self.store.owner_supplied_by_path(path) if hasattr(self.store, "owner_supplied_by_path") else None
+        if owner is not None:
+            if sha256_file(Path(path)) != owner["sha256"]:
+                raise BatchJobError(f"owner-supplied sample {path} drifted from its admitted hash")
+            return self.OWNER_SUPPLIED, None
         # Derived samples (QS-X61): admitted only when the store records the exact path and hash with a
         # transformation chain rooting at a bound registered input resource.
         derived = self.store.derived_sample_by_path(path) if hasattr(self.store, "derived_sample_by_path") else None
@@ -338,7 +351,10 @@ class OFIQBatchJob:
     # -- execution -------------------------------------------------------------
 
     def _launch(self, chunk: ChunkState) -> None:
-        adapter = self.container_adapter or self.engine.adapters[self._input_resource.resource_id]
+        if self._input_resource == self.OWNER_SUPPLIED:
+            adapter = self.container_adapter or self.engine.owner_adapter
+        else:
+            adapter = self.container_adapter or self.engine.adapters[self._input_resource.resource_id]
         list_identity = ArtifactIdentity.from_file(chunk.list_path)
         request = adapter.create_request(
             arguments=("-c", self.engine.configuration.path, "-i", str(chunk.list_path), "-o", str(chunk.output_path)),
@@ -550,7 +566,18 @@ class OFIQBatchJob:
         assessment_total = sum(row.assessment_ms or 0 for row in measured)
 
         runtime_record = self.engine.registry.raw_resource(self.engine.runtime.resource_id)
-        input_record = self.engine.registry.raw_resource(self._input_resource.resource_id)
+        if self._input_resource == self.OWNER_SUPPLIED:
+            # Decision 30: not a registered resource — the classification is the
+            # dataset's, and the restriction names the source kind honestly.
+            input_record = {
+                "data_classification": self.dataset.classification.value,
+                "use_restrictions": (
+                    "OWNER_SUPPLIED_LOCAL_INPUT (decision 30): operator-supplied bytes admitted by hash; "
+                    "no third-party rights review; local analysis only; never redistributed.",
+                ),
+            }
+        else:
+            input_record = self.engine.registry.raw_resource(self._input_resource.resource_id)
         binary = _to_domain(self.engine.executable)
         configuration = _to_domain(self.engine.configuration)
         libraries = tuple(_to_domain(item.identity) for item in self.engine.runtime.artifacts_with_role("RUNTIME_LIBRARY"))

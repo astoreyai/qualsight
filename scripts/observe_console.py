@@ -119,22 +119,76 @@ def main() -> int:
             page = browser.new_page(viewport={"width": 1500, "height": 1000})
             page.goto(f"http://127.0.0.1:{PREVIEW_PORT}/", wait_until="networkidle")
             manifest = page.evaluate("() => document.querySelector('link[rel=manifest]')?.getAttribute('href')")
-            observation["steps"].append({"step": "load", "title": page.title(), "manifest": manifest, "primary_nav_links": page.evaluate("() => document.querySelectorAll('[data-testid=primary-nav] [data-testid=nav-link]').length"), "system_panel_resources": (page.wait_for_selector("[data-testid=resource-table] tbody tr", timeout=60_000) and page.evaluate("() => document.querySelectorAll('[data-testid=resource-table] tbody tr').length"))})
+
+            def goto(view: str) -> None:
+                """QS-Y89: navigate the routed console; exactly one view is visible."""
+                page.evaluate(f"() => {{ window.location.hash = '#/{view}' }}")
+                page.wait_for_function(
+                    "(v) => { const shown = Array.from(document.querySelectorAll('main > div[data-view]')).filter(d => getComputedStyle(d).display !== 'none'); return shown.length >= 1 && shown.every(d => (d.getAttribute('data-view') || '').startsWith(v) || (v === 'projects' && (d.getAttribute('data-view') || '').startsWith('projects'))); }",
+                    arg=view,
+                    timeout=30_000,
+                )
+
+            # QS-Y89: routed navigation — every route shows exactly one view; empty states honest on a fresh store.
+            nav_checks = []
+            for target in ("system", "utility", "cross", "reports", "advanced", "matchers", "data", "assess", "projects"):
+                goto(target)
+                nav_checks.append({"view": target, "visible_views": page.evaluate("() => Array.from(document.querySelectorAll('main > div[data-view]')).filter(d => getComputedStyle(d).display !== 'none').map(d => d.getAttribute('data-view'))")})
+            goto("utility")
+            empty_state = page.inner_text("main div[data-view=utility]")
+            goto("system")
+            system_rows = page.wait_for_selector("[data-testid=resource-table] tbody tr", timeout=60_000) and page.evaluate("() => document.querySelectorAll('[data-testid=resource-table] tbody tr').length")
+            observation["steps"].append({"step": "load", "title": page.title(), "manifest": manifest, "primary_nav_links": page.evaluate("() => document.querySelectorAll('[data-testid=primary-nav] [data-testid=nav-link]').length"), "system_panel_resources": system_rows, "routes": nav_checks, "fresh_store_empty_state": empty_state[:200]})
             page.wait_for_selector("[data-testid=engine-badge] .value", timeout=30_000)
             badge = page.inner_text("[data-testid=engine-badge]")
             observation["steps"].append({"step": "engine-badge", "text": badge})
+            goto("assess")
             page.wait_for_selector("img[alt^='Registered sample']", timeout=30_000)
             image_ok = page.evaluate(
                 "() => { const i = document.querySelector('img[alt^=\"Registered sample\"]'); return i && i.complete && i.naturalWidth > 0; }"
             )
             observation["steps"].append({"step": "image-rendered", "natural_size_ok": bool(image_ok)})
+            # QS-Y85: matcher-pipeline detection overlay on the registered sample.
+            page.click("[data-testid=detection-toggle]")
+            page.wait_for_selector("[data-testid=detection-overlay]", state="attached", timeout=60_000)
+            overlay_counts = page.evaluate(
+                "() => ({ boxes: document.querySelectorAll('[data-testid=detection-overlay] rect').length, points: document.querySelectorAll('[data-testid=detection-overlay] circle').length })"
+            )
+            detection_label = page.inner_text("[data-testid=detection-label]")
+            observation["steps"].append(
+                {
+                    "step": "detection-overlay",
+                    "boxes": overlay_counts["boxes"],
+                    "landmark_points": overlay_counts["points"],
+                    "labelled_as_matcher_pipeline": "not OFIQ's internal landmarks" in detection_label,
+                }
+            )
+            page.click("[data-testid=detection-toggle]")
+            # QS-Z90: OFIQ's own internal ADNet-98 landmarks through the registered auxiliary binary.
+            page.click("[data-testid=ofiq-landmark-toggle]")
+            page.wait_for_selector("[data-testid=ofiq-landmark-overlay]", state="attached", timeout=120_000)
+            ofiq_counts = page.evaluate(
+                "() => ({ faces: document.querySelectorAll('[data-testid=ofiq-landmark-overlay] rect').length, points: document.querySelectorAll('[data-testid=ofiq-landmark-overlay] circle').length })"
+            )
+            ofiq_label = page.inner_text("[data-testid=ofiq-landmark-label]")
+            observation["steps"].append(
+                {
+                    "step": "ofiq-landmarks",
+                    "faces": ofiq_counts["faces"],
+                    "landmark_points": ofiq_counts["points"],
+                    "labelled_as_ofiq_internal": "distinct from the matcher pipeline" in ofiq_label,
+                }
+            )
+            page.click("[data-testid=ofiq-landmark-toggle]")
             # QS-B10: create a project from the console and record the run into it.
+            goto("projects")
             page.fill("[data-testid=project-name-input]", "Console lifecycle observation")
             page.click("[data-testid=project-create]")
             page.wait_for_selector("[data-testid=project-actions]", timeout=30_000)
             created_message = page.inner_text("[data-testid=project-message]")
             observation["steps"].append({"step": "project-created", "message": created_message})
             console_project_id_holder = [next(p["project_id"] for p in json.load(urllib.request.urlopen(f"http://127.0.0.1:{API_PORT}/api/projects")) if p["name"] == "Console lifecycle observation")]  # noqa: S310
+            goto("assess")
             page.click("[data-testid=assess-button]")
             page.wait_for_selector("[data-testid=measure-table]", timeout=180_000)
             banner = page.inner_text("[data-testid=result-banner]")
@@ -153,9 +207,31 @@ def main() -> int:
                     "run_link": run_link,
                 }
             )
+            goto("projects")
             page.wait_for_selector("[data-testid=run-table]", timeout=30_000)
             observation["steps"].append({"step": "run-list", "rows": page.evaluate("() => document.querySelectorAll('[data-testid=run-table] tbody tr').length")})
+            # QS-Y81 (decision 30): upload an operator-picked real photo through the
+            # console file picker and observe the recorded owner-supplied Run.
+            upload_source = Path("/mnt/projects/datasets/lfw/lfw_funneled/Aaron_Peirsol/Aaron_Peirsol_0001.jpg")
+            upload_copy = Path(tempfile.mkdtemp(prefix="qualsight-upload-")) / "evaluator_photo.jpg"
+            shutil.copyfile(upload_source, upload_copy)
+            goto("assess")
+            page.set_input_files("[data-testid=upload-input]", str(upload_copy))
+            page.wait_for_selector("[data-testid=upload-result]", timeout=180_000)
+            uqs_text = page.inner_text("[data-testid=upload-uqs]")
+            upload_text = page.inner_text("[data-testid=upload-result]")
+            observation["steps"].append(
+                {
+                    "step": "owner-supplied-upload",
+                    "file": upload_copy.name,
+                    "unified_quality_score": uqs_text,
+                    "source_kind_shown": "OWNER_SUPPLIED_LOCAL_INPUT" in upload_text,
+                    "run_link_present": bool(page.get_attribute("[data-testid=upload-result] a", "href")),
+                }
+            )
+            shutil.rmtree(upload_copy.parent, ignore_errors=True)
             # Save, close, reopen, clone, archive from the console; each transition is a new version.
+            goto("projects")
             transitions = []
             for label in ("Save", "Close", "Open", "Archive"):
                 page.click(f"[data-testid=project-actions] button:has-text('{label}')")
@@ -170,11 +246,13 @@ def main() -> int:
             observation["steps"].append({"step": "project-facts", "text": facts})
             # QS-B11..B13: reopen, import the registered LFW dataset, run the
             # subset-fixture batch, and explore the distribution down to a sample.
+            goto("projects")
             page.click("[data-testid=project-actions] button:has-text('Open')")
             page.wait_for_function(
                 "() => (document.querySelector('[data-testid=project-message]')?.innerText || '').toLowerCase().startsWith('open')",
                 timeout=30_000,
             )
+            goto("data")
             page.click("[data-testid=import-lfw]")
             page.wait_for_selector("[data-testid=dataset-facts]", timeout=300_000)
             observation["steps"].append({"step": "dataset-imported", "facts": page.inner_text("[data-testid=dataset-facts]")})
@@ -208,6 +286,7 @@ def main() -> int:
             sample_rows = page.evaluate("() => document.querySelectorAll('[data-testid=sample-measure-table] tbody tr').length")
             sample_facts = page.inner_text("[data-testid=sample-quality] dl")
             # QS-C20..C24: freeze the protocol, run the fixture-pair matrix, inspect the six leaves and an error list.
+            goto("matchers")
             page.click("[data-testid=freeze-protocol]")
             page.wait_for_selector("[data-testid=protocol-summary]", timeout=120_000)
             page.click("[data-testid=matrix-fixture]")
@@ -235,6 +314,28 @@ def main() -> int:
                     "error_pairs_at_0_9": error_pairs[:6],
                 }
             )
+            # QS-Y86/Y87/Z91/Z92: open the recorded match evidence for the first error pair.
+            page.click("[data-testid=evidence-open]")
+            page.wait_for_selector("[data-testid=pair-evidence]", timeout=120_000)
+            page.wait_for_selector("[data-testid=evidence-crop-left]", timeout=120_000)
+            page.wait_for_selector("[data-testid=score-distribution]", state="attached", timeout=60_000)
+            crops_ok = page.evaluate(
+                "() => ['left','right'].map(s => { const i = document.querySelector(`[data-testid=evidence-crop-${s}]`); return i && i.naturalWidth === 112 && i.naturalHeight === 112; })"
+            )
+            evidence_statement = page.inner_text("[data-testid=evidence-statement]")
+            decisions = page.evaluate(
+                "() => Array.from(document.querySelectorAll('[data-testid=evidence-decisions] tbody tr')).map(r => r.innerText)"
+            )
+            observation["steps"].append(
+                {
+                    "step": "match-evidence",
+                    "compared_crops_112": crops_ok,
+                    "score_marker": bool(page.query_selector("[data-testid=pair-score-marker]")),
+                    "decisions": decisions,
+                    "attribution_shown": bool(page.query_selector("[data-testid=evidence-attribution]")),
+                    "statement_present": "not OFIQ's internal landmarks" in evidence_statement and "not causal" in evidence_statement,
+                }
+            )
             observation["steps"].append(
                 {
                     "step": "explorer",
@@ -247,6 +348,7 @@ def main() -> int:
                 }
             )
             # QS-D30..D33: run a utility analysis over the fixture matcher Run and the fixture quality job, inspect the results.
+            goto("utility")
             page.wait_for_function("() => document.querySelectorAll('[data-testid=utility-leaf] option').length > 0 && document.querySelectorAll('[data-testid=utility-job] option').length > 0", timeout=60_000)
             page.fill("[data-testid=utility-q]", "40")
             page.fill("[data-testid=utility-replicates]", "200")
@@ -274,6 +376,7 @@ def main() -> int:
                 }
             )
             # QS-E40..E42: run the cross-matcher contrasts over the fixture matrix, open a contrast's disagreement list, annotate a pair.
+            goto("cross")
             page.wait_for_function("() => document.querySelectorAll('[data-testid=cross-matrix] option').length > 0 && document.querySelectorAll('[data-testid=cross-job] option').length > 0", timeout=60_000)
             page.fill("[data-testid=cross-replicates]", "100")
             page.click("[data-testid=cross-run]")
@@ -306,6 +409,7 @@ def main() -> int:
                 }
             )
             # QS-F50..F53: figures, dashboard save/reload, report build, bundle export, reproduction.
+            goto("reports")
             page.wait_for_function("() => !document.querySelector('[data-testid=figure-det]')?.disabled", timeout=60_000)
             page.click("[data-testid=figure-det]")
             page.wait_for_selector("[data-testid=figure-detail] img", timeout=120_000)
@@ -338,6 +442,7 @@ def main() -> int:
                 }
             )
             # QS-X60/QS-X61: 1:N identification over the fixture subjects and a controlled-degradation response through the console.
+            goto("advanced")
             page.wait_for_function("() => !document.querySelector('[data-testid=ident-freeze]')?.disabled", timeout=60_000)
             page.click("[data-testid=ident-freeze]")
             page.wait_for_selector("[data-testid=ident-search]", timeout=60_000)

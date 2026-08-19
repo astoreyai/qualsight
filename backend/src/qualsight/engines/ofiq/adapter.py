@@ -220,6 +220,15 @@ class OFIQQualityEngine:
             )
             for resource in self.input_resources
         }
+        # Owner-supplied batches (decision 30) bind the runtime alone; scope
+        # authority comes from the runtime resource's own approved scopes.
+        self.owner_adapter: RegisteredCLIAdapter = RegisteredCLIAdapter.from_registry(
+            descriptor=descriptor,
+            registry=self.registry,
+            runtime_resource_id=runtime_resource_id,
+            input_resource_ids=(),
+            repository_root=self.repository_root,
+        )
         self.configuration = self.runtime.artifact("CONFIGURATION").identity
         self.executable = self.runtime.artifact("BINARY").identity
 

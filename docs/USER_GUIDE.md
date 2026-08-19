@@ -70,6 +70,30 @@ JOB_ID=$($QS batch --project-id "$PROJECT_ID" --dataset-id "$DATASET_ID" --selec
 echo "$JOB_ID"
 ```
 
+## 3b. Bring your own inputs (decision 30; console: *Assess your own photo*, *Data → owner import*)
+
+An operator-picked photo or directory is admitted by SHA-256 (uploads are stored content-addressed
+in the data directory; directory files are recorded in place), recorded with source kind
+`OWNER_SUPPLIED_LOCAL_INPUT` and the attributed operator, and assessed by the same registered
+engine. Owner-supplied data is never redistributed, never presented as a registered rights-reviewed
+dataset, and is removed by the project purge. `freeze-owner-pairs` builds a deterministic seeded
+pair protocol from the operator's identity labels (the generated pair list is itself hashed and
+recorded); the matcher matrix then runs on it unchanged. The gate block below uses real registered
+LFW photographs copied outside the registry tree to stand in for an evaluator's own files.
+
+```sh gate
+OWNER_ROOT=$(mktemp -d)
+mkdir -p "$OWNER_ROOT/person_a" "$OWNER_ROOT/person_b"
+cp /mnt/projects/datasets/lfw/lfw_funneled/Gerhard_Schroeder/Gerhard_Schroeder_0001.jpg "$OWNER_ROOT/person_a/"
+cp /mnt/projects/datasets/lfw/lfw_funneled/Gerhard_Schroeder/Gerhard_Schroeder_0002.jpg "$OWNER_ROOT/person_a/"
+cp /mnt/projects/datasets/lfw/lfw_funneled/Jacques_Chirac/Jacques_Chirac_0001.jpg "$OWNER_ROOT/person_b/"
+cp /mnt/projects/datasets/lfw/lfw_funneled/Jacques_Chirac/Jacques_Chirac_0002.jpg "$OWNER_ROOT/person_b/"
+$QS assess-owner --project-id "$PROJECT_ID" --image "$OWNER_ROOT/person_a/Gerhard_Schroeder_0001.jpg" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["source_kind"] == "OWNER_SUPPLIED_LOCAL_INPUT"; print(d["run_id"], d["image_sha256"][:16])'
+OWNER_DATASET_ID=$($QS import-owner-directory --project-id "$PROJECT_ID" --root "$OWNER_ROOT" --name "evaluator directory" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dataset_id"])')
+$QS freeze-owner-pairs --project-id "$PROJECT_ID" --dataset-id "$OWNER_DATASET_ID" --seed 7 | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["mated"] >= 2 and d["nonmated"] >= 2; print(d["protocol_id"], d["pairs_sha256"][:16])'
+rm -rf "$OWNER_ROOT"
+```
+
 ## 4. Freeze the protocol and run the matcher matrix (console: *Verification*)
 
 The LFW View 2 protocol (6,000 pairs, 10 folds) is frozen from the registered official pair lists

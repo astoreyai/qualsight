@@ -357,6 +357,24 @@ CREATE TABLE IF NOT EXISTS jobs (
     selection_rule TEXT NOT NULL,
     engine_version TEXT
 );
+CREATE TABLE IF NOT EXISTS owner_supplied_inputs (
+    path TEXT PRIMARY KEY,
+    sha256 TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    storage TEXT NOT NULL,
+    source_kind TEXT NOT NULL,
+    admitted_at TEXT NOT NULL,
+    record_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS import_mappings (
+    mapping_name TEXT PRIMARY KEY,
+    mapping_json TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -387,12 +405,28 @@ class RunStore:
         database_path.parent.mkdir(parents=True, exist_ok=True)
         self.database_path = database_path
         self._lock = threading.Lock()
+        # One locked writer connection; every reader thread gets its own
+        # connection (QS-S97). Reads on the writer's connection would observe
+        # a writer's uncommitted BEGIN..COMMIT window (same-connection reads
+        # bypass isolation); WAL gives per-connection snapshot isolation instead.
         self._connection = sqlite3.connect(str(database_path), check_same_thread=False, isolation_level=None)
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA foreign_keys=ON")
+        self._connection.execute("PRAGMA busy_timeout=30000")
         self._connection.executescript(SCHEMA)
+        self._readers = threading.local()
+
+    def _read(self) -> sqlite3.Connection:
+        connection = getattr(self._readers, "connection", None)
+        if connection is None:
+            connection = sqlite3.connect(str(self.database_path), check_same_thread=False, isolation_level=None)
+            connection.execute("PRAGMA busy_timeout=30000")
+            connection.execute("PRAGMA query_only=ON")
+            self._readers.connection = connection
+        return connection
 
     def close(self) -> None:
+        # Reader connections are per-thread and close with their threads.
         self._connection.close()
 
     # -- writes ----------------------------------------------------------------
@@ -978,11 +1012,11 @@ class RunStore:
         if matrix_id is not None:
             clauses.append("matrix_id = ?"); params.append(matrix_id)
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        cursor = self._connection.execute(f"SELECT * FROM cross_matcher_analyses{where} ORDER BY created_at", params)
+        cursor = self._read().execute(f"SELECT * FROM cross_matcher_analyses{where} ORDER BY created_at", params)
         return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
     def cross_matcher_analysis(self, analysis_id: str) -> dict[str, Any] | None:
-        cursor = self._connection.execute("SELECT * FROM cross_matcher_analyses WHERE analysis_id = ? OR run_id = ?", (analysis_id, analysis_id))
+        cursor = self._read().execute("SELECT * FROM cross_matcher_analyses WHERE analysis_id = ? OR run_id = ?", (analysis_id, analysis_id))
         row = cursor.fetchone()
         return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
 
@@ -1006,7 +1040,7 @@ class RunStore:
         if project_id is not None:
             clauses.append("project_id = ?"); params.append(project_id)
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        cursor = self._connection.execute(f"SELECT * FROM annotations{where} ORDER BY created_at LIMIT ?", [*params, int(limit)])
+        cursor = self._read().execute(f"SELECT * FROM annotations{where} ORDER BY created_at LIMIT ?", [*params, int(limit)])
         rows = [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
         for row in rows:
             row["context"] = json.loads(row.pop("context_json"))
@@ -1027,12 +1061,12 @@ class RunStore:
             self._connection.commit()
 
     def figure(self, figure_id: str) -> dict[str, Any] | None:
-        cursor = self._connection.execute("SELECT * FROM figures WHERE figure_id = ?", (figure_id,))
+        cursor = self._read().execute("SELECT * FROM figures WHERE figure_id = ?", (figure_id,))
         row = cursor.fetchone()
         return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
 
     def figures(self, *, project_id: str) -> list[dict[str, Any]]:
-        cursor = self._connection.execute("SELECT * FROM figures WHERE project_id = ? ORDER BY created_at", (project_id,))
+        cursor = self._read().execute("SELECT * FROM figures WHERE project_id = ? ORDER BY created_at", (project_id,))
         return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
     def record_dashboard(self, record: dict[str, Any]) -> None:
@@ -1049,12 +1083,12 @@ class RunStore:
             self._connection.commit()
 
     def dashboard(self, dashboard_id: str) -> dict[str, Any] | None:
-        cursor = self._connection.execute("SELECT * FROM dashboards WHERE dashboard_id = ?", (dashboard_id,))
+        cursor = self._read().execute("SELECT * FROM dashboards WHERE dashboard_id = ?", (dashboard_id,))
         row = cursor.fetchone()
         return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
 
     def dashboards(self, *, project_id: str) -> list[dict[str, Any]]:
-        cursor = self._connection.execute("SELECT * FROM dashboards WHERE project_id = ? ORDER BY created_at", (project_id,))
+        cursor = self._read().execute("SELECT * FROM dashboards WHERE project_id = ? ORDER BY created_at", (project_id,))
         return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
     def record_report(self, record: dict[str, Any]) -> None:
@@ -1066,12 +1100,12 @@ class RunStore:
             self._connection.commit()
 
     def report(self, report_id: str) -> dict[str, Any] | None:
-        cursor = self._connection.execute("SELECT * FROM reports WHERE report_id = ?", (report_id,))
+        cursor = self._read().execute("SELECT * FROM reports WHERE report_id = ?", (report_id,))
         row = cursor.fetchone()
         return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
 
     def reports(self, *, project_id: str) -> list[dict[str, Any]]:
-        cursor = self._connection.execute("SELECT * FROM reports WHERE project_id = ? ORDER BY created_at", (project_id,))
+        cursor = self._read().execute("SELECT * FROM reports WHERE project_id = ? ORDER BY created_at", (project_id,))
         return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
     def record_experiment_bundle(self, record: dict[str, Any]) -> None:
@@ -1087,7 +1121,7 @@ class RunStore:
         if run_id is not None:
             clauses.append("run_id = ?"); params.append(run_id)
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        cursor = self._connection.execute(f"SELECT * FROM bundles{where} ORDER BY created_at", params)
+        cursor = self._read().execute(f"SELECT * FROM bundles{where} ORDER BY created_at", params)
         return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
     def record_reproduction(self, record: dict[str, Any]) -> None:
@@ -1113,14 +1147,14 @@ class RunStore:
             self._connection.execute("COMMIT")
 
     def identification_protocol(self, protocol_id: str) -> dict[str, Any] | None:
-        row = self._connection.execute("SELECT record_json FROM identification_protocols WHERE protocol_id = ?", (protocol_id,)).fetchone()
+        row = self._read().execute("SELECT record_json FROM identification_protocols WHERE protocol_id = ?", (protocol_id,)).fetchone()
         return json.loads(row[0]) if row else None
 
     def identification_protocols(self, *, project_id: str) -> list[dict[str, Any]]:
-        return [json.loads(row[0]) for row in self._connection.execute("SELECT record_json FROM identification_protocols WHERE project_id = ? ORDER BY created_at", (project_id,)).fetchall()]
+        return [json.loads(row[0]) for row in self._read().execute("SELECT record_json FROM identification_protocols WHERE project_id = ? ORDER BY created_at", (project_id,)).fetchall()]
 
     def identification_entries(self, protocol_id: str) -> list[dict[str, Any]]:
-        cursor = self._connection.execute("SELECT source_order, role, sample_id, subject_id FROM identification_entries WHERE protocol_id = ? ORDER BY source_order", (protocol_id,))
+        cursor = self._read().execute("SELECT source_order, role, sample_id, subject_id FROM identification_entries WHERE protocol_id = ? ORDER BY source_order", (protocol_id,))
         return [{"source_order": r[0], "role": r[1], "sample_id": r[2], "subject_id": r[3]} for r in cursor.fetchall()]
 
     def record_identification_search(self, result: Any, protocol: dict[str, Any]) -> None:
@@ -1140,12 +1174,12 @@ class RunStore:
             self._connection.execute("COMMIT")
 
     def identification_search(self, search_id: str) -> dict[str, Any] | None:
-        cursor = self._connection.execute("SELECT * FROM identification_searches WHERE search_id = ? OR run_id = ?", (search_id, search_id))
+        cursor = self._read().execute("SELECT * FROM identification_searches WHERE search_id = ? OR run_id = ?", (search_id, search_id))
         row = cursor.fetchone()
         return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
 
     def identification_searches(self, *, project_id: str) -> list[dict[str, Any]]:
-        cursor = self._connection.execute("SELECT * FROM identification_searches WHERE project_id = ? ORDER BY created_at", (project_id,))
+        cursor = self._read().execute("SELECT * FROM identification_searches WHERE project_id = ? ORDER BY created_at", (project_id,))
         return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
     def record_derived_set(self, result: Any) -> None:
@@ -1169,19 +1203,84 @@ class RunStore:
             self._connection.execute("COMMIT")
 
     def derived_set(self, derived_set_id: str) -> dict[str, Any] | None:
-        row = self._connection.execute("SELECT record_json FROM derived_sets WHERE derived_set_id = ? OR derived_dataset_id = ?", (derived_set_id, derived_set_id)).fetchone()
+        row = self._read().execute("SELECT record_json FROM derived_sets WHERE derived_set_id = ? OR derived_dataset_id = ?", (derived_set_id, derived_set_id)).fetchone()
         return json.loads(row[0]) if row else None
 
     def derived_sets(self, *, project_id: str) -> list[dict[str, Any]]:
-        return [json.loads(row[0]) for row in self._connection.execute("SELECT record_json FROM derived_sets WHERE project_id = ? ORDER BY created_at", (project_id,)).fetchall()]
+        return [json.loads(row[0]) for row in self._read().execute("SELECT record_json FROM derived_sets WHERE project_id = ? ORDER BY created_at", (project_id,)).fetchall()]
 
     def derived_samples(self, derived_set_id: str) -> list[dict[str, Any]]:
-        cursor = self._connection.execute("SELECT derived_sample_id, parent_sample_id, transform, parameter, level_index, path, sha256, chain_json FROM derived_samples WHERE derived_set_id = ? ORDER BY level_index, parent_sample_id", (derived_set_id,))
+        cursor = self._read().execute("SELECT derived_sample_id, parent_sample_id, transform, parameter, level_index, path, sha256, chain_json FROM derived_samples WHERE derived_set_id = ? ORDER BY level_index, parent_sample_id", (derived_set_id,))
         return [{"derived_sample_id": r[0], "parent_sample_id": r[1], "transform": r[2], "parameter": r[3], "level_index": r[4], "path": r[5], "sha256": r[6], "chain": json.loads(r[7])} for r in cursor.fetchall()]
 
     def derived_sample_by_path(self, path: str) -> dict[str, Any] | None:
-        row = self._connection.execute("SELECT derived_sample_id, derived_set_id, parent_sample_id, sha256, chain_json FROM derived_samples WHERE path = ?", (path,)).fetchone()
+        row = self._read().execute("SELECT derived_sample_id, derived_set_id, parent_sample_id, sha256, chain_json FROM derived_samples WHERE path = ?", (path,)).fetchone()
         return {"derived_sample_id": row[0], "derived_set_id": row[1], "parent_sample_id": row[2], "sha256": row[3], "chain": json.loads(row[4])} if row else None
+
+    def record_owner_supplied(self, record: dict[str, Any]) -> None:
+        """Admit an owner-supplied local input (decision 30); idempotent for identical bytes at the same path."""
+
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT sha256 FROM owner_supplied_inputs WHERE path = ?", (record["path"],)
+            ).fetchone()
+            if row is not None:
+                if row[0] != record["sha256"]:
+                    raise ImmutableRecordConflict(
+                        f"owner-supplied path {record['path']} was already admitted with different bytes"
+                    )
+                return
+            self._connection.execute(
+                "INSERT INTO owner_supplied_inputs (path, sha256, project_id, actor_id, original_name, size_bytes, storage, source_kind, admitted_at, record_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    record["path"], record["sha256"], record["project_id"], record["actor_id"],
+                    record["original_name"], record["size_bytes"], record["storage"],
+                    record["source_kind"], record["admitted_at"],
+                    json.dumps(record, sort_keys=True, separators=(",", ":")),
+                ),
+            )
+
+    def owner_supplied_by_path(self, path: str) -> dict[str, Any] | None:
+        row = self._read().execute(
+            "SELECT record_json FROM owner_supplied_inputs WHERE path = ?", (path,)
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def owner_supplied_for_project(self, project_id: str) -> list[dict[str, Any]]:
+        cursor = self._read().execute(
+            "SELECT record_json FROM owner_supplied_inputs WHERE project_id = ? ORDER BY admitted_at", (project_id,)
+        )
+        return [json.loads(row[0]) for row in cursor.fetchall()]
+
+    def record_import_mapping(self, mapping_name: str, mapping: dict[str, str], actor_id: str, created_at: str) -> None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT mapping_json FROM import_mappings WHERE mapping_name = ?", (mapping_name,)
+            ).fetchone()
+            text = json.dumps(mapping, sort_keys=True, separators=(",", ":"))
+            if row is not None:
+                if row[0] != text:
+                    raise ImmutableRecordConflict(f"import mapping {mapping_name} already exists with a different mapping")
+                return
+            self._connection.execute(
+                "INSERT INTO import_mappings (mapping_name, mapping_json, actor_id, created_at) VALUES (?, ?, ?, ?)",
+                (mapping_name, text, actor_id, created_at),
+            )
+
+    def import_mapping(self, mapping_name: str) -> dict[str, str] | None:
+        row = self._read().execute(
+            "SELECT mapping_json FROM import_mappings WHERE mapping_name = ?", (mapping_name,)
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def import_mappings(self) -> list[dict[str, Any]]:
+        cursor = self._read().execute(
+            "SELECT mapping_name, mapping_json, actor_id, created_at FROM import_mappings ORDER BY mapping_name"
+        )
+        return [
+            {"mapping_name": row[0], "mapping": json.loads(row[1]), "actor_id": row[2], "created_at": row[3]}
+            for row in cursor.fetchall()
+        ]
 
     def record_degradation_analysis(self, result: Any) -> None:
         run = result.run
@@ -1198,12 +1297,12 @@ class RunStore:
             self._connection.execute("COMMIT")
 
     def degradation_analysis(self, analysis_id: str) -> dict[str, Any] | None:
-        cursor = self._connection.execute("SELECT * FROM degradation_analyses WHERE analysis_id = ? OR run_id = ?", (analysis_id, analysis_id))
+        cursor = self._read().execute("SELECT * FROM degradation_analyses WHERE analysis_id = ? OR run_id = ?", (analysis_id, analysis_id))
         row = cursor.fetchone()
         return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
 
     def degradation_analyses(self, *, project_id: str) -> list[dict[str, Any]]:
-        cursor = self._connection.execute("SELECT * FROM degradation_analyses WHERE project_id = ? ORDER BY created_at", (project_id,))
+        cursor = self._read().execute("SELECT * FROM degradation_analyses WHERE project_id = ? ORDER BY created_at", (project_id,))
         return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
     def record_purge(self, record: dict[str, Any]) -> None:
@@ -1214,7 +1313,7 @@ class RunStore:
 
     def purges(self, *, project_id: str | None = None) -> list[dict[str, Any]]:
         where = " WHERE project_id = ?" if project_id is not None else ""
-        cursor = self._connection.execute(f"SELECT record_json FROM purges{where} ORDER BY created_at", (project_id,) if project_id is not None else ())
+        cursor = self._read().execute(f"SELECT record_json FROM purges{where} ORDER BY created_at", (project_id,) if project_id is not None else ())
         return [json.loads(row[0]) for row in cursor.fetchall()]
 
     def reproductions(self, *, original_run_id: str | None = None, project_id: str | None = None) -> list[dict[str, Any]]:
@@ -1224,7 +1323,7 @@ class RunStore:
         if project_id is not None:
             clauses.append("project_id = ?"); params.append(project_id)
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        cursor = self._connection.execute(f"SELECT * FROM reproductions{where} ORDER BY created_at", params)
+        cursor = self._read().execute(f"SELECT * FROM reproductions{where} ORDER BY created_at", params)
         return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
     def utility_analyses(self, *, project_id: str | None = None, matcher_run_id: str | None = None) -> list[dict[str, Any]]:
@@ -1234,11 +1333,11 @@ class RunStore:
         if matcher_run_id is not None:
             clauses.append("matcher_run_id = ?"); params.append(matcher_run_id)
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        cursor = self._connection.execute(f"SELECT * FROM utility_analyses{where} ORDER BY created_at", params)
+        cursor = self._read().execute(f"SELECT * FROM utility_analyses{where} ORDER BY created_at", params)
         return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
     def utility_analysis(self, analysis_id: str) -> dict[str, Any] | None:
-        cursor = self._connection.execute("SELECT * FROM utility_analyses WHERE analysis_id = ? OR run_id = ?", (analysis_id, analysis_id))
+        cursor = self._read().execute("SELECT * FROM utility_analyses WHERE analysis_id = ? OR run_id = ?", (analysis_id, analysis_id))
         row = cursor.fetchone()
         return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
 
@@ -1249,11 +1348,11 @@ class RunStore:
         if matrix_id is not None:
             clauses.append("matrix_id = ?"); params.append(matrix_id)
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        cursor = self._connection.execute(f"SELECT * FROM matcher_leaves{where} ORDER BY created_at, leaf_id", params)
+        cursor = self._read().execute(f"SELECT * FROM matcher_leaves{where} ORDER BY created_at, leaf_id", params)
         return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
     def matcher_leaf(self, run_id: str) -> dict[str, Any] | None:
-        cursor = self._connection.execute("SELECT * FROM matcher_leaves WHERE run_id = ?", (run_id,))
+        cursor = self._read().execute("SELECT * FROM matcher_leaves WHERE run_id = ?", (run_id,))
         row = cursor.fetchone()
         return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
 
@@ -1262,18 +1361,36 @@ class RunStore:
             self._connection.execute("UPDATE jobs SET ended_at = ?, state = ? WHERE job_id = ? AND ended_at IS NULL", (ended_at, state, job_id))
 
     def job(self, job_id: str) -> dict[str, Any] | None:
-        cursor = self._connection.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,))
+        cursor = self._read().execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,))
         row = cursor.fetchone()
         if row is None:
             return None
         return {description[0]: value for description, value in zip(cursor.description, row)}
 
     def jobs_for_project(self, project_id: str) -> list[dict[str, Any]]:
-        cursor = self._connection.execute("SELECT * FROM jobs WHERE project_id = ? ORDER BY created_at DESC", (project_id,))
+        cursor = self._read().execute("SELECT * FROM jobs WHERE project_id = ? ORDER BY created_at DESC", (project_id,))
         return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
+    def quality_measure_medians(self, job_id: str) -> dict[str, float]:
+        """Median scalar per measure over the job's MEASURED rows (recorded values only)."""
+
+        cursor = self._read().execute(
+            "SELECT measures_json FROM quality_results WHERE job_id = ? AND outcome = 'MEASURED'", (job_id,)
+        )
+        values: dict[str, list[float]] = {}
+        for (text,) in cursor.fetchall():
+            for name, value in json.loads(text).items():
+                if not value["failed"] and value["scalar"] is not None:
+                    values.setdefault(name, []).append(float(value["scalar"]))
+        medians: dict[str, float] = {}
+        for name, items in values.items():
+            items.sort()
+            mid = len(items) // 2
+            medians[name] = items[mid] if len(items) % 2 else (items[mid - 1] + items[mid]) / 2
+        return medians
+
     def quality_results_for_sample(self, sample_id: str) -> list[dict[str, Any]]:
-        cursor = self._connection.execute(
+        cursor = self._read().execute(
             "SELECT job_id, sample_id, dataset_id, run_id, outcome, failure_reason, uqs_scalar, uqs_native, measures_json FROM quality_results WHERE sample_id = ? ORDER BY job_id",
             (sample_id,),
         )
@@ -1297,8 +1414,8 @@ class RunStore:
             clauses.append("outcome = ?")
             params.append(outcome)
         where = " AND ".join(clauses)
-        total = int(self._connection.execute(f"SELECT COUNT(*) FROM quality_results WHERE {where}", params).fetchone()[0])
-        cursor = self._connection.execute(
+        total = int(self._read().execute(f"SELECT COUNT(*) FROM quality_results WHERE {where}", params).fetchone()[0])
+        cursor = self._read().execute(
             f"SELECT q.job_id, q.sample_id, q.dataset_id, q.run_id, q.outcome, q.failure_reason, q.uqs_scalar, q.uqs_native, s.source_path, s.sha256 "
             f"FROM quality_results q JOIN samples s ON s.sample_id = q.sample_id WHERE {where} ORDER BY q.uqs_scalar, s.source_path LIMIT ? OFFSET ?",
             [*params, int(limit), int(offset)],
@@ -1308,31 +1425,31 @@ class RunStore:
     def quality_coverage(self, dataset_id: str) -> dict[str, Any]:
         """PRD §11 quality coverage from every recorded batch result of a dataset."""
 
-        totals = self._connection.execute(
+        totals = self._read().execute(
             "SELECT outcome, COUNT(*) FROM quality_results WHERE dataset_id = ? GROUP BY outcome", (dataset_id,)
         ).fetchall()
         by_outcome = {outcome: int(count) for outcome, count in totals}
         assessed_samples = int(
-            self._connection.execute(
+            self._read().execute(
                 "SELECT COUNT(DISTINCT sample_id) FROM quality_results WHERE dataset_id = ? AND outcome = 'MEASURED'", (dataset_id,)
             ).fetchone()[0]
         )
         distinct_samples = int(
-            self._connection.execute("SELECT COUNT(DISTINCT sample_id) FROM quality_results WHERE dataset_id = ?", (dataset_id,)).fetchone()[0]
+            self._read().execute("SELECT COUNT(DISTINCT sample_id) FROM quality_results WHERE dataset_id = ?", (dataset_id,)).fetchone()[0]
         )
-        jobs = [row[0] for row in self._connection.execute("SELECT DISTINCT job_id FROM quality_results WHERE dataset_id = ?", (dataset_id,)).fetchall()]
+        jobs = [row[0] for row in self._read().execute("SELECT DISTINCT job_id FROM quality_results WHERE dataset_id = ?", (dataset_id,)).fetchall()]
         if not distinct_samples:
             return {"state": "NOT_ASSESSED", "reason": "No quality Run has executed over this dataset yet (QS-B12)."}
-        uqs = self._connection.execute(
+        uqs = self._read().execute(
             "SELECT MIN(uqs_scalar), MAX(uqs_scalar), AVG(uqs_scalar), COUNT(uqs_scalar) FROM quality_results WHERE dataset_id = ? AND outcome = 'MEASURED'",
             (dataset_id,),
         ).fetchone()
-        histogram = self._connection.execute(
+        histogram = self._read().execute(
             "SELECT uqs_scalar / 10 AS bin, COUNT(*) FROM quality_results WHERE dataset_id = ? AND outcome = 'MEASURED' AND uqs_scalar IS NOT NULL GROUP BY bin ORDER BY bin",
             (dataset_id,),
         ).fetchall()
         component_failures: dict[str, int] = {}
-        for (measures_json,) in self._connection.execute(
+        for (measures_json,) in self._read().execute(
             "SELECT measures_json FROM quality_results WHERE dataset_id = ? AND outcome = 'MEASURED'", (dataset_id,)
         ).fetchall():
             for name, value in json.loads(measures_json).items():
@@ -1402,13 +1519,13 @@ class RunStore:
     def protocol(self, protocol_id: str) -> Any | None:
         from ..domain.comparison import VerificationProtocolRecord
 
-        row = self._connection.execute("SELECT record_json FROM protocols WHERE protocol_id = ?", (protocol_id,)).fetchone()
+        row = self._read().execute("SELECT record_json FROM protocols WHERE protocol_id = ?", (protocol_id,)).fetchone()
         return VerificationProtocolRecord.model_validate_json(row[0]) if row else None
 
     def protocols_for_project(self, project_id: str) -> list[Any]:
         from ..domain.comparison import VerificationProtocolRecord
 
-        rows = self._connection.execute("SELECT record_json FROM protocols WHERE project_id = ?", (project_id,)).fetchall()
+        rows = self._read().execute("SELECT record_json FROM protocols WHERE project_id = ?", (project_id,)).fetchall()
         return [VerificationProtocolRecord.model_validate_json(row[0]) for row in rows]
 
     def protocol_pairs(self, protocol_id: str, *, limit: int, offset: int = 0, fold: int | None = None, label: str | None = None) -> list[Any]:
@@ -1422,29 +1539,29 @@ class RunStore:
         if label is not None:
             clauses.append("label = ?")
             params.append(label)
-        rows = self._connection.execute(
+        rows = self._read().execute(
             f"SELECT record_json FROM protocol_pairs WHERE {' AND '.join(clauses)} ORDER BY fold, source_order LIMIT ? OFFSET ?",
             [*params, int(limit), int(offset)],
         ).fetchall()
         return [ProtocolPair.model_validate_json(row[0]) for row in rows]
 
     def protocol_pair_count(self, protocol_id: str) -> int:
-        return int(self._connection.execute("SELECT COUNT(*) FROM protocol_pairs WHERE protocol_id = ?", (protocol_id,)).fetchone()[0])
+        return int(self._read().execute("SELECT COUNT(*) FROM protocol_pairs WHERE protocol_id = ?", (protocol_id,)).fetchone()[0])
 
     def artifacts_for_run(self, run_id: str) -> list[Artifact]:
-        rows = self._connection.execute("SELECT record_json FROM artifacts WHERE run_id = ?", (run_id,)).fetchall()
+        rows = self._read().execute("SELECT record_json FROM artifacts WHERE run_id = ?", (run_id,)).fetchall()
         return [Artifact.model_validate_json(row[0]) for row in rows]
 
     # -- reads -----------------------------------------------------------------
 
     def datasets_for_project(self, project_id: str) -> list[Dataset]:
-        rows = self._connection.execute(
+        rows = self._read().execute(
             "SELECT record_json FROM datasets WHERE project_id = ?", (project_id,)
         ).fetchall()
         return [Dataset.model_validate_json(row[0]) for row in rows]
 
     def dataset_statistics(self, dataset_id: str) -> tuple[dict, str] | None:
-        row = self._connection.execute(
+        row = self._read().execute(
             "SELECT record_json, evidence_sha256 FROM dataset_statistics WHERE dataset_id = ?", (dataset_id,)
         ).fetchone()
         if row is None:
@@ -1454,42 +1571,42 @@ class RunStore:
         return json.loads(row[0]), row[1]
 
     def sample_count(self, dataset_id: str) -> int:
-        row = self._connection.execute("SELECT COUNT(*) FROM samples WHERE dataset_id = ?", (dataset_id,)).fetchone()
+        row = self._read().execute("SELECT COUNT(*) FROM samples WHERE dataset_id = ?", (dataset_id,)).fetchone()
         return int(row[0])
 
     def samples_for_dataset(self, dataset_id: str, *, limit: int, offset: int = 0, subject_id: str | None = None) -> list[Sample]:
         if subject_id is None:
-            rows = self._connection.execute(
+            rows = self._read().execute(
                 "SELECT record_json FROM samples WHERE dataset_id = ? ORDER BY source_path LIMIT ? OFFSET ?",
                 (dataset_id, int(limit), int(offset)),
             ).fetchall()
         else:
-            rows = self._connection.execute(
+            rows = self._read().execute(
                 "SELECT record_json FROM samples WHERE dataset_id = ? AND source_path LIKE ? ORDER BY source_path LIMIT ? OFFSET ?",
                 (dataset_id, f"%/{subject_id}/%", int(limit), int(offset)),
             ).fetchall()
         return [Sample.model_validate_json(row[0]) for row in rows]
 
     def sample_by_source_path(self, source_path: str) -> Sample | None:
-        row = self._connection.execute(
+        row = self._read().execute(
             "SELECT record_json FROM samples WHERE source_path = ? LIMIT 1", (source_path,)
         ).fetchone()
         return Sample.model_validate_json(row[0]) if row else None
 
     def sample_by_path(self, dataset_id: str, source_path: str) -> Sample | None:
-        row = self._connection.execute(
+        row = self._read().execute(
             "SELECT record_json FROM samples WHERE dataset_id = ? AND source_path = ?", (dataset_id, source_path)
         ).fetchone()
         return Sample.model_validate_json(row[0]) if row else None
 
     def project_head(self, project_id: str) -> tuple[Project, int] | None:
-        row = self._connection.execute(
+        row = self._read().execute(
             "SELECT record_json, version, evidence_sha256 FROM project_versions WHERE project_id = ? "
             "ORDER BY version DESC LIMIT 1",
             (project_id,),
         ).fetchone()
         if row is None:
-            legacy = self._connection.execute(
+            legacy = self._read().execute(
                 "SELECT record_json FROM projects WHERE project_id = ?", (project_id,)
             ).fetchone()
             if legacy is None:
@@ -1501,14 +1618,14 @@ class RunStore:
         return Project.model_validate_json(record_json), int(version)
 
     def project_versions(self, project_id: str) -> list[tuple[int, Project]]:
-        rows = self._connection.execute(
+        rows = self._read().execute(
             "SELECT version, record_json FROM project_versions WHERE project_id = ? ORDER BY version",
             (project_id,),
         ).fetchall()
         return [(int(version), Project.model_validate_json(record_json)) for version, record_json in rows]
 
     def list_project_heads(self) -> list[tuple[Project, int]]:
-        rows = self._connection.execute(
+        rows = self._read().execute(
             "SELECT p.project_id FROM projects p ORDER BY p.created_at DESC"
         ).fetchall()
         heads: list[tuple[Project, int]] = []
@@ -1519,19 +1636,19 @@ class RunStore:
         return heads
 
     def run_ids_for_project(self, project_id: str) -> list[str]:
-        rows = self._connection.execute(
+        rows = self._read().execute(
             "SELECT run_id FROM runs WHERE project_id = ? ORDER BY start_time", (project_id,)
         ).fetchall()
         return [row[0] for row in rows]
 
     def audit_events_for_project(self, project_id: str) -> list[AuditEvent]:
-        rows = self._connection.execute(
+        rows = self._read().execute(
             "SELECT record_json FROM audit_events WHERE project_id = ? ORDER BY occurred_at", (project_id,)
         ).fetchall()
         return [AuditEvent.model_validate_json(row[0]) for row in rows]
 
     def run(self, run_id: str) -> tuple[CompletedRun, str] | None:
-        row = self._connection.execute(
+        row = self._read().execute(
             "SELECT record_json, evidence_sha256 FROM runs WHERE run_id = ?", (run_id,)
         ).fetchone()
         if row is None:
@@ -1542,7 +1659,7 @@ class RunStore:
         return CompletedRun.model_validate_json(record_json), evidence_sha256
 
     def run_summaries(self, limit: int = 200) -> list[RunSummary]:
-        rows = self._connection.execute(
+        rows = self._read().execute(
             "SELECT run_id, project_id, experiment_id, sample_id, status, engine_resource_id, "
             "engine_version, start_time, end_time, evidence_sha256 FROM runs "
             "ORDER BY start_time DESC LIMIT ?",
@@ -1551,29 +1668,29 @@ class RunStore:
         return [RunSummary(*row) for row in rows]
 
     def project(self, project_id: str) -> Project | None:
-        row = self._connection.execute("SELECT record_json FROM projects WHERE project_id = ?", (project_id,)).fetchone()
+        row = self._read().execute("SELECT record_json FROM projects WHERE project_id = ?", (project_id,)).fetchone()
         return Project.model_validate_json(row[0]) if row else None
 
     def dataset(self, dataset_id: str) -> Dataset | None:
-        row = self._connection.execute("SELECT record_json FROM datasets WHERE dataset_id = ?", (dataset_id,)).fetchone()
+        row = self._read().execute("SELECT record_json FROM datasets WHERE dataset_id = ?", (dataset_id,)).fetchone()
         return Dataset.model_validate_json(row[0]) if row else None
 
     def sample(self, sample_id: str) -> Sample | None:
-        row = self._connection.execute("SELECT record_json FROM samples WHERE sample_id = ?", (sample_id,)).fetchone()
+        row = self._read().execute("SELECT record_json FROM samples WHERE sample_id = ?", (sample_id,)).fetchone()
         return Sample.model_validate_json(row[0]) if row else None
 
     def experiment(self, experiment_id: str) -> Experiment | None:
-        row = self._connection.execute(
+        row = self._read().execute(
             "SELECT record_json FROM experiments WHERE experiment_id = ?", (experiment_id,)
         ).fetchone()
         return Experiment.model_validate_json(row[0]) if row else None
 
     def audit_events_for(self, subject_id: str) -> list[AuditEvent]:
-        rows = self._connection.execute(
+        rows = self._read().execute(
             "SELECT record_json FROM audit_events WHERE subject_id = ? ORDER BY occurred_at", (subject_id,)
         ).fetchall()
         return [AuditEvent.model_validate_json(row[0]) for row in rows]
 
     def sample_id_for_run(self, run_id: str) -> str | None:
-        row = self._connection.execute("SELECT sample_id FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        row = self._read().execute("SELECT sample_id FROM runs WHERE run_id = ?", (run_id,)).fetchone()
         return row[0] if row else None

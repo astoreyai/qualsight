@@ -235,6 +235,7 @@ export interface MatcherLeaf {
   matcher_id: string;
   condition_id: string;
   protocol_id: string;
+  dataset_id?: string | null;
   comparison_count: number;
   scored_count: number;
   failed_count: number;
@@ -484,7 +485,28 @@ export interface DerivedSetOut { derived_set_id: string; derived_dataset_id: str
 export interface DegradationSummary { analysis_id: string; run_id: string; derived_set_id: string; matcher_id: string; condition_id: string; matcher_threshold: number; transforms: string[]; levels: number; mated_pairs: number; nonmated_pairs: number; seconds: number; fnmr_by_transform: Record<string, Array<number | null>>; uqs_by_transform: Record<string, Array<number | null>>; created_at?: string; links?: { analysis: string; run: string } }
 export interface DegradationOut { analysis_id: string; state: "RUNNING" | "COMPLETED" | "FAILED"; run_id?: string; summary?: DegradationSummary; document?: any; progress?: any; error?: string | null }
 
+export interface UploadAssessOut {
+  run_id: string;
+  job_id: string;
+  dataset_id: string;
+  sample_id: string;
+  source_kind: string;
+  image_sha256: string;
+  stored_path: string;
+  original_name: string;
+  width: number;
+  height: number;
+  measures: MeasureOut[];
+  failed_measures: string[];
+  provenance: { run: string; sample_image: string; statement: string };
+}
+
 export const api = {
+  assessUpload: (project_id: string, purpose_scope: string, file: File) =>
+    fetch(
+      `/api/quality/assess-upload?project_id=${encodeURIComponent(project_id)}&purpose_scope=${encodeURIComponent(purpose_scope)}&filename=${encodeURIComponent(file.name)}`,
+      { method: "POST", headers: { "content-type": "application/octet-stream" }, body: file },
+    ).then((r) => readJson<UploadAssessOut>(r)),
   freezeIdentification: (project_id: string, dataset_id: string, selection: string, rank_depth: number) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/${encodeURIComponent(dataset_id)}/protocols/freeze-lfw-identification`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ selection, rank_depth }) }).then((r) => readJson<IdentificationProtocolOut>(r)),
   identificationProtocols: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/identification-protocols`).then((r) => readJson<IdentificationProtocolOut[]>(r)),

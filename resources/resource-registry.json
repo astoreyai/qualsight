@@ -1413,6 +1413,13 @@
           "mtime_ns": 1786989397000000000
         },
         {
+          "role": "AUXILIARY_BINARY",
+          "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/install/Release/bin/OFIQLandmarkApp",
+          "sha256": "a7fd7a1f54f7efe429de4d2fa46160e332c2d3c0f84e8b1bfebe2759d4891034",
+          "size_bytes": 27512,
+          "mtime_ns": 1787145845899992123
+        },
+        {
           "role": "RUNTIME_LIBRARY",
           "path": "/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build/install/Release/bin/libofiq_lib.so",
           "sha256": "d96f98b47f447c47c35f1d724daacd6d687545c638bb80694715e6f8c7f5e7c3",

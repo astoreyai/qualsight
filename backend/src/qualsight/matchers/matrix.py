@@ -150,7 +150,7 @@ class MatcherMatrixJob:
         self.matchers = matchers
         self.conditions = conditions
         self.selection_rule = selection_rule
-        for resource_id in (SCRFD_RESOURCE_ID, *(m.value for m in matchers), dataset_resource_of(dataset)):
+        for resource_id in filter(None, (SCRFD_RESOURCE_ID, *(m.value for m in matchers), dataset_resource_of(dataset))):
             resource = registry.resource(resource_id)
             if purpose_scope not in resource.approved_scopes:
                 raise MatrixError(f"{resource_id} does not approve scope {purpose_scope}")
@@ -447,5 +447,8 @@ class MatcherMatrixJob:
         return self.leaves
 
 
-def dataset_resource_of(dataset: Dataset) -> str:
-    return json.loads(dataset.manifest.text)["dataset_resource_id"]
+def dataset_resource_of(dataset: Dataset) -> str | None:
+    descriptor = json.loads(dataset.manifest.text)
+    if descriptor.get("source_kind") == "OWNER_SUPPLIED_LOCAL_INPUT":
+        return None  # decision 30: not a registered resource; scope authority is the runtime grant
+    return descriptor["dataset_resource_id"]

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type JobOut, type MatcherLeaf, type PairQualityPolicy, type UtilityAnalysisOut, type UtilityPairRow, type UtilitySummary } from "./api";
+import { PairEvidence } from "./PairEvidence";
 
 const MATCHER_SHORT: Record<string, string> = {
   "adaface-ir101-local-candidate": "AdaFace IR-101",
@@ -47,6 +48,7 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
   const [detail, setDetail] = useState<UtilityAnalysisOut | null>(null);
   const [curves, setCurves] = useState<Record<string, { fnmr: CurvePoint[]; label: string }>>({});
   const [pairs, setPairs] = useState<{ total: number; rows: UtilityPairRow[] } | null>(null);
+  const [evidencePairId, setEvidencePairId] = useState<string | null>(null);
   const [pairFilter, setPairFilter] = useState<"rejected" | "prevented" | "removed">("rejected");
   const [busy, setBusy] = useState(false);
 
@@ -62,7 +64,6 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
     api.projectJobs(projectId).then((items) => {
       const completed = items.filter((job) => job.state === "COMPLETED" && job.run_id);
       setJobs(completed);
-      setSelectedJob((current) => current || (completed[0]?.job_id ?? ""));
     }).catch(() => setJobs([]));
     api.utilityAnalyses(projectId).then(setAnalyses).catch(() => setAnalyses([]));
   }, [projectId]);
@@ -109,6 +110,22 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [analyses]);
+
+  const leafDataset = useMemo(
+    () => leaves.find((leaf) => leaf.run_id === selectedLeaf)?.dataset_id ?? null,
+    [leaves, selectedLeaf],
+  );
+  const eligibleJobs = useMemo(
+    () => jobs.filter((job) => !leafDataset || !job.dataset_id || job.dataset_id === leafDataset),
+    [jobs, leafDataset],
+  );
+  useEffect(() => {
+    // A quality job is only comparable to a matcher Run over the same dataset;
+    // keep the selection inside the eligible set (e.g. exclude uploaded-photo jobs).
+    setSelectedJob((current) =>
+      current && eligibleJobs.some((job) => job.job_id === current) ? current : (eligibleJobs[0]?.job_id ?? ""),
+    );
+  }, [eligibleJobs]);
 
   const start = useCallback(async () => {
     if (!projectId || !selectedLeaf || !selectedJob) return;
@@ -185,7 +202,7 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
         <label>
           Quality job
           <select value={selectedJob} onChange={(event) => setSelectedJob(event.target.value)} data-testid="utility-job">
-            {jobs.map((job) => (
+            {eligibleJobs.map((job) => (
               <option key={job.job_id} value={job.job_id}>{shortHash(job.job_id)} · {job.assessed.toLocaleString()} measured</option>
             ))}
           </select>
@@ -404,6 +421,12 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
                     {row.links.right_image && <img src={row.links.right_image} alt="" loading="lazy" />}
                     <div className="pair-facts">
                       <span className="mono">{row.pair_id} · fold {row.fold} · {row.label}</span>
+                      <button type="button" className="secondary" data-testid="utility-evidence-open" onClick={() => setEvidencePairId(evidencePairId === row.pair_id ? null : row.pair_id)}>
+                        {evidencePairId === row.pair_id ? "hide evidence" : "match evidence"}
+                      </button>
+                      {evidencePairId === row.pair_id && detail?.summary?.matcher_run_id && (
+                        <PairEvidence runId={detail.summary.matcher_run_id} pairId={row.pair_id} onClose={() => setEvidencePairId(null)} />
+                      )}
                       <span className="mono">q {row.quality_left ?? "—"} / {row.quality_right ?? "—"} → pair {row.pair_quality ?? "—"} · {row.score === null ? row.failure : `score ${row.score.toFixed(4)}`}{row.decision_error ? " · matcher error" : ""}</span>
                       <span className="links">
                         <a href={row.links.left_quality}>left quality</a>

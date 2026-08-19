@@ -8,6 +8,7 @@ import {
   type ProjectOut,
   type RegisteredSample,
   type RunSummaryOut,
+  type UploadAssessOut,
 } from "./api";
 import { Workbench } from "./Workbench";
 import { Matchers } from "./Matchers";
@@ -46,6 +47,31 @@ export function App() {
   const [runs, setRuns] = useState<RunSummaryOut[]>([]);
   const [projects, setProjects] = useState<ProjectOut[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [view, setView] = useState<string>(() => window.location.hash.replace(/^#\//, "") || "projects");
+  useEffect(() => {
+    const onHash = () => setView(window.location.hash.replace(/^#\//, "") || "projects");
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const viewClass = (name: string) => (view === name ? "view" : "view hidden-view");
+  const [detection, setDetection] = useState<
+    | { phase: "hidden" }
+    | { phase: "loading" }
+    | { phase: "shown"; payload: { label: string; image: { width: number; height: number }; chosen_index: number | null; detections: Array<{ bbox: number[]; score: number; landmarks: number[][] }> } }
+    | { phase: "error"; detail: string }
+  >({ phase: "hidden" });
+  const [ofiqLandmarks, setOfiqLandmarks] = useState<
+    | { phase: "hidden" }
+    | { phase: "loading" }
+    | { phase: "shown"; payload: { label: string; image: { width: number; height: number }; landmark_type: string; faces: Array<{ x: number; y: number; width: number; height: number }>; landmarks: number[][] } }
+    | { phase: "error"; detail: string }
+  >({ phase: "hidden" });
+  const [upload, setUpload] = useState<
+    | { phase: "idle" }
+    | { phase: "running"; name: string }
+    | { phase: "done"; result: UploadAssessOut }
+    | { phase: "error"; detail: string }
+  >({ phase: "idle" });
   const [newProjectName, setNewProjectName] = useState("");
   const [projectMessage, setProjectMessage] = useState<string | null>(null);
   const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null);
@@ -166,6 +192,7 @@ export function App() {
       <Nav />
 
       <main className="layout">
+        <div className={viewClass("projects")} data-view="projects">
         <section className="panel projects" aria-labelledby="projects-heading" data-testid="projects-panel">
           <h2 id="projects-heading">Projects</h2>
           <div className="project-create">
@@ -229,6 +256,8 @@ export function App() {
           )}
         </section>
 
+        </div>
+        <div className={viewClass("assess")} data-view="assess">
         <section className="panel" aria-labelledby="samples-heading">
           <h2 id="samples-heading">Registered samples</h2>
           <p className="hint">
@@ -245,6 +274,8 @@ export function App() {
                     setSelected(sample);
                     setScope(sample.approved_scopes[0] ?? "");
                     setAssess({ phase: "idle" });
+                    setDetection({ phase: "hidden" });
+                    setOfiqLandmarks({ phase: "hidden" });
                   }}
                 >
                   <span className="sample-name">{fileName(sample.path)}</span>
@@ -257,12 +288,121 @@ export function App() {
           </ul>
         </section>
 
+        <section className="panel" aria-labelledby="upload-heading">
+          <h2 id="upload-heading">Assess your own photo</h2>
+          <p className="hint">
+            Decision 30: an operator-picked photo is hashed, stored content-addressed in the local data
+            directory, assessed by the registered OFIQ engine, and recorded as a Run marked
+            OWNER_SUPPLIED_LOCAL_INPUT. It is never redistributed and is not a registered, rights-reviewed
+            dataset.
+          </p>
+          {activeProjectId ? (
+            <div className="controls">
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/bmp"
+                data-testid="upload-input"
+                disabled={upload.phase === "running"}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (!file || !activeProjectId) return;
+                  const scopeToUse = scope || "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1";
+                  setUpload({ phase: "running", name: file.name });
+                  api
+                    .assessUpload(activeProjectId, scopeToUse, file)
+                    .then((result) => setUpload({ phase: "done", result }))
+                    .catch((error: unknown) =>
+                      setUpload({
+                        phase: "error",
+                        detail: error instanceof ApiError ? `${error.status}: ${error.detail}` : String(error),
+                      }),
+                    );
+                  event.target.value = "";
+                }}
+              />
+              {upload.phase === "running" && (
+                <p className="status" role="status">Assessing {upload.name} with the registered OFIQ engine…</p>
+              )}
+              {upload.phase === "error" && (
+                <p className="error" role="alert" data-testid="upload-error">{upload.detail}</p>
+              )}
+              {upload.phase === "done" && (
+                <div data-testid="upload-result" className="upload-result">
+                  {(() => {
+                    const unified = upload.result.measures.find((m) => m.name === "UnifiedQualityScore");
+                    return (
+                      <>
+                        <p>
+                          <strong>{upload.result.original_name}</strong> · UnifiedQualityScore{" "}
+                          <strong data-testid="upload-uqs">{unified?.scalar ?? "failed"}</strong> / 100 ·{" "}
+                          {upload.result.measures.length} measures · {upload.result.failed_measures.length} failed
+                        </p>
+                        <p className="mono">
+                          sha256 {upload.result.image_sha256.slice(0, 16)}… ·{" "}
+                          <a href={upload.result.provenance.run}>run record</a>
+                        </p>
+                        <p className="hint">{upload.result.provenance.statement}</p>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="empty">Open a project first — every upload is recorded into a project.</p>
+          )}
+        </section>
+
         <section className="panel inspector" aria-labelledby="inspector-heading">
           <h2 id="inspector-heading">Sample</h2>
           {selected ? (
             <>
               <figure className="preview">
-                <img src={api.imageUrl(selected.path)} alt={`Registered sample ${fileName(selected.path)}`} />
+                <div className="overlay-frame">
+                  <img src={api.imageUrl(selected.path)} alt={`Registered sample ${fileName(selected.path)}`} />
+                  {ofiqLandmarks.phase === "shown" && (
+                    <svg
+                      className="detection-overlay ofiq"
+                      viewBox={`0 0 ${ofiqLandmarks.payload.image.width} ${ofiqLandmarks.payload.image.height}`}
+                      preserveAspectRatio="none"
+                      data-testid="ofiq-landmark-overlay"
+                    >
+                      {ofiqLandmarks.payload.faces.map((face, index) => (
+                        <rect key={index} x={face.x} y={face.y} width={face.width} height={face.height} />
+                      ))}
+                      {ofiqLandmarks.payload.landmarks.map((point, index) => (
+                        <circle key={index} cx={point[0] ?? 0} cy={point[1] ?? 0} r={Math.max(1, ofiqLandmarks.payload.image.width / 180)} />
+                      ))}
+                    </svg>
+                  )}
+                  {detection.phase === "shown" && (
+                    <svg
+                      className="detection-overlay"
+                      viewBox={`0 0 ${detection.payload.image.width} ${detection.payload.image.height}`}
+                      preserveAspectRatio="none"
+                      data-testid="detection-overlay"
+                    >
+                      {detection.payload.detections.map((det, index) => (
+                        <g key={index} className={index === detection.payload.chosen_index ? "det chosen" : "det"}>
+                          <rect x={det.bbox[0] ?? 0} y={det.bbox[1] ?? 0} width={(det.bbox[2] ?? 0) - (det.bbox[0] ?? 0)} height={(det.bbox[3] ?? 0) - (det.bbox[1] ?? 0)} />
+                          {det.landmarks.map((point, li) => (
+                            <circle key={li} cx={point[0] ?? 0} cy={point[1] ?? 0} r={Math.max(1.5, detection.payload.image.width / 120)} />
+                          ))}
+                        </g>
+                      ))}
+                    </svg>
+                  )}
+                </div>
+                {detection.phase === "shown" && (
+                  <p className="hint" data-testid="detection-label">{detection.payload.label}</p>
+                )}
+                {ofiqLandmarks.phase === "shown" && (
+                  <p className="hint" data-testid="ofiq-landmark-label">
+                    {ofiqLandmarks.payload.label} ({ofiqLandmarks.payload.landmark_type}, {ofiqLandmarks.payload.landmarks.length} points)
+                  </p>
+                )}
+                {detection.phase === "error" && <p className="error">{detection.detail}</p>}
+                {ofiqLandmarks.phase === "error" && <p className="error">{ofiqLandmarks.detail}</p>}
                 <figcaption>
                   <span className="mono">{selected.path}</span>
                   <span className="mono">sha256 {shortHash(selected.sha256, 16)} · {selected.size_bytes.toLocaleString()} bytes</span>
@@ -277,6 +417,42 @@ export function App() {
                     </option>
                   ))}
                 </select>
+                <button
+                  type="button"
+                  className="secondary"
+                  data-testid="detection-toggle"
+                  onClick={() => {
+                    if (detection.phase === "shown") { setDetection({ phase: "hidden" }); return; }
+                    setDetection({ phase: "loading" });
+                    fetch(`/api/detection?path=${encodeURIComponent(selected.path)}`)
+                      .then(async (r) => {
+                        if (!r.ok) throw new Error(`${r.status}: ${(await r.json()).detail ?? r.statusText}`);
+                        return await r.json();
+                      })
+                      .then((payload) => setDetection({ phase: "shown", payload }))
+                      .catch((err: unknown) => setDetection({ phase: "error", detail: err instanceof Error ? err.message : String(err) }));
+                  }}
+                >
+                  {detection.phase === "shown" ? "Hide face detection" : "Show face detection (matcher pipeline)"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  data-testid="ofiq-landmark-toggle"
+                  onClick={() => {
+                    if (ofiqLandmarks.phase === "shown") { setOfiqLandmarks({ phase: "hidden" }); return; }
+                    setOfiqLandmarks({ phase: "loading" });
+                    fetch(`/api/ofiq-landmarks?path=${encodeURIComponent(selected.path)}`)
+                      .then(async (r) => {
+                        if (!r.ok) throw new Error(`${r.status}: ${(await r.json()).detail ?? r.statusText}`);
+                        return await r.json();
+                      })
+                      .then((payload) => setOfiqLandmarks({ phase: "shown", payload }))
+                      .catch((err: unknown) => setOfiqLandmarks({ phase: "error", detail: err instanceof Error ? err.message : String(err) }));
+                  }}
+                >
+                  {ofiqLandmarks.phase === "loading" ? "Running OFIQ…" : ofiqLandmarks.phase === "shown" ? "Hide OFIQ landmarks" : "Show OFIQ landmarks (ADNet-98)"}
+                </button>
                 <button
                   type="button"
                   className="primary"
@@ -391,14 +567,30 @@ export function App() {
           )}
         </section>
 
-        <Workbench projectId={activeProjectId} onMessage={setProjectMessage} onDataset={setActiveDatasetId} />
-        <Matchers projectId={activeProjectId} datasetId={activeDatasetId} onMessage={setProjectMessage} />
-        <Utility projectId={activeProjectId} onMessage={setProjectMessage} />
-        <CrossMatcher projectId={activeProjectId} onMessage={setProjectMessage} />
-        <Reports projectId={activeProjectId} datasetId={activeDatasetId} onMessage={setProjectMessage} />
-        <Advanced projectId={activeProjectId} datasetId={activeDatasetId} onMessage={setProjectMessage} />
-        <SystemPanel />
+        </div>
+        <div className={viewClass("data")} data-view="data">
+          <Workbench projectId={activeProjectId} onMessage={setProjectMessage} onDataset={setActiveDatasetId} />
+        </div>
+        <div className={viewClass("matchers")} data-view="matchers">
+          <Matchers projectId={activeProjectId} datasetId={activeDatasetId} onMessage={setProjectMessage} />
+        </div>
+        <div className={viewClass("utility")} data-view="utility">
+          <Utility projectId={activeProjectId} onMessage={setProjectMessage} />
+        </div>
+        <div className={viewClass("cross")} data-view="cross">
+          <CrossMatcher projectId={activeProjectId} onMessage={setProjectMessage} />
+        </div>
+        <div className={viewClass("reports")} data-view="reports">
+          <Reports projectId={activeProjectId} datasetId={activeDatasetId} onMessage={setProjectMessage} />
+        </div>
+        <div className={viewClass("advanced")} data-view="advanced">
+          <Advanced projectId={activeProjectId} datasetId={activeDatasetId} onMessage={setProjectMessage} />
+        </div>
+        <div className={viewClass("system")} data-view="system">
+          <SystemPanel />
+        </div>
 
+        <div className={viewClass("projects")} data-view="projects-runs">
         <section className="panel runs" aria-labelledby="runs-heading">
           <h2 id="runs-heading">Recorded runs</h2>
           {runs.length === 0 ? (
@@ -432,6 +624,7 @@ export function App() {
             </table>
           )}
         </section>
+        </div>
       </main>
     </div>
   );

@@ -94,7 +94,9 @@ export function Advanced({ projectId, datasetId, onMessage }: AdvancedProps) {
   });
   const search = (protocolId: string) => guard("search", async () => {
     if (!projectId) throw new Error("no project");
-    const started = await api.startIdentificationSearch(projectId, protocolId, { matcher_id: matcher, condition_id: condition, quality_job_id: jobs[0]?.job_id ?? null });
+    // Probe-quality effects need the dataset-scale quality batch, not a single-photo upload job.
+    const qualityJob = jobs.reduce<JobOut | null>((best, job) => (best === null || job.assessed > best.assessed ? job : best), null);
+    const started = await api.startIdentificationSearch(projectId, protocolId, { matcher_id: matcher, condition_id: condition, quality_job_id: qualityJob?.job_id ?? null });
     setRunningSearch(started.search_id);
     return `Identification search ${shortHash(started.search_id)} running on the matcher device`;
   });

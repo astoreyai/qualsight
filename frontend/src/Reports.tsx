@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type BundleOut, type DashboardOut, type FigureOut, type JobOut, type MatcherLeaf, type ReportOut, type ReproductionOut, type UtilitySummary } from "./api";
 
 function shortHash(value: string, keep = 12): string {
@@ -51,7 +51,12 @@ export function Reports({ projectId, datasetId, onMessage }: ReportsProps) {
   }, [refresh]);
 
   const latestMatrix = leaves.length ? leaves[leaves.length - 1]!.matrix_id : null;
-  const latestJob = jobs[0] ?? null;
+  // Prefer the dataset-scale batch over single-photo uploads: report quality
+  // sections describe the dataset job with the most assessed samples (newest wins ties).
+  const latestJob = useMemo(
+    () => jobs.reduce<JobOut | null>((best, job) => (best === null || job.assessed > best.assessed ? job : best), null),
+    [jobs],
+  );
 
   const run = useCallback(async (label: string, action: () => Promise<string>) => {
     setBusy(label);

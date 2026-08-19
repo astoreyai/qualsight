@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type ComparisonRow, type MatcherErrors, type MatcherLeaf, type MatrixStatus } from "./api";
+import { PairEvidence } from "./PairEvidence";
 
 const POLICY = "EXCLUDE_FAILED_TRIALS";
 const CONDITION_SHORT: Record<string, string> = {
@@ -290,9 +291,9 @@ export function Matchers({ projectId, datasetId, onMessage }: MatchersProps) {
               {errors.counts.false_matches} false matches · {errors.counts.false_non_matches} false non-matches · {errors.counts.processing_failures} processing failures
             </span>
           </div>
-          <ErrorList title="False matches (non-mated accepted)" rows={errors.false_matches} />
-          <ErrorList title="False non-matches (mated rejected)" rows={errors.false_non_matches} />
-          <ErrorList title="Processing failures (no score)" rows={errors.processing_failures} />
+          <ErrorList title="False matches (non-mated accepted)" rows={errors.false_matches} runId={selectedLeaf?.run_id ?? ""} />
+          <ErrorList title="False non-matches (mated rejected)" rows={errors.false_non_matches} runId={selectedLeaf?.run_id ?? ""} />
+          <ErrorList title="Processing failures (no score)" rows={errors.processing_failures} runId={selectedLeaf?.run_id ?? ""} />
         </div>
       )}
       <div className="errors" data-testid="external-scores">
@@ -327,7 +328,8 @@ export function Matchers({ projectId, datasetId, onMessage }: MatchersProps) {
   );
 }
 
-function ErrorList({ title, rows }: { title: string; rows: ComparisonRow[] }) {
+function ErrorList({ title, rows, runId }: { title: string; rows: ComparisonRow[]; runId: string }) {
+  const [evidencePair, setEvidencePair] = useState<string | null>(null);
   if (rows.length === 0) return <p className="hint">{title}: none</p>;
   return (
     <div className="error-list">
@@ -344,7 +346,13 @@ function ErrorList({ title, rows }: { title: string; rows: ComparisonRow[] }) {
               <span className="links">
                 <a href={row.links.left_sample}>{fileName(row.links.left_image ?? row.left_sample_id)}</a>
                 <a href={row.links.right_sample}>{fileName(row.links.right_image ?? row.right_sample_id)}</a>
+                <button type="button" className="secondary" data-testid="evidence-open" onClick={() => setEvidencePair(evidencePair === row.pair_id ? null : row.pair_id)}>
+                  {evidencePair === row.pair_id ? "hide evidence" : "match evidence"}
+                </button>
               </span>
+              {evidencePair === row.pair_id && (
+                <PairEvidence runId={runId} pairId={row.pair_id} onClose={() => setEvidencePair(null)} />
+              )}
             </div>
           </li>
         ))}

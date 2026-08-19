@@ -145,3 +145,34 @@ button.secondary.selected { border-color: var(--ok); }
 .nav-group-label { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.68rem; }
 .nav-link { color: var(--text); text-decoration: none; padding: 0.15rem 0.45rem; border-radius: 6px; border: 1px solid transparent; }
 .nav-link:hover { border-color: var(--accent); }
+
+/* QS-Y85/Y86/Y87 evidence visuals */
+.overlay-frame { position: relative; display: inline-block; max-width: 100%; }
+.overlay-frame img { display: block; max-width: 100%; }
+.detection-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.detection-overlay .det rect { fill: none; stroke: #f59e0b; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.detection-overlay .det circle { fill: #f59e0b; }
+.detection-overlay .det.chosen rect { stroke: #22c55e; }
+.detection-overlay .det.chosen circle { fill: #22c55e; }
+.pair-evidence { border: 1px solid var(--border, #334155); border-radius: 8px; padding: 0.75rem; margin-top: 0.5rem; }
+.pair-evidence-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+.pair-evidence-sides { display: flex; gap: 1rem; flex-wrap: wrap; }
+.pair-evidence-side img.original { max-width: 180px; display: block; }
+.pair-evidence-side .crop img { width: 112px; height: 112px; image-rendering: pixelated; display: block; }
+.pair-evidence-side .crop figcaption { font-size: 0.75rem; opacity: 0.8; }
+.score-distribution { width: 100%; max-width: 520px; background: rgba(148, 163, 184, 0.08); border-radius: 4px; }
+.score-distribution .genuine-bar { fill: rgba(34, 197, 94, 0.65); }
+.score-distribution .impostor-bar { fill: rgba(239, 68, 68, 0.5); }
+.score-distribution .threshold-line { stroke: #94a3b8; stroke-dasharray: 4 3; }
+.score-distribution .threshold-label { font-size: 9px; fill: #94a3b8; }
+.score-distribution .pair-score-line { stroke: #38bdf8; stroke-width: 2; }
+.score-distribution .pair-score-label { font-size: 10px; fill: #38bdf8; }
+.pair-evidence td.accept { color: #22c55e; font-weight: 600; }
+.pair-evidence td.reject { color: #ef4444; font-weight: 600; }
+.provenance-statement { border-top: 1px dashed var(--border, #334155); padding-top: 0.5rem; }
+.upload-result { border-left: 3px solid #38bdf8; padding-left: 0.75rem; }
+.detection-overlay.ofiq rect { fill: none; stroke: #a855f7; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.detection-overlay.ofiq circle { fill: #a855f7; }
+.hidden-view { display: none; }
+.nav-link.active { text-decoration: underline; font-weight: 600; }
+html { scroll-padding-top: 90px; } /* keep scrolled-to targets clear of the sticky nav */

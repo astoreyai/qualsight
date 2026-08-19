@@ -45,6 +45,38 @@ class ExternalScoreImportError(RuntimeError):
     """Raised when the artifact cannot be mapped to the protocol without inventing or dropping rows silently."""
 
 
+CANONICAL_SCORE_FIELDS = ("pair_id", "score", "label", "left_path", "right_path", "failure")
+
+
+def apply_field_mapping(
+    rows: list[dict[str, Any]], columns: list[str], field_mapping: dict[str, str] | None
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Rename an external table's columns to the canonical score fields (PRD §12).
+
+    ``field_mapping`` maps canonical field -> source column. Unmapped canonical
+    fields fall through to a same-named source column when one exists. Mapping a
+    canonical field to a missing column is refused; no value is invented.
+    """
+
+    if field_mapping is None:
+        return rows, columns
+    for field in field_mapping:
+        if field not in CANONICAL_SCORE_FIELDS:
+            raise ExternalScoreImportError(f"unknown canonical score field {field!r} in the field mapping")
+    for field, column in field_mapping.items():
+        if column not in columns:
+            raise ExternalScoreImportError(f"mapped column {column!r} ({field}) is not in the score table header")
+    translated: list[dict[str, Any]] = []
+    for row in rows:
+        out = {field: row.get(column) for field, column in field_mapping.items()}
+        for field in CANONICAL_SCORE_FIELDS:
+            if field not in out and field in row:
+                out[field] = row[field]
+        translated.append(out)
+    mapped_columns = sorted({*field_mapping.keys(), *(f for f in CANONICAL_SCORE_FIELDS if f in columns and f not in field_mapping)})
+    return translated, mapped_columns
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc).astimezone()
 
@@ -67,7 +99,8 @@ class ExternalImportResult:
 class ExternalScoreImporter:
     """Import one registered external score artifact over one frozen protocol into an immutable Run."""
 
-    def __init__(self, *, store: Any, registry: Any, repository_root: Path, project: Any, protocol: Any, resource_id: str, job_root: Path, actor: str, purpose_scope: str = "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1") -> None:
+    def __init__(self, *, store: Any, registry: Any, repository_root: Path, project: Any, protocol: Any, resource_id: str, job_root: Path, actor: str, purpose_scope: str = "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1", field_mapping: dict[str, str] | None = None) -> None:
+        self.field_mapping = dict(field_mapping) if field_mapping else None
         self.store = store
         self.registry = registry
         self.repository_root = repository_root
@@ -114,11 +147,12 @@ class ExternalScoreImporter:
                     samples[sample_id] = self.store.sample(sample_id)
         with Path(self.score_identity.path).open(newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle)
-            columns = reader.fieldnames or []
-            missing = [c for c in REQUIRED_COLUMNS if c not in columns]
-            if missing:
-                raise ExternalScoreImportError(f"score table lacks required columns {missing}")
+            columns = list(reader.fieldnames or [])
             rows = list(reader)
+        rows, columns = apply_field_mapping(rows, columns, self.field_mapping)
+        missing = [c for c in REQUIRED_COLUMNS if c not in columns]
+        if missing:
+            raise ExternalScoreImportError(f"score table lacks required columns {missing}")
         seen: set[str] = set()
         refusals: list[str] = []
         by_pair: dict[str, dict[str, Any]] = {}
@@ -170,7 +204,7 @@ class ExternalScoreImporter:
             mapped.append({"pair_id": pair.pair_id, "fold": pair.fold, "source_order": pair.source_order, "label": pair.label.value, "left_sample_id": pair.left_sample_id, "right_sample_id": pair.right_sample_id,
                            "left_subject_id": pair.left_subject_id, "right_subject_id": pair.right_subject_id,
                            "score": score, "failure": failure, "failure_side": side, "left_face_count": None, "right_face_count": None})
-        mapping = {"artifact_rows": len(rows), "protocol_pairs": len(pairs), "mapped_pairs": len(by_pair), "protocol_pairs_without_row": len(pairs) - len(by_pair), "columns": columns, "refusals": 0, "rule": "rows map to protocol pairs by pair_id; paths and labels, when present, must agree with the recorded protocol; no row is invented; uncovered pairs are NOT_EXECUTED failures"}
+        mapping = {"artifact_rows": len(rows), "protocol_pairs": len(pairs), "mapped_pairs": len(by_pair), "protocol_pairs_without_row": len(pairs) - len(by_pair), "columns": columns, "field_mapping": self.field_mapping, "refusals": 0, "rule": "rows map to protocol pairs by pair_id; paths and labels, when present, must agree with the recorded protocol; no row is invented; uncovered pairs are NOT_EXECUTED failures"}
         return mapped, mapping
 
     # -- run --------------------------------------------------------------------

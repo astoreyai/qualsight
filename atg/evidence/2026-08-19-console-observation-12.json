@@ -1,0 +1,136 @@
+{
+  "api_log_tail": "se import via timm.layers\n  warnings.warn(f\"Importing from {__name__} is deprecated, please import via timm.layers\", FutureWarning)\n/tmp/qualsight-observe-7fpk5lmm/upstream/danjun6737/vit.fb6cd56d.py:57: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n/tmp/qualsight-observe-7fpk5lmm/upstream/danjun6737/vit.fb6cd56d.py:62: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(False):\n/tmp/qualsight-observe-7fpk5lmm/upstream/danjun6737/vit.fb6cd56d.py:68: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n/tmp/qualsight-observe-7fpk5lmm/upstream/danjun6737/vit.fb6cd56d.py:110: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n/tmp/qualsight-observe-7fpk5lmm/upstream/danjun6737/vit.fb6cd56d.py:57: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n/tmp/qualsight-observe-7fpk5lmm/upstream/danjun6737/vit.fb6cd56d.py:62: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(False):\n/tmp/qualsight-observe-7fpk5lmm/upstream/danjun6737/vit.fb6cd56d.py:68: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n/tmp/qualsight-observe-7fpk5lmm/upstream/danjun6737/vit.fb6cd56d.py:110: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\n",
+  "api_url": "http://127.0.0.1:8480",
+  "browser": "chromium 145.0.7632.6",
+  "console_url": "http://127.0.0.1:5181",
+  "exit_code": 1,
+  "health": {
+    "actor_id": "local-user:aaron",
+    "application_version": "0.1.0b1",
+    "database_path": "/tmp/qualsight-observe-7fpk5lmm/qualsight.sqlite3",
+    "engine": {
+      "approved_scopes": [
+        "REPRODUCE_OFIQ_CONFORMANCE_TESTS",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ],
+      "consumers": [
+        "QS-A06",
+        "QS-A07",
+        "QS-A08",
+        "QS-A10",
+        "QS-B12"
+      ],
+      "data_classification": "RESTRICTED",
+      "kind": "ENGINE_RUNTIME",
+      "name": "OFIQ 1.1.2 installed runtime (isolated no-sudo build from the official tag)",
+      "research_use_status": "OWNER_APPROVED_LOCAL_NONCOMMERCIAL_RESEARCH_MIT_ENGINE_WITH_BUNDLED_MODEL_LICENSES",
+      "resource_id": "ofiq-v1-1-2-linux-runtime",
+      "state": "APPROVED_LOCAL_RESEARCH_USE",
+      "third_party_rights_status": "VERIFIED_LICENSE",
+      "version": "1.1.2"
+    },
+    "network_guard": {
+      "installed": false,
+      "refused_attempts": []
+    },
+    "registry_id": "qualsight-local-resources",
+    "registry_sha256": "3107fe4caf14c14c94786d658defa848a934bc77b57f3acd2f4b785cfc77fb0f",
+    "status": "ok"
+  },
+  "kind": "QUALSIGHT_CONSOLE_RUNTIME_OBSERVATION",
+  "observed_at": "2026-08-19T08:21:07-0500",
+  "schema_version": "1.0.0",
+  "steps": [
+    {
+      "manifest": "/manifest.webmanifest",
+      "primary_nav_links": 15,
+      "step": "load",
+      "system_panel_resources": 10,
+      "title": "QualSight"
+    },
+    {
+      "step": "engine-badge",
+      "text": "ENGINE\nOFIQ 1.1.2 installed runtime (isolated no-sudo build from the official tag) \u00b7 v1.1.2 \u00b7 APPROVED_LOCAL_RESEARCH_USE\nREGISTRY\nqualsight-local-resources \u00b7 3107fe4caf14\u2026"
+    },
+    {
+      "natural_size_ok": true,
+      "step": "image-rendered"
+    },
+    {
+      "boxes": 1,
+      "labelled_as_matcher_pipeline": true,
+      "landmark_points": 5,
+      "step": "detection-overlay"
+    },
+    {
+      "message": "Created Console lifecycle observation (v1, NEW)",
+      "step": "project-created"
+    },
+    {
+      "banner": "ENGINE MEASUREMENTpolicy: none applied\nofiq-v1-1-2-linux-runtime \u00b7 v1.1.2 \u00b7 init 2816 ms \u00b7 assess 421 ms",
+      "measure_rows": 28,
+      "provenance_text": "PROVENANCE\nRun\n7509b954dc399dcbc432\u2026\nEvidence\n73f6099751f6c6da24db\u2026\nImage\n3c3655e6ac9f16bc6909\u2026\nScope\nREPRODUCE_OFIQ_CONFORMANCE_TESTS\nLinks\nproject\nexperiment\nsample\naudit",
+      "run_link": "/api/runs/run:sha256:7509b954dc399dcbc432d5650750d697950c1bcaeaa5f51f31d92e9725705b0d",
+      "step": "assessment",
+      "unified_quality_score_row": [
+        "UnifiedQualityScore",
+        "26.390884",
+        "79",
+        "measured"
+      ]
+    },
+    {
+      "rows": 1,
+      "step": "run-list"
+    },
+    {
+      "file": "evaluator_photo.jpg",
+      "run_link_present": true,
+      "source_kind_shown": true,
+      "step": "owner-supplied-upload",
+      "unified_quality_score": "41"
+    },
+    {
+      "messages": [
+        "save: Console lifecycle observation is now v2 SAVED",
+        "close: Console lifecycle observation is now v3 SAVED",
+        "open: Console lifecycle observation is now v4 OPEN",
+        "archive: Console lifecycle observation is now v5 ARCHIVED"
+      ],
+      "step": "project-transitions"
+    },
+    {
+      "step": "project-facts",
+      "text": "Lifecycle\nARCHIVED \u00b7 v5\nRuns\n2\nEngine\nofiq-v1-1-2-linux-runtime v1.1.2\nEvidence\nd3e91d5551a5c40e\u2026"
+    },
+    {
+      "facts": "Name\nLocal LFW funneled image collection\nSamples\n13,233 \u00b7 5749 subjects\nRights\nNO_EXPLICIT_LICENSE_PUBLIC_RESEARCH_DATASET\nScope\nQUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1\nManifest\nf0d8e9c49ea048d6\u2026\nPairs\n3,000 mated \u00b7 3,000 non-mated\nCompleteness\nmissing 0 \u00b7 unreadable 0 \u00b7 hash mismatches 0 \u00b7 dup hashes 0",
+      "step": "dataset-imported"
+    },
+    {
+      "progress": "COMPLETED \u00b7 16/16 \u00b7 failures 0 \u00b7 not assessed 0\n\nrun da03e5c148ca2c2d\u2026",
+      "step": "batch"
+    },
+    {
+      "det_polylines": 6,
+      "error_pairs_at_0_9": [
+        "lfw-local-fold-01-mated-0001 \u00b7 fold 1 \u00b7 MATED\nAbel_Pacheco vs Abel_Pacheco\nscore 0.7126\nAbel_Pacheco_0001.jpg\nAbel_Pacheco_0004.jpg\nmatch evidence",
+        "lfw-local-fold-01-mated-0002 \u00b7 fold 1 \u00b7 MATED\nAkhmed_Zakayev vs Akhmed_Zakayev\nscore 0.8464\nAkhmed_Zakayev_0001.jpg\nAkhmed_Zakayev_0003.jpg\nmatch evidence",
+        "lfw-local-fold-01-mated-0003 \u00b7 fold 1 \u00b7 MATED\nAkhmed_Zakayev vs Akhmed_Zakayev\nscore 0.7823\nAkhmed_Zakayev_0002.jpg\nAkhmed_Zakayev_0003.jpg\nmatch evidence",
+        "lfw-local-fold-01-mated-0004 \u00b7 fold 1 \u00b7 MATED\nAmber_Tamblyn vs Amber_Tamblyn\nscore 0.7236\nAmber_Tamblyn_0001.jpg\nAmber_Tamblyn_0002.jpg\nmatch evidence",
+        "lfw-local-fold-01-mated-0005 \u00b7 fold 1 \u00b7 MATED\nAnders_Fogh_Rasmussen vs Anders_Fogh_Rasmussen\nscore 0.7736\nAnders_Fogh_Rasmussen_0001.jpg\nAnders_Fogh_Rasmussen_0003.jpg\nmatch evidence"
+      ],
+      "leaf_cells": [
+        "QS-C22.AS\nEER 0.00 %\nFNMR@FMR\u22640.1 % 0.00 %\n10-fold acc \u2014\n10/10 scored \u00b7 0 failed",
+        "QS-C22.AN\nEER 0.00 %\nFNMR@FMR\u22640.1 % 0.00 %\n10-fold acc \u2014\n10/10 scored \u00b7 0 failed",
+        "QS-C22.ES\nEER 0.00 %\nFNMR@FMR\u22640.1 % 0.00 %\n10-fold acc \u2014\n10/10 scored \u00b7 0 failed",
+        "QS-C22.EN\nEER 0.00 %\nFNMR@FMR\u22640.1 % 0.00 %\n10-fold acc \u2014\n10/10 scored \u00b7 0 failed",
+        "QS-C22.TS\nEER 0.00 %\nFNMR@FMR\u22640.1 % 0.00 %\n10-fold acc \u2014\n10/10 scored \u00b7 0 failed",
+        "QS-C22.TN\nEER 0.00 %\nFNMR@FMR\u22640.1 % 0.00 %\n10-fold acc \u2014\n10/10 scored \u00b7 0 failed"
+      ],
+      "matrix_progress": "matrix 10ee60373505\u2026 \u00b7 completed 6 leaves \u00b7 6/6 leaves",
+      "protocol": "LFW View 2 (10-fold, 6,000 pairs) \u2014 registered local pair manifest \u00b7 6,000 pairs (3,000 mated)",
+      "step": "matchers"
+    }
+  ]
+}

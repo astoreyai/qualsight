@@ -79,6 +79,9 @@ def purge_targets(store: Any, data_dir: Path, project_id: str) -> dict[str, list
         directories.add(row["directory"])
     for row in store.experiment_bundles(project_id=project_id):
         files.add(row["path"])
+    if hasattr(store, "owner_supplied_for_project"):
+        for row in store.owner_supplied_for_project(project_id):
+            files.add(row["path"])  # only copies under the data directory are deletable (filter below)
     project_runs = set(store.run_ids_for_project(project_id))
     exports_root = data_dir / "exports"
     if exports_root.exists():

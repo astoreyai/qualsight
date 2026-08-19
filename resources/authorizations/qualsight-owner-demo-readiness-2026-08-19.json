@@ -1,0 +1,28 @@
+{
+  "receipt_id": "qualsight-owner-demo-readiness-2026-08-19",
+  "recorded_at": "2026-08-19T00:00:00-05:00",
+  "owner": "Aaron Storey",
+  "channel": "Claude Code session 8e2f9bb1-b00a-4d9f-9a42-74b1d318c22b (interactive)",
+  "verbatim_instruction": "think about this as a demo for dhs - what should be able to be done in a beta? [followed by] using the recommendations create an atomic level plan to get to a fully ready beta state - then reassess again what improvements are needed for a dhs review - are we showing the correct facial features? do we show a pair of images? do we visually show what we are looking at matches? do we correctly show the why? if not what is missing? create another atomic level plan to add recommendations run this as a /loop until minimial responses, then run another /loop on security, hardening, race conditions, optimization",
+  "decisions": [
+    {
+      "decision": 30,
+      "grant": "OWNER_SUPPLIED_LOCAL_INPUT_ADMISSION",
+      "terms": [
+        "An image or dataset supplied interactively by the operator on this workstation may be admitted for assessment without a per-file registry entry.",
+        "Every admitted byte stream is SHA-256 hashed at admission, stored content-addressed under the QualSight data directory, and recorded with source kind OWNER_SUPPLIED_LOCAL_INPUT and the attributed operator as the use decision.",
+        "Owner-supplied inputs are never redistributed, never bundled, never promoted to registered resources without a separate receipt, and are purgeable through the existing purge scopes.",
+        "Results on owner-supplied inputs are marked with their source kind and are never presented as results on registered, rights-reviewed datasets."
+      ]
+    },
+    {
+      "decision": 31,
+      "grant": "DEMO_READINESS_AND_HARDENING_BRANCHES",
+      "terms": [
+        "Plan D (DHS demo readiness), Plan E (review-visuals reassessment loop), and Plan F (security/hardening/race/optimization loop) are authorized as post-beta branches with no edge into the closed beta gate QS-H74.",
+        "Plan E and Plan F execute as loops that terminate when a full cycle produces no new accepted node and no new finding.",
+        "Commits to main remain authorized; pushes remain unauthorized until a remote is named."
+      ]
+    }
+  ]
+}

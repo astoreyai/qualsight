@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
+import cv2
 import hashlib
 import json
 import mimetypes
@@ -21,8 +22,8 @@ import threading
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..domain.entities import AuditEvent, AuditEventType, DataClassification
@@ -43,6 +44,13 @@ from ..reporting.exports import ExportError, export_table
 from ..reporting.reports import ReportBuilder, ReportError
 from ..security.network_guard import guard_status, install_network_guard
 from ..importers.external_scores import EXTERNAL_CONDITION_ID, ExternalScoreImportError, ExternalScoreImporter
+from ..importers.owner_supplied import (
+    SOURCE_KIND as OWNER_SOURCE_KIND,
+    OwnerSuppliedAdmission,
+    OwnerSuppliedError,
+    OwnerSuppliedImporter,
+    freeze_owner_pairs,
+)
 from ..identification.protocol import IdentificationProtocolError, freeze_lfw_identification
 from ..identification.search import IdentificationSearchError, IdentificationSearchJob
 from ..transforms.derived import DerivedSetError, build_derived_set
@@ -51,6 +59,7 @@ from ..transforms.operators import PARAMETER_NAMES
 from ..matchers.matrix import dataset_resource_of
 from ..security.purge import PurgeError, SCOPE_STATEMENT, purge_project, purge_targets
 from ..matchers.upstream import UpstreamSources
+from .evidence import EvidenceError, HONESTY_STATEMENT, detection_geometry, ofiq_landmarks, pair_evidence, recompute_crop
 from ..execution.contracts import ContractValidationError, ExecutionOutcomeError
 from ..provenance import artifact_identity
 from .settings import Settings
@@ -84,6 +93,24 @@ class AssessRequest(ApiModel):
     image_path: str = Field(min_length=1)
     purpose_scope: str = Field(min_length=1)
     project_id: str | None = None
+
+
+class OwnerDirectoryImportRequest(ApiModel):
+    root: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+
+
+class OwnerManifestImportRequest(ApiModel):
+    manifest_path: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    mapping: dict[str, str] | None = None
+    mapping_name: str | None = None
+
+
+class OwnerPairsRequest(ApiModel):
+    seed: int = Field(ge=0)
+    max_mated_pairs_per_subject: int = Field(default=6, ge=1, le=1000)
+    nonmated_multiple: float = Field(default=1.0, gt=0, le=100)
 
 
 class UtilityAnalysisRequest(ApiModel):
@@ -146,6 +173,8 @@ class ReproduceRequest(ApiModel):
 class ExternalScoreImportRequest(ApiModel):
     resource_id: str = Field(min_length=1)
     purpose_scope: str = Field(default="QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1", min_length=1)
+    field_mapping: dict[str, str] | None = None
+    mapping_name: str | None = None
 
 
 class IdentificationFreezeRequest(ApiModel):
@@ -787,8 +816,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def dataset_scopes(dataset) -> tuple[str | None, tuple[str, ...], tuple[str, ...]]:
         import json as _json
 
-        resource_id = _json.loads(dataset.manifest.text).get("dataset_resource_id")
+        descriptor = _json.loads(dataset.manifest.text)
+        resource_id = descriptor.get("dataset_resource_id")
         eng = engine()
+        if descriptor.get("source_kind") == "OWNER_SUPPLIED_LOCAL_INPUT":
+            # Decision 30: the runtime grant is the scope authority for owner-supplied data.
+            return None, tuple(eng.runtime.approved_scopes), tuple(eng.runtime.approved_scopes)
         try:
             resource = eng.registry.resource(resource_id) if resource_id else None
         except Exception:  # noqa: BLE001 - unknown resource id in an old record
@@ -948,6 +981,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "matcher_id": row["matcher_id"],
             "condition_id": row["condition_id"],
             "protocol_id": row["protocol_id"],
+            "dataset_id": row["dataset_id"],
             "comparison_count": row["comparison_count"],
             "scored_count": row["scored_count"],
             "failed_count": row["failed_count"],
@@ -962,7 +996,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     @app.post("/api/projects/{project_id}/protocols/{protocol_id}/matrix", status_code=202)
-    def start_matrix(project_id: str, protocol_id: str, fixture_pairs_only: bool = Query(default=False)) -> JSONResponse:
+    def start_matrix(project_id: str, protocol_id: str, fixture_pairs_only: bool = Query(default=False), leaves: str | None = Query(default=None)) -> JSONResponse:
         try:
             project = projects().require_writable(project_id)
         except KeyError as error:
@@ -980,12 +1014,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             wanted = {p["pair_id"] for p in fixture["pairs"]}
             pairs = [pair for pair in pairs if pair.pair_id in wanted]
             rule = "the registered subset-fixture pairs of the frozen protocol"
+        matcher_filter = condition_filter = None
+        if leaves:
+            from ..matchers.matrix import LEAF_IDS
+
+            wanted_leaves = {item.strip() for item in leaves.split(",") if item.strip()}
+            unknown = wanted_leaves - set(LEAF_IDS.values())
+            if unknown:
+                raise HTTPException(status_code=422, detail=f"unknown matrix leaves: {sorted(unknown)}")
+            matcher_filter = tuple(sorted({m for (m, c), leaf in LEAF_IDS.items() if leaf in wanted_leaves}, key=lambda m: m.value))
+            condition_filter = tuple(sorted({c for (m, c), leaf in LEAF_IDS.items() if leaf in wanted_leaves}, key=lambda c: c.value))
+            rule += f" (leaf selection {sorted(wanted_leaves)}: the matcher x condition cross product of the named leaves)"
         upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir)
         try:
             upstream.acquire()
+            extra = {}
+            if matcher_filter:
+                extra = {"matchers": matcher_filter, "conditions": condition_filter}
             job = MatcherMatrixJob(
                 registry=engine().registry, registry_path=settings.registry_path, repository_root=settings.repository_root, upstream=upstream,
-                store=store(), project=project, dataset=dataset, protocol=protocol, pairs=pairs, job_root=settings.data_dir / "matrix", selection_rule=rule,
+                store=store(), project=project, dataset=dataset, protocol=protocol, pairs=pairs, job_root=settings.data_dir / "matrix", selection_rule=rule, **extra,
             )
         except (MatrixError, Exception) as error:  # noqa: BLE001 - surfaced as a typed HTTP error
             raise HTTPException(status_code=409, detail=str(error)) from error
@@ -1016,7 +1064,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if protocol is None or protocol.project_id != project_id:
             raise HTTPException(status_code=404, detail="protocol is not recorded in this project")
         try:
-            importer = ExternalScoreImporter(store=store(), registry=engine().registry, repository_root=settings.repository_root, project=project, protocol=protocol, resource_id=request.resource_id, job_root=settings.data_dir / "external", actor=projects().actor, purpose_scope=request.purpose_scope)
+            field_mapping = request.field_mapping
+            if field_mapping is None and request.mapping_name:
+                field_mapping = store().import_mapping(request.mapping_name)
+                if field_mapping is None:
+                    raise HTTPException(status_code=404, detail=f"import mapping {request.mapping_name} is not recorded")
+            importer = ExternalScoreImporter(store=store(), registry=engine().registry, repository_root=settings.repository_root, project=project, protocol=protocol, resource_id=request.resource_id, job_root=settings.data_dir / "external", actor=projects().actor, purpose_scope=request.purpose_scope, field_mapping=field_mapping)
+            if request.mapping_name and request.field_mapping is not None:
+                store().record_import_mapping(request.mapping_name, request.field_mapping, projects().actor, datetime.now(timezone.utc).astimezone().isoformat())
             result = importer.run()
         except (ExternalScoreImportError, ContractValidationError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
@@ -1839,6 +1894,111 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         eng = engine()
         return [_resource_out(eng, resource.resource_id) for resource in eng.registry.resources]
 
+    detector_holder: dict[str, Any] = {}
+
+    def detector():
+        if "detector" not in detector_holder:
+            from ..matchers.detection import SCRFDDetector
+            from ..matchers.matrix import SCRFD_RESOURCE_ID
+
+            scrfd = engine().registry.resource(SCRFD_RESOURCE_ID)
+            model = next(item.identity for item in scrfd.artifacts if item.role == "MODEL")
+            detector_holder["detector"] = SCRFDDetector(Path(model.path), model.sha256)
+        return detector_holder["detector"]
+
+    def _resolve_evidence_sample(sample_id: str | None, path: str | None) -> tuple[str, str]:
+        if sample_id:
+            sample = store().sample(sample_id)
+            if sample is None:
+                raise HTTPException(status_code=404, detail="sample is not recorded")
+            return sample.source_path, sample.sha256
+        if path:
+            eng = engine()
+            for resource in eng.input_resources:
+                for artifact in resource.artifacts:
+                    if artifact.role == "DATA" and artifact.identity.path == path:
+                        return path, artifact.identity.sha256
+            owner = store().owner_supplied_by_path(path)
+            if owner is not None:
+                return path, owner["sha256"]
+            raise HTTPException(status_code=404, detail="path is neither a registered DATA artifact, a recorded sample, nor an admitted owner-supplied input")
+        raise HTTPException(status_code=422, detail="sample_id or path is required")
+
+    @app.get("/api/detection")
+    def sample_detection_endpoint(
+        sample_id: str | None = Query(default=None),
+        path: str | None = Query(default=None),
+        condition_id: str | None = Query(default=None),
+    ) -> JSONResponse:
+        """QS-Y85: matcher-pipeline SCRFD detection geometry for a recorded or registered sample."""
+
+        source_path, sha = _resolve_evidence_sample(sample_id, path)
+        try:
+            payload = detection_geometry(detector(), source_path, sha, condition_id)
+        except EvidenceError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return JSONResponse(content=payload)
+
+    @app.get("/api/ofiq-landmarks")
+    def ofiq_landmarks_endpoint(
+        sample_id: str | None = Query(default=None),
+        path: str | None = Query(default=None),
+    ) -> JSONResponse:
+        """QS-Z90: OFIQ's own ADNet-98 landmarks through the registered auxiliary binary."""
+
+        source_path, sha = _resolve_evidence_sample(sample_id, path)
+        try:
+            payload = ofiq_landmarks(engine().registry, source_path, sha)
+        except EvidenceError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return JSONResponse(content=payload)
+
+    @app.get("/api/matcher-runs/{run_id}/pairs/{pair_id}/evidence")
+    def matcher_pair_evidence(run_id: str, pair_id: str) -> JSONResponse:
+        """QS-Y87: recorded match evidence for one compared pair, with population context."""
+
+        row = store().matcher_leaf(run_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="matcher Run is not recorded")
+        try:
+            payload = pair_evidence(store(), row, pair_id)
+        except EvidenceError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        for side in ("left", "right"):
+            info = payload["sides"][side]
+            if info["path"]:
+                info["links"] = {
+                    "image": f"/api/samples/image?path={info['path']}",
+                    "crop": f"/api/matcher-runs/{run_id}/pairs/{pair_id}/crops/{side}",
+                    "detection": f"/api/detection?sample_id={info['sample_id']}&condition_id={row['condition_id']}",
+                }
+        return JSONResponse(content=payload)
+
+    @app.get("/api/matcher-runs/{run_id}/pairs/{pair_id}/crops/{side}")
+    def matcher_pair_crop(run_id: str, pair_id: str, side: Literal["left", "right"]) -> Response:
+        """QS-Y86: the aligned 112x112 crop actually compared, recomputed under the recorded frozen condition."""
+
+        row = store().matcher_leaf(run_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="matcher Run is not recorded")
+        import pyarrow.parquet as pq
+
+        rows = pq.read_table(row["comparisons_parquet"]).to_pylist()
+        target = next((item for item in rows if item["pair_id"] == pair_id), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail="pair is not part of this Run")
+        sample = store().sample(target[f"{side}_sample_id"])
+        if sample is None:
+            raise HTTPException(status_code=404, detail="sample is not recorded")
+        try:
+            crop, crop_sha = recompute_crop(detector(), sample.source_path, sample.sha256, row["condition_id"])
+        except EvidenceError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        ok, encoded = cv2.imencode(".png", crop)
+        if not ok:
+            raise HTTPException(status_code=500, detail="crop encoding failed")
+        return Response(content=encoded.tobytes(), media_type="image/png", headers={"X-Crop-Sha256": crop_sha, "Cache-Control": "no-store"})
+
     @app.get("/api/samples/registered", response_model=list[RegisteredSample])
     def registered_samples() -> list[RegisteredSample]:
         eng = engine()
@@ -1965,6 +2125,199 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 audit_events=f"/api/runs/{run.run_id}/audit",
             ),
         )
+
+    @app.post("/api/quality/assess-upload", status_code=201)
+    async def assess_upload(
+        request: Request,
+        project_id: str = Query(min_length=1),
+        purpose_scope: str = Query(min_length=1),
+        filename: str = Query(default="uploaded-image"),
+    ) -> JSONResponse:
+        """QS-Y81 (decision 30): assess one operator-uploaded photo with the registered engine, recorded as a Run."""
+
+        data = await request.body()
+        if not data:
+            raise HTTPException(status_code=422, detail="the request body is empty")
+        from starlette.concurrency import run_in_threadpool
+
+        def _process() -> dict[str, Any]:
+            try:
+                project = projects().require_writable(project_id)
+            except KeyError as error:
+                raise HTTPException(status_code=404, detail="project is not recorded") from error
+            except ProjectLifecycleError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            importer = OwnerSuppliedImporter(store(), settings.data_dir, projects().actor)
+            try:
+                admitted = importer.admission.admit_bytes(data, filename, project_id)
+                dataset, sample = importer.import_admitted_single(project, admitted, f"Uploaded photo {filename}")
+            except OwnerSuppliedError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            try:
+                job = OFIQBatchJob(
+                    engine=engine(),
+                    store=store(),
+                    project=project,
+                    dataset=dataset,
+                    samples=[sample],
+                    purpose_scope=purpose_scope,
+                    job_root=settings.data_dir / "jobs",
+                    chunks=1,
+                    selection_rule="the single operator-uploaded owner-supplied image (decision 30)",
+                )
+                with job_lock:
+                    jobs[job.job_id] = job
+                job.run()
+            except BatchJobError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            finally:
+                if "job" in locals():
+                    store().finish_job(job.job_id, job.ended_at.isoformat() if job.ended_at else "", job.state)
+            if job.state != "COMPLETED" or not job.run_id:
+                raise HTTPException(status_code=422, detail=f"the engine did not complete on the uploaded image (state {job.state})")
+            import pyarrow.parquet as pq
+
+            from ..engines.ofiq.batch import MEASURE_NAMES
+
+            table = pq.read_table(job.parquet_path).to_pylist()
+            row = next(item for item in table if item["sample_id"] == sample.sample_id)
+            if row["outcome"] != "MEASURED":
+                raise HTTPException(status_code=422, detail=f"the engine reported {row['outcome']} for the uploaded image")
+            measures = [
+                {
+                    "name": name,
+                    "native": row[f"{name}.native"],
+                    "scalar": row[f"{name}.scalar"],
+                    "failed": bool(row[f"{name}.failed"]),
+                }
+                for name in MEASURE_NAMES
+            ]
+            record_action(
+                project_id,
+                AuditEventType.RUN_COMPLETED,
+                "OwnerSuppliedAssessment",
+                job.run_id,
+                {"source_kind": OWNER_SOURCE_KIND, "sha256": admitted.sha256, "original_name": filename},
+            )
+            return {
+                "run_id": job.run_id,
+                "job_id": job.job_id,
+                "dataset_id": dataset.dataset_id,
+                "sample_id": sample.sample_id,
+                "source_kind": OWNER_SOURCE_KIND,
+                "image_sha256": admitted.sha256,
+                "stored_path": admitted.path,
+                "original_name": filename,
+                "width": admitted.width,
+                "height": admitted.height,
+                "measures": measures,
+                "failed_measures": [m["name"] for m in measures if m["failed"]],
+                "provenance": {
+                    "run": f"/api/runs/{job.run_id}",
+                    "sample_image": f"/api/samples/image?path={admitted.path}",
+                    "statement": "OWNER_SUPPLIED_LOCAL_INPUT: operator-supplied bytes admitted by hash under decision 30; not a registered, rights-reviewed dataset.",
+                },
+            }
+
+        payload = await run_in_threadpool(_process)
+        return JSONResponse(status_code=201, content=payload)
+
+    @app.post("/api/projects/{project_id}/datasets/import-owner-directory", status_code=201)
+    def import_owner_directory(project_id: str, request: OwnerDirectoryImportRequest) -> JSONResponse:
+        """QS-Y82: identity-labelled dataset from an operator directory (subject = immediate folder name)."""
+
+        try:
+            project = projects().require_writable(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        importer = OwnerSuppliedImporter(store(), settings.data_dir, projects().actor)
+        try:
+            result = importer.import_directory(project, Path(request.root), request.name)
+        except (OwnerSuppliedError, OSError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        record_action(project_id, AuditEventType.DATASET_IMPORTED, "Dataset", result.dataset.dataset_id, {"source_kind": OWNER_SOURCE_KIND, "samples": result.sample_count, "subjects": result.subject_count})
+        return JSONResponse(status_code=201, content={
+            "dataset_id": result.dataset.dataset_id,
+            "sample_count": result.sample_count,
+            "subject_count": result.subject_count,
+            "source_kind": OWNER_SOURCE_KIND,
+            "statistics_sha256": result.statistics_sha256,
+        })
+
+    @app.post("/api/projects/{project_id}/datasets/import-owner-manifest", status_code=201)
+    def import_owner_manifest(project_id: str, request: OwnerManifestImportRequest) -> JSONResponse:
+        """QS-Y82: identity-labelled dataset from an operator CSV manifest with a saved, reusable field mapping."""
+
+        try:
+            project = projects().require_writable(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        mapping = request.mapping
+        if mapping is None:
+            if not request.mapping_name:
+                raise HTTPException(status_code=422, detail="either mapping or mapping_name is required")
+            mapping = store().import_mapping(request.mapping_name)
+            if mapping is None:
+                raise HTTPException(status_code=404, detail=f"import mapping {request.mapping_name} is not recorded")
+        importer = OwnerSuppliedImporter(store(), settings.data_dir, projects().actor)
+        try:
+            result = importer.import_manifest(project, Path(request.manifest_path), name=request.name, mapping=mapping)
+        except (OwnerSuppliedError, OSError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        if request.mapping_name and request.mapping is not None:
+            store().record_import_mapping(request.mapping_name, mapping, projects().actor, datetime.now(timezone.utc).astimezone().isoformat())
+        record_action(project_id, AuditEventType.DATASET_IMPORTED, "Dataset", result.dataset.dataset_id, {"source_kind": OWNER_SOURCE_KIND, "samples": result.sample_count, "subjects": result.subject_count, "mapping": mapping})
+        return JSONResponse(status_code=201, content={
+            "dataset_id": result.dataset.dataset_id,
+            "sample_count": result.sample_count,
+            "subject_count": result.subject_count,
+            "source_kind": OWNER_SOURCE_KIND,
+            "statistics_sha256": result.statistics_sha256,
+            "mapping": mapping,
+        })
+
+    @app.get("/api/import-mappings")
+    def list_import_mappings() -> JSONResponse:
+        return JSONResponse(content=store().import_mappings())
+
+    @app.post("/api/projects/{project_id}/datasets/{dataset_id}/protocols/freeze-owner-pairs", status_code=201)
+    def freeze_owner_pairs_endpoint(project_id: str, dataset_id: str, request: OwnerPairsRequest) -> JSONResponse:
+        """QS-Y83: deterministic seeded pair protocol over an owner-supplied identity-labelled dataset."""
+
+        try:
+            project = projects().require_writable(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        dataset = store().dataset(dataset_id)
+        if dataset is None or dataset.project_id != project_id:
+            raise HTTPException(status_code=404, detail="dataset is not recorded in this project")
+        try:
+            record = freeze_owner_pairs(
+                store(), project, dataset,
+                data_dir=settings.data_dir,
+                actor_id=projects().actor,
+                seed=request.seed,
+                max_mated_pairs_per_subject=request.max_mated_pairs_per_subject,
+                nonmated_multiple=request.nonmated_multiple,
+            )
+        except OwnerSuppliedError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        record_action(project_id, AuditEventType.CONFIGURATION_CHANGED, "VerificationProtocol", record.protocol_id, {"pairs": record.pair_count, "seed": request.seed, "pairs_sha256": record.pairs_sha256})
+        return JSONResponse(status_code=201, content={
+            "protocol_id": record.protocol_id,
+            "pair_count": record.pair_count,
+            "mated_count": record.mated_count,
+            "nonmated_count": record.nonmated_count,
+            "pairs_sha256": record.pairs_sha256,
+            "unique_subject_count": record.unique_subject_count,
+            "limitations": list(record.limitations),
+        })
 
     @app.get("/api/runs", response_model=list[RunSummaryOut])
     def runs(limit: int = Query(default=200, ge=1, le=10_000)) -> list[RunSummaryOut]:

@@ -1,0 +1,181 @@
+{
+  "data_dir": "/mnt/projects/ofiqgui/var",
+  "ended_at": "2026-08-19T09:09:11-0500",
+  "exit_code": 0,
+  "kind": "QUALSIGHT_OFFLINE_GATE",
+  "project_id": "project:sha256:4c0188d849c1c512f2b367cbba4f779ed9058359fc0e50eb08cf38e8edf09b9b",
+  "server_log_tail": "rgs...)` instead.\n  with torch.cuda.amp.autocast(True):\n/mnt/projects/ofiqgui/var/upstream/danjun6737/vit.fb6cd56d.py:110: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with torch.cuda.amp.autocast(True):\nINFO:     127.0.0.1:35104 - \"GET /api/matrices/matrix%3Asha256%3Ae30af1f81e773feb8749db800b737536af4d371cca67f34a3595d1a294e08a0e HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:35108 - \"POST /api/projects/project%3Asha256%3A4c0188d849c1c512f2b367cbba4f779ed9058359fc0e50eb08cf38e8edf09b9b/utility-analyses HTTP/1.1\" 202 Accepted\nINFO:     127.0.0.1:35124 - \"GET /api/utility-analyses/analysis%3Asha256%3A4fddfcdb82553ec0a5e1bfb185c964ba7de0c4b72938a95af1245515bf16487c HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:35128 - \"GET /api/utility-analyses/analysis%3Asha256%3A4fddfcdb82553ec0a5e1bfb185c964ba7de0c4b72938a95af1245515bf16487c HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:35130 - \"POST /api/projects/project%3Asha256%3A4c0188d849c1c512f2b367cbba4f779ed9058359fc0e50eb08cf38e8edf09b9b/cross-matcher HTTP/1.1\" 202 Accepted\nINFO:     127.0.0.1:35138 - \"GET /api/cross-matcher/analysis%3Asha256%3Ae57fc36fe542878f45ae35aeb1be5daab2c6285a73b2bc56f24739fb779d8dd3 HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:42882 - \"GET /api/cross-matcher/analysis%3Asha256%3Ae57fc36fe542878f45ae35aeb1be5daab2c6285a73b2bc56f24739fb779d8dd3 HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:42890 - \"GET /api/cross-matcher/analysis%3Asha256%3Ae57fc36fe542878f45ae35aeb1be5daab2c6285a73b2bc56f24739fb779d8dd3/pairs?contrast_id=QS-C22.AN~QS-C22.EN&limit=5 HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:42904 - \"POST /api/projects/project%3Asha256%3A4c0188d849c1c512f2b367cbba4f779ed9058359fc0e50eb08cf38e8edf09b9b/figures HTTP/1.1\" 201 Created\nINFO:     127.0.0.1:42910 - \"POST /api/projects/project%3Asha256%3A4c0188d849c1c512f2b367cbba4f779ed9058359fc0e50eb08cf38e8edf09b9b/dashboards HTTP/1.1\" 201 Created\nINFO:     127.0.0.1:42918 - \"GET /api/dashboards/dashboard%3Asha256%3A26e223df8187d3b2093be3de9e022b04794b0895dd64a2e7f30bf3853abba7e0 HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:42922 - \"POST /api/projects/project%3Asha256%3A4c0188d849c1c512f2b367cbba4f779ed9058359fc0e50eb08cf38e8edf09b9b/reports HTTP/1.1\" 201 Created\nINFO:     127.0.0.1:42932 - \"POST /api/projects/project%3Asha256%3A4c0188d849c1c512f2b367cbba4f779ed9058359fc0e50eb08cf38e8edf09b9b/bundles HTTP/1.1\" 201 Created\nINFO:     127.0.0.1:42934 - \"POST /api/reproductions HTTP/1.1\" 201 Created\nINFO:     127.0.0.1:42938 - \"GET /api/projects/project%3Asha256%3A4c0188d849c1c512f2b367cbba4f779ed9058359fc0e50eb08cf38e8edf09b9b/purge-scope HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:42944 - \"GET /api/projects/project%3Asha256%3A4c0188d849c1c512f2b367cbba4f779ed9058359fc0e50eb08cf38e8edf09b9b/audit HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:42960 - \"GET /api/health HTTP/1.1\" 200 OK\nINFO:     Shutting down\nINFO:     Waiting for application shutdown.\nINFO:     Application shutdown complete.\nINFO:     Finished server process [565312]\n",
+  "started_at": "2026-08-19T09:07:48-0500",
+  "steps": [
+    {
+      "actor": "local-user:aaron",
+      "application_version": "0.1.0b1",
+      "network_guard": {
+        "installed": true,
+        "refused_attempts": []
+      },
+      "ok": true,
+      "step": "health"
+    },
+    {
+      "bytes": 559,
+      "ok": true,
+      "step": "console-served-from-product"
+    },
+    {
+      "ok": true,
+      "project_id": "project:sha256:4c0188d849c1c512f2b367cbba4f779ed9058359fc0e50eb08cf38e8edf09b9b",
+      "step": "project-created"
+    },
+    {
+      "dataset_id": "dataset:sha256:a4f9604ee38caed43f9c195054f8fb5a48464095b4b7f5656dfcfcffc7e67e24",
+      "ok": true,
+      "samples": 13233,
+      "step": "lfw-imported"
+    },
+    {
+      "ok": true,
+      "run_id": "run:sha256:5e050d42b1a0969437efb6f11923c31a394632446ec8b6c5712a0d0da0bf7b0c",
+      "step": "single-image-assessment",
+      "unified_quality_score": 79
+    },
+    {
+      "job_id": "job:sha256:54af98ba9fc082c465f1d565cd0f2e756ad58947d911a97d1441c9d266ad2204",
+      "ok": true,
+      "step": "batch-started"
+    },
+    {
+      "failed": 0,
+      "measured": 16,
+      "ok": true,
+      "step": "batch-completed"
+    },
+    {
+      "ok": true,
+      "pairs": 6000,
+      "protocol_id": "protocol:sha256:ca23e2017fb53568c02559c76a0f804360fd3719242842f89ff6c480971b000b",
+      "step": "protocol-frozen"
+    },
+    {
+      "eer": 0.023154362416107382,
+      "failed": 43,
+      "leaf_id": "QS-C21.EXTERNAL",
+      "mapping": {
+        "artifact_rows": 6000,
+        "columns": [
+          "pair_id",
+          "left_path",
+          "right_path",
+          "score",
+          "label",
+          "failure"
+        ],
+        "field_mapping": null,
+        "mapped_pairs": 6000,
+        "protocol_pairs": 6000,
+        "protocol_pairs_without_row": 0,
+        "refusals": 0,
+        "rule": "rows map to protocol pairs by pair_id; paths and labels, when present, must agree with the recorded protocol; no row is invented; uncovered pairs are NOT_EXECUTED failures"
+      },
+      "ok": true,
+      "run_id": "run:sha256:ae796665fa2f5029522eff3eb120cc52cf236983473ca96008eea5aad9ee8f6a",
+      "scored": 5957,
+      "step": "external-scores-imported"
+    },
+    {
+      "matrix_id": "matrix:sha256:e30af1f81e773feb8749db800b737536af4d371cca67f34a3595d1a294e08a0e",
+      "ok": true,
+      "step": "matrix-started"
+    },
+    {
+      "leaves": 6,
+      "ok": true,
+      "step": "matrix-completed"
+    },
+    {
+      "analysis_id": "analysis:sha256:4fddfcdb82553ec0a5e1bfb185c964ba7de0c4b72938a95af1245515bf16487c",
+      "ok": true,
+      "step": "utility-started"
+    },
+    {
+      "ok": true,
+      "run_id": "run:sha256:c590b9bf2a45b8932ee0e2e879647682189f92ce78ab11377c8f4739ea0f83c1",
+      "step": "utility-completed"
+    },
+    {
+      "analysis_id": "analysis:sha256:e57fc36fe542878f45ae35aeb1be5daab2c6285a73b2bc56f24739fb779d8dd3",
+      "ok": true,
+      "step": "cross-matcher-started"
+    },
+    {
+      "contrasts": 9,
+      "ok": true,
+      "step": "cross-matcher-completed"
+    },
+    {
+      "contrast": "QS-C22.AN~QS-C22.EN",
+      "ok": true,
+      "pairs": 10,
+      "step": "disagreements-resolve-to-pairs"
+    },
+    {
+      "figure_id": "figure:sha256:ea44a5a23849c64b6f7432b0b7f3482d06388ffc325601fa32cb5040df276ef0",
+      "ok": true,
+      "sha256": {
+        "csv": "cd230cd3a93d6d0a1d9893f4f7519f6739ef66a6cc4020752eaa30ecd3e7addb",
+        "pdf": "61f3cb929f94c3ab324aa69ab3eb88119e6718728183b7e413997c6ea183ff1f",
+        "png": "ab40121b1378a6f26bbddb1191ac4f1f345f352b0cae0f09465c06d6de243cbc",
+        "svg": "3abb0369c8f8ee0bc44e9befe066bbbebd6b57563e683a406d155ccea0b80b8e"
+      },
+      "step": "figure-rendered"
+    },
+    {
+      "dashboard_id": "dashboard:sha256:26e223df8187d3b2093be3de9e022b04794b0895dd64a2e7f30bf3853abba7e0",
+      "ok": true,
+      "panels": 5,
+      "step": "dashboard-saved-and-reloaded"
+    },
+    {
+      "ok": true,
+      "pdf_sha256": "f73139aa61617f72fcbc9d913314376feaaacab321d33085f22b3c4ac7cbb6c8",
+      "report_id": "report:sha256:d1267e06e36fc7a2cd229833a0b911d6eaa7df9202ee03410eef2a7143a9619d",
+      "step": "report-built"
+    },
+    {
+      "bundle_id": "bundle:sha256:58ade31f9bcbc47a610ac10adca71ae4d42ad175ea173d0b26d7bb139b07ac05",
+      "ok": true,
+      "sha256": "fee73b991e14a24da0e7747bfaec42a9f213b644d236194215db06675ce8ce48",
+      "step": "bundle-exported"
+    },
+    {
+      "compared_values": 1026,
+      "ok": true,
+      "state": "EXACT",
+      "step": "reproduced"
+    },
+    {
+      "directories": 14,
+      "files": 29,
+      "ok": true,
+      "step": "purge-scope-listed"
+    },
+    {
+      "event_types": [
+        "ARTIFACT_EXPORTED",
+        "CONFIGURATION_CHANGED",
+        "DATASET_IMPORTED",
+        "PROJECT_CREATED",
+        "RUN_COMPLETED",
+        "RUN_STARTED"
+      ],
+      "events": 24,
+      "ok": true,
+      "step": "audit-attributed"
+    },
+    {
+      "ok": true,
+      "refused": [],
+      "step": "network-guard-refused-nothing"
+    }
+  ]
+}

@@ -113,7 +113,7 @@ class ResourceRegistryTests(unittest.TestCase):
     def test_real_registry_validates_recorded_bytes(self) -> None:
         summary = validate_registry_file(REGISTRY_PATH)
         self.assertEqual(summary["resources"], 10)
-        self.assertEqual(summary["artifacts"], 192)
+        self.assertEqual(summary["artifacts"], 193)
         self.assertEqual(summary["checks"], 18)
         self.assertEqual(
             summary["states"],

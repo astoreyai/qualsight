@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type CrossContrastSummary, type CrossMatcherOut, type CrossMatcherSummary, type CrossPairRow, type JobOut, type MatcherLeaf } from "./api";
+import { PairEvidence } from "./PairEvidence";
 
 const MATCHER_SHORT: Record<string, string> = {
   "adaface-ir101-local-candidate": "AdaFace IR-101",
@@ -50,6 +51,7 @@ export function CrossMatcher({ projectId, onMessage }: CrossMatcherProps) {
   const [category, setCategory] = useState<string>("A_ONLY");
   const [pairs, setPairs] = useState<{ total: number; rows: CrossPairRow[] } | null>(null);
   const [noteText, setNoteText] = useState<Record<string, string>>({});
+  const [evidencePair, setEvidencePair] = useState<{ pair: string; run: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(() => {
@@ -65,10 +67,25 @@ export function CrossMatcher({ projectId, onMessage }: CrossMatcherProps) {
     api.projectJobs(projectId).then((items) => {
       const completed = items.filter((job) => job.state === "COMPLETED" && job.run_id);
       setJobs(completed);
-      setSelectedJob((current) => current || (completed[0]?.job_id ?? ""));
     }).catch(() => setJobs([]));
     api.crossMatcherAnalyses(projectId).then(setAnalyses).catch(() => setAnalyses([]));
   }, [projectId]);
+
+  const matrixDataset = useMemo(
+    () => leaves.find((leaf) => leaf.matrix_id === selectedMatrix)?.dataset_id ?? null,
+    [leaves, selectedMatrix],
+  );
+  const eligibleJobs = useMemo(
+    () => jobs.filter((job) => !matrixDataset || !job.dataset_id || job.dataset_id === matrixDataset),
+    [jobs, matrixDataset],
+  );
+  useEffect(() => {
+    // The quality job must cover the matrix's own dataset (uploads and other
+    // datasets' jobs are not comparable to these matcher Runs).
+    setSelectedJob((current) =>
+      current && eligibleJobs.some((job) => job.job_id === current) ? current : (eligibleJobs[0]?.job_id ?? ""),
+    );
+  }, [eligibleJobs]);
 
   useEffect(() => {
     refresh();
@@ -175,7 +192,7 @@ export function CrossMatcher({ projectId, onMessage }: CrossMatcherProps) {
         <label>
           Quality job
           <select value={selectedJob} onChange={(event) => setSelectedJob(event.target.value)} data-testid="cross-job">
-            {jobs.map((job) => (
+            {eligibleJobs.map((job) => (
               <option key={job.job_id} value={job.job_id}>{shortHash(job.job_id)} · {job.assessed.toLocaleString()} measured</option>
             ))}
           </select>
@@ -290,6 +307,9 @@ export function CrossMatcher({ projectId, onMessage }: CrossMatcherProps) {
                         <a href={row.links.right_quality}>right quality</a>
                         <a href={row.links.run_a}>run A</a>
                         <a href={row.links.run_b}>run B</a>
+                        <button type="button" className="secondary" data-testid="cross-evidence-open" onClick={() => setEvidencePair(evidencePair?.pair === row.pair_id ? null : { pair: row.pair_id, run: row.links.run_a.split("/").pop() ?? "" })}>
+                          {evidencePair?.pair === row.pair_id ? "hide evidence" : "match evidence (A)"}
+                        </button>
                       </span>
                       {row.annotations.length > 0 && (
                         <ul className="annotations">
@@ -303,6 +323,9 @@ export function CrossMatcher({ projectId, onMessage }: CrossMatcherProps) {
                         <button type="button" className="secondary" onClick={() => void annotate(row)} data-testid="annotation-save">Save</button>
                       </span>
                     </div>
+                  {evidencePair?.pair === row.pair_id && (
+                      <PairEvidence runId={evidencePair.run} pairId={row.pair_id} onClose={() => setEvidencePair(null)} />
+                    )}
                   </li>
                 ))}
               </ul>

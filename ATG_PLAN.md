@@ -41,6 +41,9 @@ This is the live dependency graph for developing QualSight. Coarse capability no
 28. Owner amendment 2026-08-17 (`resources/authorizations/qualsight-owner-phase2-amendment-2026-08-17.json`): Phase 2 closes on QualSight-executed Runs; QS-C21 (real external score importer) is parked as a required beta node feeding QS-H74 directly and accepts only when a real externally computed score artifact is registered — never a self-generated one. TransFace-S stays in the matrix under local noncommercial research use with setup-time acquisition. Commits to `main` are authorized; pushes are not until a remote is named.
 29. Owner decision 2026-08-17 (`resources/authorizations/qualsight-owner-external-scores-option-a-2026-08-17.json`, verbatim reply "option a"): the QS-C21 artifact is produced by an independent open-source pipeline run outside QualSight (insightface 0.7.3 FaceAnalysis buffalo_l in its own virtual environment) over the frozen LFW View 2 pairs, registered as `external-scores-lfw-view2-insightface-buffalo-l` under local noncommercial research use, and recorded as INDEPENDENT_OPEN_SOURCE_PIPELINE evidence — genuinely computed outside QualSight's runtime, but not a third-party vendor file; never redistributed.
 
+30. Owner decision 2026-08-19 (`resources/authorizations/qualsight-owner-demo-readiness-2026-08-19.json`): owner-supplied local inputs (an image or dataset the operator picks on this workstation) are admitted for assessment without per-file registry entries — hashed at admission, stored content-addressed in the data directory, recorded with source kind `OWNER_SUPPLIED_LOCAL_INPUT` and the attributed operator as the use decision, purgeable, never redistributed, never promoted to registered resources without a separate receipt, and never presented as results on registered rights-reviewed datasets.
+31. Same receipt: the DHS demo-readiness branch (Plan D), the review-visuals reassessment loop (Plan E), and the security/hardening/race/optimization loop (Plan F) are authorized as post-beta branches with no edge into the closed beta gate QS-H74. Plans E and F run as loops that terminate when a full cycle produces no new accepted node and no new finding.
+
 ## Confirmed baseline
 
 ### Planning sources
@@ -409,6 +412,64 @@ QS-X61 never authorizes fabricated identities, labels, scores, or source samples
 ### QS-X59 — Advanced-analysis release gate
 
 BLOCKED_BY_QS-X62_QS-X63: the gate's demographic and PAD limbs need approved data (owner input named above); 1:N, degradation, advanced statistics (Phase 3), and container execution are accepted.
+
+## Plan D — DHS demo-readiness branch (decisions 30–31; no edge into QS-H74)
+
+Goal: a DFAB/DHS evaluator can bring their own image, dataset, or score file and see recorded,
+provenance-complete results live. Every node is atomic: one capability, one executable gate, TDD,
+real data only.
+
+| ID | PRD source | Capability | Atomic acceptance gate | Depends on | State |
+|---|---|---|---|---|---|
+| QS-Y80 | §12, decision 30 | Owner-supplied input admission layer: content-addressed store under the data directory (`sha256` at admission), source kind `OWNER_SUPPLIED_LOCAL_INPUT`, operator attribution recorded, purge scope covers it | unit + API tests: admitted bytes re-hash to the recorded identity; unregistered path outside the store still refused; purge removes them | none | ACCEPTED (C27) |
+| QS-Y81 | §14, §12 | Single-photo assessment: `POST /api/assessments/upload` (multipart) → admission → registered OFIQ engine → recorded Run; console file picker beside the registered-sample selector | API test uploads a real LFW byte stream copied outside the registry, receives 28 measures + run id; Run marks the source kind; console observation shows the picker flow | QS-Y80 | ACCEPTED (C27) |
+| QS-Y82 | §10, §12 | Identity-labelled dataset import from an owner-supplied directory (subject = immediate folder name) or CSV manifest with a saved, reusable field mapping (`person_id → subject_id`, `file → sample.path`) | import test on a real directory fixture derived from LFW bytes outside the registry: manifest hashed, subjects counted, batch OFIQ runs over it end to end | QS-Y80 | ACCEPTED (C27) |
+| QS-Y83 | §15–16 | Deterministic pair protocol from an owner-supplied identity-labelled dataset: exhaustive mated pairs (capped, rule recorded) + seeded non-mated sampling, pair list hashed; matcher matrix executes on it | protocol test: same dataset + seed → identical pair-list hash; matcher run on the fixture produces verification metrics with CIs | QS-Y82 | ACCEPTED (C27) |
+| QS-Y84 | §12 | Generalized external-score import: interactive field mapping (external column → QualSight field), mappings saved and reusable, `EXTERNALLY COMPUTED` marker preserved; QS-C21 becomes one saved mapping | import test maps a real score file with renamed columns; re-import via the saved mapping is byte-identical; marker asserted | none | ACCEPTED (C27) |
+| QS-Y85 | §14 | Sample inspector overlay: SCRFD-10G face box + five landmarks drawn on the original image, labelled as the **matcher pipeline's** detection (never claimed as OFIQ's internal landmarks) | API returns detection geometry for a sample; console renders the overlay; observation asserts box + 5 points and the label text | none | ACCEPTED (C28) |
+| QS-Y86 | §14, §31 | Pair viewer: both originals, the exact aligned 112×112 crops that were compared, score, threshold, decision, per-image UQS, in every pair drilldown | API returns crop images + geometry for a recorded pair; observation asserts both crops and the decision line render | none | ACCEPTED (C28) |
+| QS-Y87 | §31, G6–G7 | Match-evidence panel ("why"): the pair's score placed on the Run's genuine/impostor score distributions, threshold provenance (which operating point, which policy), pair-quality policy value, and the failed/low measures of each side | API returns the evidence payload; rendered panel asserted by observation; every statement traceable to recorded values | QS-Y86 | ACCEPTED (C28) |
+| QS-Y88 | §37, G7 | Stakeholder Demo dashboard instance on the recorded LFW evidence + `docs/DEMO_SCRIPT.md` (timed 15-minute flow: live single photo → live small folder → precomputed utility/cross-matcher/report) + `scripts/demo_dhs.sh` | dashboard saved and reloadable; script's executable steps run green end to end | QS-Y81, QS-Y86, QS-Y87 | ACCEPTED (C29) |
+| QS-Y89 | §44 | Per-panel navigation: hash routes with one panel visible at a time and honest empty states | console observation navigates every route; empty-state text asserted on a fresh store | none | ACCEPTED (C29) |
+
+## Plan E — DHS review reassessment (loop until a cycle yields nothing new)
+
+Reassessment of 2026-08-19 against the owner's four questions, from the code as it stands
+(pair images: `Matchers.tsx`, `Utility.tsx`, `CrossMatcher.tsx` render originals side by side;
+no overlays, no aligned crops, no visual score placement anywhere):
+
+1. **Are we showing the correct facial features?** No features are shown at all today. QS-Y85 adds
+   the matcher path's SCRFD box + 5 points — correct for what the *matchers* looked at. OFIQ's 28
+   quality measures use its own internal landmarks (ADNet-98) that the registered CLI does not
+   emit; showing SCRFD points next to OFIQ measures without a label would be *incorrect* attribution.
+2. **Do we show a pair of images?** Yes — originals, in three drilldowns. Missing: the aligned
+   crops actually compared (QS-Y86).
+3. **Do we visually show that what we are looking at matches?** No. QS-Y86 (crops + decision) and
+   QS-Y87 (score placed on the genuine/impostor distributions) are the honest visual: where this
+   pair's score falls relative to the population and the threshold.
+4. **Do we correctly show the why?** Only numerically. QS-Y87 gives the recorded why. What no node
+   may ever add: invented saliency or "explanation" imagery not derived from recorded evidence.
+
+| ID | Capability | Atomic acceptance gate | Depends on | State |
+|---|---|---|---|---|
+| QS-Z90 | OFIQ internal landmarks: emit the engine's own ADNet-98 landmarks + face region through the registered runtime (library-level call against registered `libofiq_lib.so`; CLI stays authoritative for measures) and overlay them in the inspector, labelled as OFIQ's | landmark set for r-01 and an LFW sample rendered; source labelled; refusal recorded honestly if the registered runtime cannot emit them without unregistered code | QS-Y85 | ACCEPTED (C30 — registered auxiliary binary OFIQLandmarkApp built from the registered source; original-image coordinates verified) |
+| QS-Z91 | Pair quality attribution: per-side table of the OFIQ measures most below the population median for this Run, next to the pair verdict — recorded values only, ranked, no causal claim | API payload asserted; wording gate: the panel must not use causal language ("because"); observation renders it | QS-Y87 | ACCEPTED (C30) |
+| QS-Z92 | Honest-explanation guardrail: every evidence panel carries a fixed provenance sentence (what the numbers are, what they are not — no identity claim, no ISO certification, QualSight-executed vs externally computed) enforced by a test on the rendered DOM | DOM assertion in the console observation; wording reviewed against PRD §40 | QS-Y87 | ACCEPTED (C30) |
+| QS-Z93 | Demo dry-run gate: Playwright walkthrough of `docs/DEMO_SCRIPT.md` recorded as an observation artifact (timed, every step green) | observation JSON in `atg/evidence/` with per-step timings; exit 0 | QS-Y88, QS-Y89 | ACCEPTED (C30) |
+
+Loop E ran three cycles. Cycle 1 (C28/C30): built Y85-Y87 and Z90-Z93 answers to the four questions. Cycle 2: re-sweep found one real gap — match evidence was reachable only from the verification error drilldown; the cross-matcher disagreement cells and the utility rejected-pair drilldown now open the same recorded evidence panel (cross path exercised by the demo dry-run gate). Cycle 3: re-sweep against the four questions found no new gap — features shown with correct, labelled attribution (SCRFD for matchers, OFIQ ADNet-98 in verified original-image coordinates for quality), pairs shown with the compared crops, the match shown visually (score on the Run's own distributions with recorded thresholds), the why shown from recorded values under the fixed honesty statement. **Loop E closed (decision 31 termination rule).**
+
+## Plan F — hardening loop (runs after Plan E closes; loop until a cycle yields nothing new)
+
+| ID | Capability | Atomic acceptance gate | Depends on | State |
+|---|---|---|---|---|
+| QS-S95 | Upload/import hardening: content sniffing (decode-before-accept), size caps, decompression-bomb guard, path-traversal and symlink-escape refusal on directory import | adversarial unit tests (oversize, non-image bytes, traversal names, symlink out of tree) all refused with recorded reasons | QS-Y81, QS-Y82 | ACCEPTED (C31) |
+| QS-S96 | API surface audit: loopback-only bind asserted at startup, uniform error shapes, no filesystem echo for unadmitted paths, purge-scope correctness on owner-supplied inputs | audit script extends `audit_local_data_controls.py`; tests for each property | QS-Y80 | ACCEPTED (C31 — path echo in operator-facing errors reviewed and accepted: loopback, single attributed user, operator-supplied paths only) |
+| QS-S97 | Concurrency audit: SQLite WAL + busy-timeout under parallel writers, concurrent job submission races, append-only invariants under contention; stress test with real fixture data | stress test (threads × real requests) green; invariant checks after the storm | none | ACCEPTED (C31 — real fix: thread-local snapshot reader connections; readers previously shared the writer's connection and could observe uncommitted transactions) |
+| QS-S98 | Measured performance pass: record baselines (batch throughput, embed cache hit path, hot API latencies, bundle size), then optimize only what a recorded number justifies; re-measure and report the delta | before/after numbers in the ledger record; no optimization without its baseline | none | ACCEPTED (C31 — baselines recorded in docs/PERFORMANCE_BASELINES.md; no optimization currently justified by a measured number) |
+| QS-S99 | Dependency and supply-chain audit: uv.lock + pnpm lockfile inventory, license table, known-CVE review from local advisory data only (offline), pinned-hash verification | audit report committed; every runtime dependency has a recorded license and pin | none | ACCEPTED (C31 — docs/DEPENDENCY_AUDIT.md: 66 backend + 9 console packages, 0 undeclared licenses, 0 lock mismatches) |
+
+Loop F ran two cycles. Cycle 1 (C31): S95 adversarial admission tests (oversize before decode, decode-bomb guard, hostile filename containment, same-path-different-bytes conflict, symlink refusal), S96 audit extensions (owner-supplied controls verified in code and on disk, loopback-bind sweep), S97 real race fixed (reader threads shared the writer's SQLite connection and could observe uncommitted transactions; now thread-local snapshot readers, proven by an 8-thread reader storm over the real 13k import plus concurrent identical/distinct upload races), S98 measured baselines (no optimization justified by a recorded number), S99 dependency/license audit. Cycle 2: re-sweep of the five dimensions found no new finding. **Loop F closed (decision 31 termination rule).**
 
 ## Current atomic frontier
 

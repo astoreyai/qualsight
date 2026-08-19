@@ -106,11 +106,54 @@ def _check_purge() -> dict[str, object]:
             "ok": "SCOPE_STATEMENT" in purge and "CREATE TABLE IF NOT EXISTS purges" in store}
 
 
+def _check_owner_supplied(data_dir: Path) -> dict[str, object]:
+    """QS-S96: decision-30 admission controls are present in the code and honored on disk."""
+
+    module = (BACKEND / "importers" / "owner_supplied.py").read_text(encoding="utf-8")
+    code_controls = {
+        "size_cap": "MAX_UPLOAD_BYTES" in module,
+        "decode_before_accept": "imdecode" in module and "do not decode as an image" in module,
+        "decode_bomb_guard": "MAX_DECODED_PIXELS" in module,
+        "symlink_refusal": "symlinks are not admitted" in module,
+        "root_escape_refusal": "resolves outside the declared root" in module,
+        "source_kind_marker": 'SOURCE_KIND = "OWNER_SUPPLIED_LOCAL_INPUT"' in module,
+    }
+    # On-disk check: every stored owner-supplied copy re-hashes to its filename stem.
+    import hashlib
+
+    storage = data_dir / "owner_supplied"
+    verified = drifted = 0
+    if storage.is_dir():
+        for path in storage.iterdir():
+            if not path.is_file():
+                continue
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if path.stem == digest:
+                verified += 1
+            else:
+                drifted += 1
+    ok = all(code_controls.values()) and drifted == 0
+    return {**code_controls, "stored_copies_verified": verified, "stored_copies_drifted": drifted, "ok": ok}
+
+
+def _check_loopback_bind() -> dict[str, object]:
+    """QS-S96: the serve entry point binds 127.0.0.1 explicitly and nothing binds 0.0.0.0."""
+
+    cli = (BACKEND / "cli.py").read_text(encoding="utf-8")
+    package_binds = []
+    for path in BACKEND.rglob("*.py"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "0.0.0.0" in text:
+            package_binds.append(str(path.relative_to(ROOT)))
+    ok = '"127.0.0.1"' in cli and not package_binds
+    return {"serve_binds_loopback": '"127.0.0.1"' in cli, "wildcard_binds": package_binds, "ok": ok}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=Path, default=ROOT / "var")
     args = parser.parse_args(argv)
-    summary = {"network_posture": _check_network_posture(), "secrets": _check_secrets(args.data_dir), "purge": _check_purge()}
+    summary = {"network_posture": _check_network_posture(), "secrets": _check_secrets(args.data_dir), "purge": _check_purge(), "owner_supplied": _check_owner_supplied(args.data_dir), "loopback_bind": _check_loopback_bind()}
     ok = all(section["ok"] for section in summary.values())
     summary["ok"] = ok
     print(("LOCAL_DATA_CONTROLS_OK " if ok else "LOCAL_DATA_CONTROLS_FAIL ") + json.dumps(summary, sort_keys=True))

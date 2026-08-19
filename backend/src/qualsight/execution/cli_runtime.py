@@ -196,7 +196,7 @@ class RegisteredCLIAdapter:
             raise ContractValidationError("CLI runtime resource ID is invalid")
         if not isinstance(input_resource_ids, tuple):
             raise ContractValidationError("CLI input resource IDs must be a tuple")
-        if not input_resource_ids or not all(
+        if not all(
             isinstance(resource_id, str) and resource_id
             for resource_id in input_resource_ids
         ):
@@ -270,10 +270,11 @@ class RegisteredCLIAdapter:
         resource_ids = tuple(resource.resource_id for resource in self._resources)
         if len(resource_ids) != len(set(resource_ids)):
             raise ContractValidationError("CLI binding contains duplicate resources")
-        if not self._input_resources:
-            raise ContractValidationError(
-                "CLI binding must include at least one registered input resource"
-            )
+        # A binding with no input resources is the decision-30 owner-supplied
+        # form: it can only launch the batch list invocation (the single-image
+        # ``-i <registered data>`` form has no registered data to match), and
+        # scope authorization falls to the runtime resource's own grant.
+
         registry_identity = self._runtime_resource.registry_file_identity
         for resource in self._resources:
             if resource.registry_file_identity != registry_identity:

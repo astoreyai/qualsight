@@ -24,6 +24,14 @@ and a container execution adapter.
   (append-only evidence ledger), `PRD.md`, `REQUIREMENTS.md`, `metrics/metric-registry.json`,
   `resources/resource-registry.json`.
 
+## Demonstration
+
+`bash scripts/demo_dhs.sh` starts the console on the recorded evidence, verifies the demo state,
+and ensures the *Stakeholder Demo* dashboard; the timed 15-minute operator flow is
+`docs/DEMO_SCRIPT.md`. Evaluators can bring their own photo or directory (decision 30): inputs are
+hashed, recorded as `OWNER_SUPPLIED_LOCAL_INPUT`, assessed by the registered engine, never
+redistributed, and purgeable.
+
 ## Rights and data
 
 Datasets, model checkpoints, the OFIQ runtime, and derived biometric data are registered by hash and used

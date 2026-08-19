@@ -1,0 +1,76 @@
+{
+  "demo_script": "docs/DEMO_SCRIPT.md",
+  "ended_at": "2026-08-19T08:54:21-0500",
+  "exit_code": 0,
+  "gate": "QS-Z93 demo dry-run",
+  "steps": [
+    {
+      "output": [
+        "  \"project\": \"LFW quality workbench \\u2014 Phase 1\",",
+        "  \"matcher_leaves\": 7,",
+        "  \"utility_analyses\": 7,",
+        "  \"cross_matcher_analyses\": 1,",
+        "  \"figures\": 9,",
+        "  \"reports\": 2",
+        "}",
+        "[demo] verify complete"
+      ],
+      "seconds": 9.1,
+      "step": "prep"
+    },
+    {
+      "resources": 10,
+      "seconds": 1.0,
+      "step": "system"
+    },
+    {
+      "project": "LFW quality workbench",
+      "seconds": 0.3,
+      "step": "select-project"
+    },
+    {
+      "seconds": 5.6,
+      "step": "live-upload",
+      "uqs": "82"
+    },
+    {
+      "ofiq_points": 98,
+      "scrfd_points": 5,
+      "seconds": 4.6,
+      "step": "overlays"
+    },
+    {
+      "dataset": "LFW 13,233 recorded",
+      "seconds": 0.3,
+      "step": "data"
+    },
+    {
+      "evidence_decisions": 4,
+      "matrix_cells": 6,
+      "seconds": 0.5,
+      "step": "matchers-evidence"
+    },
+    {
+      "recorded_analyses": 7,
+      "seconds": 0.3,
+      "step": "utility"
+    },
+    {
+      "cross_evidence": true,
+      "recorded_cross_analyses": 1,
+      "seconds": 1.1,
+      "step": "cross"
+    },
+    {
+      "figures": 9,
+      "seconds": 0.3,
+      "step": "reports"
+    },
+    {
+      "panel": "advanced shown",
+      "seconds": 0.3,
+      "step": "advanced"
+    }
+  ],
+  "total_seconds": 24.2
+}

@@ -98,6 +98,20 @@ def main(argv: list[str] | None = None) -> int:
     ext.add_argument("--project-id", required=True)
     ext.add_argument("--protocol-id", required=True)
     ext.add_argument("--resource-id", required=True)
+    owner_assess = sub.add_parser("assess-owner", help="admit one operator-supplied local photo (decision 30) and assess it with the registered engine as a recorded Run")
+    owner_assess.add_argument("--project-id", required=True)
+    owner_assess.add_argument("--image", required=True)
+    owner_assess.add_argument("--scope", default="QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1")
+    owner_dir = sub.add_parser("import-owner-directory", help="import an operator directory as an identity-labelled owner-supplied dataset (subject = immediate folder name)")
+    owner_dir.add_argument("--project-id", required=True)
+    owner_dir.add_argument("--root", required=True)
+    owner_dir.add_argument("--name", required=True)
+    owner_pairs = sub.add_parser("freeze-owner-pairs", help="freeze a deterministic seeded pair protocol over an owner-supplied dataset")
+    owner_pairs.add_argument("--project-id", required=True)
+    owner_pairs.add_argument("--dataset-id", required=True)
+    owner_pairs.add_argument("--seed", type=int, required=True)
+    owner_pairs.add_argument("--max-mated-per-subject", type=int, default=6)
+    owner_pairs.add_argument("--nonmated-multiple", type=float, default=1.0)
     ident = sub.add_parser("identification", help="freeze the LFW 1:N protocol (if needed) and run an open-set search with a frozen matcher on the GPU (QS-X60)")
     ident.add_argument("--project-id", required=True)
     ident.add_argument("--dataset-id", required=True)
@@ -291,6 +305,54 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             result = job.run()
             print(json.dumps({"analysis_id": result.analysis_id, "run_id": result.run.run_id, "directory": str(result.directory), "summary": result.summary}, indent=2))
+            return 0
+        if args.command == "assess-owner":
+            from pathlib import Path as _Path
+
+            from .engines.ofiq.batch import OFIQBatchJob
+            from .importers.owner_supplied import OwnerSuppliedImporter
+            from .projects import ProjectService
+
+            engine = _engine(settings)
+            service = ProjectService(store, engine)
+            project = service.require_writable(args.project_id)
+            importer = OwnerSuppliedImporter(store, settings.data_dir, service.actor)
+            data = _Path(args.image).read_bytes()
+            admitted = importer.admission.admit_bytes(data, _Path(args.image).name, args.project_id)
+            dataset, sample = importer.import_admitted_single(project, admitted, f"Uploaded photo {_Path(args.image).name}")
+            job = OFIQBatchJob(
+                engine=engine, store=store, project=project, dataset=dataset, samples=[sample],
+                purpose_scope=args.scope, job_root=settings.data_dir / "jobs", chunks=1,
+                selection_rule="the single operator-supplied owner image (decision 30, CLI)",
+            )
+            progress = job.run()
+            store.finish_job(job.job_id, job.ended_at.isoformat() if job.ended_at else "", job.state)
+            print(json.dumps({"run_id": progress.run_id, "state": progress.state, "source_kind": "OWNER_SUPPLIED_LOCAL_INPUT", "image_sha256": admitted.sha256, "stored_path": admitted.path, "dataset_id": dataset.dataset_id}, indent=2))
+            return 0 if progress.state == "COMPLETED" else 5
+        if args.command == "import-owner-directory":
+            from pathlib import Path as _Path
+
+            from .importers.owner_supplied import OwnerSuppliedImporter
+            from .projects import ProjectService
+
+            engine = _engine(settings)
+            service = ProjectService(store, engine)
+            project = service.require_writable(args.project_id)
+            result = OwnerSuppliedImporter(store, settings.data_dir, service.actor).import_directory(project, _Path(args.root), args.name)
+            print(json.dumps({"dataset_id": result.dataset.dataset_id, "samples": result.sample_count, "subjects": result.subject_count, "source_kind": "OWNER_SUPPLIED_LOCAL_INPUT", "statistics_sha256": result.statistics_sha256}, indent=2))
+            return 0
+        if args.command == "freeze-owner-pairs":
+            from .importers.owner_supplied import freeze_owner_pairs
+            from .projects import ProjectService
+
+            engine = _engine(settings)
+            service = ProjectService(store, engine)
+            project = service.require_writable(args.project_id)
+            dataset = store.dataset(args.dataset_id)
+            if dataset is None:
+                raise SystemExit("dataset is not recorded")
+            record = freeze_owner_pairs(store, project, dataset, data_dir=settings.data_dir, actor_id=service.actor, seed=args.seed, max_mated_pairs_per_subject=args.max_mated_per_subject, nonmated_multiple=args.nonmated_multiple)
+            print(json.dumps({"protocol_id": record.protocol_id, "pairs": record.pair_count, "mated": record.mated_count, "nonmated": record.nonmated_count, "pairs_sha256": record.pairs_sha256}, indent=2))
             return 0
         if args.command == "identification":
             from .identification.protocol import freeze_lfw_identification
