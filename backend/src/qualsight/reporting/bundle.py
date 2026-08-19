@@ -36,7 +36,8 @@ from ..provenance import sha256_file
 BUNDLE_VERSION = "1.0.0"
 NUMERIC_TOLERANCE = 1e-9
 VOLATILE_KEYS = {"analysis_id", "created_at", "run_id", "start_time", "end_time", "runtime_seconds", "assessment_ms", "timing", "evidence_sha256", "directory", "generated_at", "note"}
-SCORE_TOLERANCE = 1e-5  # float32 embeddings on GPU; cosine scores are compared at this absolute tolerance
+SCORE_TOLERANCE = 1e-5  # same device: float32 embeddings; cosine scores are compared at this absolute tolerance
+CROSS_DEVICE_SCORE_TOLERANCE = 1e-3  # original and reproduction ran on different devices (cuda vs cpu kernels); recorded with the result
 
 
 class BundleError(RuntimeError):
@@ -381,6 +382,11 @@ def _reproduce_matcher(run_json, configuration, metrics_doc, bundle_path, store,
             return finish(ReproductionState.BLOCKED.value, original_run_id, project_id=project_id)
         leaves = job.run()
         produced_rows = pq.read_table(leaves[0].comparisons_parquet).to_pylist()
+        original_device = (configuration.get("matcher") or {}).get("device")
+        reproduction_device = json.loads(leaves[0].run.configuration.text).get("matcher", {}).get("device")
+        cross_device = original_device is not None and reproduction_device is not None and original_device != reproduction_device
+        score_tolerance = CROSS_DEVICE_SCORE_TOLERANCE if cross_device else SCORE_TOLERANCE
+        metric_tolerance = 1e-3 if cross_device else 1e-6
         differences: list[str] = []
         counter = [0]
         by_pair = {row["pair_id"]: row for row in produced_rows}
@@ -402,15 +408,15 @@ def _reproduce_matcher(run_json, configuration, metrics_doc, bundle_path, store,
                     differences.append(f"{row['pair_id']}.score: {row['score']!r} vs {other['score']!r}")
                     state = "DIFFERENT"
             elif row["score"] != other["score"]:
-                if abs(row["score"] - other["score"]) <= SCORE_TOLERANCE:
+                if abs(row["score"] - other["score"]) <= score_tolerance:
                     state = _worse(state, "WITHIN_TOLERANCE")
                 else:
                     differences.append(f"{row['pair_id']}.score: {row['score']!r} vs {other['score']!r}")
                     state = "DIFFERENT"
         produced_metrics = json.loads(json.dumps(leaves[0].metrics, sort_keys=True, allow_nan=False))
-        metric_state = _compare(_strip_volatile(metrics_doc.get("verification_metrics.json", {})), _strip_volatile(produced_metrics), "verification_metrics.json", differences, counter, tolerance=1e-6)
+        metric_state = _compare(_strip_volatile(metrics_doc.get("verification_metrics.json", {})), _strip_volatile(produced_metrics), "verification_metrics.json", differences, counter, tolerance=metric_tolerance)
         state = _worse(state, metric_state)
-        steps.append({"step": "execute-and-compare", "ok": True, "kind": "MATCHER", "compared_values": counter[0], "state": state, "score_tolerance": SCORE_TOLERANCE, "reproduction_run_id": leaves[0].run.run_id})
+        steps.append({"step": "execute-and-compare", "ok": True, "kind": "MATCHER", "compared_values": counter[0], "state": state, "score_tolerance": score_tolerance, "metric_tolerance": metric_tolerance, "original_device": original_device, "reproduction_device": reproduction_device, "cross_device": cross_device, "tolerance_basis": "CROSS_DEVICE" if cross_device else "SAME_DEVICE", "reproduction_run_id": leaves[0].run.run_id})
         return finish(state, original_run_id, differences[:200], counter[0], leaves[0].run.run_id, project_id)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

@@ -15,6 +15,8 @@ import { Utility } from "./Utility";
 import { CrossMatcher } from "./CrossMatcher";
 import { Reports } from "./Reports";
 import { Advanced } from "./Advanced";
+import { Nav } from "./Nav";
+import { SystemPanel } from "./SystemPanel";
 
 type AssessState =
   | { phase: "idle" }
@@ -143,7 +145,7 @@ export function App() {
           <span className="brand-mark" aria-hidden="true" />
           <div>
             <h1>QualSight</h1>
-            <p className="subtitle">Sample inspector · Phase-0 quality vertical slice</p>
+            <p className="subtitle">Face image quality → matcher utility workbench · beta</p>
           </div>
         </div>
         <div className="engine-badge" data-testid="engine-badge">
@@ -161,6 +163,7 @@ export function App() {
           )}
         </div>
       </header>
+      <Nav />
 
       <main className="layout">
         <section className="panel projects" aria-labelledby="projects-heading" data-testid="projects-panel">
@@ -394,6 +397,7 @@ export function App() {
         <CrossMatcher projectId={activeProjectId} onMessage={setProjectMessage} />
         <Reports projectId={activeProjectId} datasetId={activeDatasetId} onMessage={setProjectMessage} />
         <Advanced projectId={activeProjectId} datasetId={activeDatasetId} onMessage={setProjectMessage} />
+        <SystemPanel />
 
         <section className="panel runs" aria-labelledby="runs-heading">
           <h2 id="runs-heading">Recorded runs</h2>

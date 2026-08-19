@@ -119,7 +119,7 @@ def main() -> int:
             page = browser.new_page(viewport={"width": 1500, "height": 1000})
             page.goto(f"http://127.0.0.1:{PREVIEW_PORT}/", wait_until="networkidle")
             manifest = page.evaluate("() => document.querySelector('link[rel=manifest]')?.getAttribute('href')")
-            observation["steps"].append({"step": "load", "title": page.title(), "manifest": manifest})
+            observation["steps"].append({"step": "load", "title": page.title(), "manifest": manifest, "primary_nav_links": page.evaluate("() => document.querySelectorAll('[data-testid=primary-nav] [data-testid=nav-link]').length"), "system_panel_resources": (page.wait_for_selector("[data-testid=resource-table] tbody tr", timeout=60_000) and page.evaluate("() => document.querySelectorAll('[data-testid=resource-table] tbody tr').length"))})
             page.wait_for_selector("[data-testid=engine-badge] .value", timeout=30_000)
             badge = page.inner_text("[data-testid=engine-badge]")
             observation["steps"].append({"step": "engine-badge", "text": badge})

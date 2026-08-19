@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 import hashlib
+import os
 from pathlib import Path
 
 import numpy as np
@@ -89,7 +90,7 @@ class FrozenMatcher:
         digest = sha256_file(checkpoint)
         if digest != models[0].identity.sha256:
             raise MatcherRuntimeError(f"{matcher_id.value}: checkpoint bytes {digest} differ from the registered {models[0].identity.sha256}")
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device or select_device()
         source_digests: list[str] = []
         for key in UPSTREAM_KEYS[matcher_id]:
             source_digests.append(upstream.sources[key].sha256)
@@ -162,6 +163,29 @@ class FrozenMatcher:
         if np.any(norms == 0):
             raise MatcherRuntimeError(f"{self.matcher_id.value} produced a zero embedding")
         return (embeddings / norms).astype(np.float32)
+
+
+MIN_FREE_CUDA_BYTES = 1_500_000_000  # the three matchers need well under 1.5 GiB; below that the shared GPU is treated as unavailable
+
+
+def select_device() -> str:
+    """Matcher device: QUALSIGHT_MATCHER_DEVICE if set, else CUDA when it exists and has headroom, else CPU.
+
+    On a shared workstation other processes can leave the GPU without free memory; instead of failing
+    mid-Run with an out-of-memory error, the runtime falls back to the CPU and records ``device`` in the
+    Run's matcher binding, so the choice is always visible in the provenance.
+    """
+
+    forced = os.environ.get("QUALSIGHT_MATCHER_DEVICE")
+    if forced:
+        return forced
+    if not torch.cuda.is_available():
+        return "cpu"
+    try:
+        free, _total = torch.cuda.mem_get_info()
+    except Exception:  # noqa: BLE001 - driver query failure means no usable GPU
+        return "cpu"
+    return "cuda" if free >= MIN_FREE_CUDA_BYTES else "cpu"
 
 
 def cosine_similarity(left: np.ndarray, right: np.ndarray) -> np.ndarray:

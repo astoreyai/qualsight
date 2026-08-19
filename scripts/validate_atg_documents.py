@@ -125,6 +125,7 @@ CURRENT_ACCEPTED_CHILDREN = {
     "QS-C22.CROP.R0",
     "QS-C22.MATRIX.LFW",
     "QS-D31.R0",
+    "QS-H74.RELEASE.R0",
 }
 SUPERSEDED_HISTORICAL_CHILDREN = {
     "QS-A02.R0",
@@ -759,6 +760,12 @@ def _validate_current_output_hashes(records: list[dict[str, Any]]) -> int:
         "resources/authorizations/qualsight-owner-external-scores-option-a-2026-08-17.json": PROJECT_ROOT / "resources/authorizations/qualsight-owner-external-scores-option-a-2026-08-17.json",
         "atg/evidence/2026-08-18-console-observation-09.json": PROJECT_ROOT / "atg/evidence/2026-08-18-console-observation-09.json",
         "atg/evidence/2026-08-18-docs-workflow-gate-03.json": PROJECT_ROOT / "atg/evidence/2026-08-18-docs-workflow-gate-03.json",
+        "atg/evidence/2026-08-18-console-observation-10.json": PROJECT_ROOT / "atg/evidence/2026-08-18-console-observation-10.json",
+        "README.md": PROJECT_ROOT / "README.md",
+        "CHANGELOG.md": PROJECT_ROOT / "CHANGELOG.md",
+        "docs/BETA_ACCEPTANCE.md": PROJECT_ROOT / "docs/BETA_ACCEPTANCE.md",
+        "scripts/demo.sh": PROJECT_ROOT / "scripts/demo.sh",
+        "scripts/release.sh": PROJECT_ROOT / "scripts/release.sh",
         "resources/authorizations/qualsight-owner-phase2-amendment-2026-08-17.json": PROJECT_ROOT / "resources/authorizations/qualsight-owner-phase2-amendment-2026-08-17.json",
     }
     for label, path in expected.items():

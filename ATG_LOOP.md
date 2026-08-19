@@ -82,7 +82,7 @@ This snapshot is routing state, not new acceptance evidence. The companion graph
 | Class | Count | IDs or value | Controller effect |
 |---|---:|---|---|
 | Accepted whole capabilities | 41 | QS-A00, QS-A01, QS-A02, QS-A03, QS-A04, QS-A05, QS-A06, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B13, QS-B14, QS-C20, QS-C21, QS-C22, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43, QS-F50, QS-F51, QS-F52, QS-F53, QS-F54, QS-H70, QS-H71, QS-H72, QS-H73, QS-H74 | Frozen accepted outputs; every phase exit and the beta terminal gate satisfied (Phase 2 under decision 28, QS-C21 under decision 29); Phase 2 executed except imported scores |
-| Current accepted evidence children | 13 | QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-D31.R0 | Frozen child outputs |
+| Current accepted evidence children | 14 | QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-D31.R0, QS-H74.RELEASE.R0 | Frozen child outputs |
 | Superseded historical child events | 11 | QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, QS-A06.R1M | Preserved in the ledger; not current-byte evidence |
 | Blocked parent capabilities | 0 | none | QS-C21 accepted 2026-08-18 on the registered option-A artifact (decision 29) |
 | Blocked refinement parents | 0 | none | — |

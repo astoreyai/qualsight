@@ -3,7 +3,7 @@
 Every reportable number is produced by a registered, versioned definition and recorded in an
 immutable Run. This document names the definitions, the fixed choices, and the limitations a reader
 needs to interpret QualSight outputs. Definitions live in `metrics/metric-registry.json`
-(`qualsight-core-metrics` v1.1.0, 14 definitions, validated by `scripts/validate_metric_registry.py`).
+(`qualsight-core-metrics` v1.2.0, 19 definitions, validated by `scripts/validate_metric_registry.py`).
 
 ## Quality (OFIQ v1.1.2)
 
@@ -76,7 +76,7 @@ environment (uv.lock identity), hardware, configuration, metrics, artifacts, and
 are content-addressed by their inputs; `scripts/verify_utility_analysis.py` and
 `scripts/verify_cross_matcher.py` re-derive results with independent code; `.qsexp` bundles re-execute
 under `reproduce-bundle` and report EXACT / WITHIN_TOLERANCE / DIFFERENT / MISSING_DEPENDENCY /
-MISSING_DATA / BLOCKED (score tolerance 1e-5 for re-embedded matcher Runs; documents 1e-9).
+MISSING_DATA / BLOCKED (score tolerance 1e-5 for re-embedded matcher Runs on the same device, 1e-3 when the original and the reproduction ran on different devices — cuda vs cpu kernels — with both devices and the tolerance basis recorded; documents 1e-9). The matcher device is chosen per Run (CUDA when it has headroom on the shared workstation, else CPU) and recorded in the matcher binding.
 
 ## Limitations that travel with every result
 

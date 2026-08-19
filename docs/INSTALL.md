@@ -51,6 +51,7 @@ guard counted zero attempts. Its last real run is recorded in `atg/evidence/2026
 | `QUALSIGHT_DATA_DIR` | SQLite store, jobs, matrix, analyses, figures, reports, bundles, exports, upstream sources | `var/` in the repository |
 | `QUALSIGHT_ACTOR` | attributed single user for every audited action | `local-user:<login>` |
 | `QUALSIGHT_NETWORK_GUARD` | `1` refuses non-loopback sockets at runtime | off |
+| `QUALSIGHT_MATCHER_DEVICE` | force the frozen matcher device (`cuda` / `cpu`); unset = CUDA when ≥ 1.5 GiB is free, else CPU (recorded per Run) | unset |
 | `QUALSIGHT_INPUT_RESOURCE_IDS` | registered input resources the engine may read | conformance image + LFW |
 | `QUALSIGHT_REGISTRY_PATH` | resource registry | `resources/resource-registry.json` |
 

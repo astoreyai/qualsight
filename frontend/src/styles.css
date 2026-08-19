@@ -48,6 +48,7 @@ button.primary:disabled { opacity: 0.55; cursor: progress; }
 .crossmatcher { grid-column: 1 / span 3; }
 .reports { grid-column: 1 / span 3; }
 .advanced { grid-column: 1 / span 3; }
+.system { grid-column: 1 / span 3; }
 .runs { grid-column: 1 / span 2; }
 .status { color: var(--accent); }
 .error { color: var(--danger); border: 1px solid rgba(248, 113, 113, 0.4); border-radius: 8px; padding: 0.7rem; }
@@ -139,3 +140,8 @@ button.secondary.selected { border-color: var(--ok); }
 .pair-facts input { background: #0d1526; color: var(--text); border: 1px solid var(--panel-border); border-radius: 8px; padding: 0.3rem; width: 220px; }
 .dashboard-grid { display: grid; gap: 0.6rem; }
 .dashboard-panel { background: #0d1526; border: 1px solid var(--panel-border); border-radius: 8px; padding: 0.4rem; display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.78rem; }
+.primary-nav { display: flex; flex-wrap: wrap; gap: 0.6rem 1.4rem; padding: 0.5rem 1.5rem; border-bottom: 1px solid var(--panel-border); background: #0b1220; position: sticky; top: 0; z-index: 5; font-size: 0.78rem; }
+.nav-group { display: flex; align-items: center; gap: 0.5rem; }
+.nav-group-label { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.68rem; }
+.nav-link { color: var(--text); text-decoration: none; padding: 0.15rem 0.45rem; border-radius: 6px; border: 1px solid transparent; }
+.nav-link:hover { border-color: var(--accent); }
