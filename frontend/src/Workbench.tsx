@@ -282,7 +282,7 @@ export function Workbench({ projectId, onMessage, onDataset }: WorkbenchProps) {
                       <button type="button" className={explorerJobId === job.job_id ? "sample selected" : "sample"} disabled={job.state !== "COMPLETED"} onClick={() => void openExplorer(job.job_id)}>
                         <span className="sample-name">{job.state} · {job.assessed}/{job.total}</span>
                         <span className="sample-meta mono">{shortHash(job.job_id, 16)}</span>
-                        <span className="sample-meta">{job.started_at ?? ""}</span>
+                        <span className="sample-meta">{(job.started_at ?? "").replace("T", " ").slice(0, 19)}</span>
                       </button>
                     </li>
                   ))}

@@ -256,6 +256,39 @@ export function App() {
           )}
         </section>
 
+        <section className="panel runs" aria-labelledby="runs-heading">
+          <h2 id="runs-heading">Recorded runs</h2>
+          {runs.length === 0 ? (
+            <p className="empty">No immutable runs are recorded yet.</p>
+          ) : (
+            <table className="run-table" data-testid="run-table">
+              <thead>
+                <tr>
+                  <th scope="col">Run</th>
+                  <th scope="col">Engine</th>
+                  <th scope="col">Started</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runs.map((run) => (
+                  <tr key={run.run_id}>
+                    <td>
+                      <a href={`/api/runs/${run.run_id}`} className="mono">
+                        {shortHash(run.run_id, 16)}
+                      </a>
+                    </td>
+                    <td className="mono">
+                      {run.engine_resource_id} v{run.engine_version}
+                    </td>
+                    <td className="mono">{run.start_time.replace("T", " ").slice(0, 19)}</td>
+                    <td>{run.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
         </div>
         <div className={viewClass("assess")} data-view="assess">
         <section className="panel" aria-labelledby="samples-heading">
@@ -417,6 +450,7 @@ export function App() {
                     </option>
                   ))}
                 </select>
+                <div className="overlay-toggles">
                 <button
                   type="button"
                   className="secondary"
@@ -433,7 +467,7 @@ export function App() {
                       .catch((err: unknown) => setDetection({ phase: "error", detail: err instanceof Error ? err.message : String(err) }));
                   }}
                 >
-                  {detection.phase === "shown" ? "Hide face detection" : "Show face detection (matcher pipeline)"}
+                  {detection.phase === "shown" ? "Hide face detection" : "Face detection (SCRFD)"}
                 </button>
                 <button
                   type="button"
@@ -451,8 +485,9 @@ export function App() {
                       .catch((err: unknown) => setOfiqLandmarks({ phase: "error", detail: err instanceof Error ? err.message : String(err) }));
                   }}
                 >
-                  {ofiqLandmarks.phase === "loading" ? "Running OFIQ…" : ofiqLandmarks.phase === "shown" ? "Hide OFIQ landmarks" : "Show OFIQ landmarks (ADNet-98)"}
+                  {ofiqLandmarks.phase === "loading" ? "Running OFIQ…" : ofiqLandmarks.phase === "shown" ? "Hide OFIQ landmarks" : "OFIQ landmarks (ADNet-98)"}
                 </button>
+                </div>
                 <button
                   type="button"
                   className="primary"
@@ -590,41 +625,7 @@ export function App() {
           <SystemPanel />
         </div>
 
-        <div className={viewClass("projects")} data-view="projects-runs">
-        <section className="panel runs" aria-labelledby="runs-heading">
-          <h2 id="runs-heading">Recorded runs</h2>
-          {runs.length === 0 ? (
-            <p className="empty">No immutable runs are recorded yet.</p>
-          ) : (
-            <table className="run-table" data-testid="run-table">
-              <thead>
-                <tr>
-                  <th scope="col">Run</th>
-                  <th scope="col">Engine</th>
-                  <th scope="col">Started</th>
-                  <th scope="col">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((run) => (
-                  <tr key={run.run_id}>
-                    <td>
-                      <a href={`/api/runs/${run.run_id}`} className="mono">
-                        {shortHash(run.run_id, 16)}
-                      </a>
-                    </td>
-                    <td className="mono">
-                      {run.engine_resource_id} v{run.engine_version}
-                    </td>
-                    <td className="mono">{run.start_time}</td>
-                    <td>{run.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
-        </div>
+        
       </main>
     </div>
   );

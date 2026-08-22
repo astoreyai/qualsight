@@ -61,8 +61,13 @@ export function CrossMatcher({ projectId, onMessage }: CrossMatcherProps) {
     }
     api.matcherLeaves(projectId).then((items) => {
       setLeaves(items);
-      const matrices = Array.from(new Set(items.map((leaf) => leaf.matrix_id)));
-      setSelectedMatrix((current) => current || (matrices[matrices.length - 1] ?? ""));
+      // Default to the fullest matrix (most executed leaves), newest as tie-break.
+      const counts = new Map<string, number>();
+      for (const leaf of items) {
+        if (leaf.condition_id !== "EXTERNALLY_COMPUTED") counts.set(leaf.matrix_id, (counts.get(leaf.matrix_id) ?? 0) + 1);
+      }
+      const best = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
+      setSelectedMatrix((current) => current || (best ?? ""));
     }).catch(() => setLeaves([]));
     api.projectJobs(projectId).then((items) => {
       const completed = items.filter((job) => job.state === "COMPLETED" && job.run_id);
@@ -185,7 +190,7 @@ export function CrossMatcher({ projectId, onMessage }: CrossMatcherProps) {
           Matrix
           <select value={selectedMatrix} onChange={(event) => setSelectedMatrix(event.target.value)} data-testid="cross-matrix">
             {matrices.map((id) => (
-              <option key={id} value={id}>{shortHash(id)} · {leaves.filter((leaf) => leaf.matrix_id === id).length} leaves</option>
+              <option key={id} value={id}>{shortHash(id)} · {leaves.filter((leaf) => leaf.matrix_id === id).length === 1 ? "1 leaf" : `${leaves.filter((leaf) => leaf.matrix_id === id).length} leaves`}</option>
             ))}
           </select>
         </label>

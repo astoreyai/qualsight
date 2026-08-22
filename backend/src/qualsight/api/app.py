@@ -384,7 +384,8 @@ class RunSummaryOut(ApiModel):
     run_id: str
     project_id: str
     experiment_id: str
-    sample_id: str
+    # Batch, matcher, and analysis Runs cover many samples and record no single sample id.
+    sample_id: str | None
     status: str
     engine_resource_id: str
     engine_version: str

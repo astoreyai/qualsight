@@ -80,7 +80,7 @@ export interface RunSummaryOut {
   run_id: string;
   project_id: string;
   experiment_id: string;
-  sample_id: string;
+  sample_id: string | null;
   status: string;
   engine_resource_id: string;
   engine_version: string;
