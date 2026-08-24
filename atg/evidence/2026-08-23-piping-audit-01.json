@@ -1,0 +1,101 @@
+{
+  "console_errors": [],
+  "exit_code": 0,
+  "gate": "console interaction/piping audit",
+  "link_checks": {
+    "non_200": [],
+    "total": 519
+  },
+  "steps": [
+    {
+      "failures": [],
+      "newly_checked": 114,
+      "runs_listed": 69,
+      "scope": "projects",
+      "seconds": 9.5,
+      "step": "load",
+      "urls_in_dom": 114
+    },
+    {
+      "failures": [],
+      "measures": 28,
+      "newly_checked": 6,
+      "ofiq_points": 98,
+      "scope": "assess",
+      "scrfd_points": 5,
+      "seconds": 21.2,
+      "step": "assess",
+      "upload_uqs": "81",
+      "urls_in_dom": 120
+    },
+    {
+      "bins": 20,
+      "failures": [],
+      "newly_checked": 2,
+      "scope": "data",
+      "seconds": 0.6,
+      "step": "data",
+      "urls_in_dom": 122
+    },
+    {
+      "evidence_decisions": 4,
+      "failures": [],
+      "matrix_cells": 6,
+      "newly_checked": 186,
+      "scope": "matchers",
+      "seconds": 1.7,
+      "step": "matchers",
+      "urls_in_dom": 308
+    },
+    {
+      "erc_polylines": 7,
+      "failures": [],
+      "newly_checked": 193,
+      "pair_counts": {
+        "prevented": 26,
+        "rejected": 60,
+        "removed": 60
+      },
+      "scope": "utility",
+      "seconds": 3.2,
+      "step": "utility",
+      "urls_in_dom": 501
+    },
+    {
+      "contrasts": 9,
+      "failures": [],
+      "newly_checked": 14,
+      "scope": "cross",
+      "seconds": 1.6,
+      "step": "cross",
+      "urls_in_dom": 515
+    },
+    {
+      "failures": [],
+      "figures_opened": 9,
+      "newly_checked": 4,
+      "scope": "reports",
+      "seconds": 0.7,
+      "step": "reports",
+      "urls_in_dom": 519
+    },
+    {
+      "failures": [],
+      "newly_checked": 0,
+      "scope": "advanced",
+      "seconds": 0.4,
+      "step": "advanced",
+      "urls_in_dom": 519
+    },
+    {
+      "failures": [],
+      "newly_checked": 0,
+      "resources": 10,
+      "scope": "system",
+      "seconds": 0.4,
+      "step": "system",
+      "urls_in_dom": 519
+    }
+  ],
+  "total_seconds": 39.9
+}
