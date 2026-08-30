@@ -20,6 +20,201 @@ export interface HealthOut {
   registry_id: string;
   engine: ResourceOut;
   database_path: string;
+  actor_id: string;
+  network_guard: {
+    installed: boolean;
+    refused_attempts: string[];
+    authorized_setup_connections: number;
+  };
+}
+
+export interface MatcherAssetOut {
+  matcher_id: string;
+  name: string;
+  registry_state: string;
+  third_party_rights_status: string;
+  research_use_status: string;
+  redistribution_status: string;
+  data_classification: string;
+  approved_scopes: string[];
+  checkpoint: {
+    state: "VERIFIED" | "MISSING" | "DRIFTED";
+    path: string;
+    registered_sha256: string;
+    registered_size_bytes: number;
+    observed_sha256: string | null;
+    observed_size_bytes?: number;
+  };
+  checkpoint_acquisition: {
+    available: boolean;
+    state: "ADMITTED_LOCAL_NONCOMMERCIAL" | "BLOCKED_THIRD_PARTY_RIGHTS";
+    reason: string;
+    published_url: string;
+    source_host: string;
+    allowed_redirect_hosts: string[];
+    managed_path: string;
+    sha256: string;
+    size_bytes: number;
+  };
+  architecture_sources: Array<{
+    key: string;
+    state: "VERIFIED" | "MISSING" | "DRIFTED";
+    path: string;
+    repository: string;
+    commit: string;
+    url: string;
+    sha256: string;
+    size_bytes: number;
+    reason: string | null;
+  }>;
+  ready_to_load: boolean;
+  blocking_reasons: string[];
+  runtime: {
+    state: "LOADED" | "UNLOADED";
+    active_leases: number;
+    loaded_at: string | null;
+    device: string | null;
+    parameter_count: number | null;
+  };
+}
+
+export interface MatcherAddonOut extends MatcherAssetOut {
+  addon_id: string;
+  kind: "MATCHER";
+  subtype: "FACE_EMBEDDING_MATCHER";
+  driver_id: string;
+  installation_state: string;
+}
+
+export interface DatasetAddonOut {
+  addon_id: string;
+  kind: "DATASET";
+  subtype: "IDENTITY_LABELED_DATASET" | "PAIR_VERIFICATION_DATASET";
+  display_name: string;
+  version: string;
+  driver_id: string;
+  registry_state?: string;
+  resource_record_sha256?: string;
+  installation_state: string;
+  runtime_state: string;
+  blocking_reasons: string[];
+  managed: boolean;
+  local_root: string;
+  sample_count: number;
+  identity_count: number | null;
+  pair_count?: number;
+  mated_pair_count?: number;
+  nonmated_pair_count?: number;
+  tree_sha256?: string;
+  archive?: { path: string; sha256: string; size_bytes: number; state?: string };
+  rights: { third_party: string; research_use: string; redistribution: string };
+  classification: string;
+  approved_scopes: string[];
+  acquisition: {
+    available: boolean;
+    refusal_code?: string;
+    source_uri?: string;
+    source_kind?: string;
+    reason?: string;
+    archive_sha256?: string;
+    archive_size_bytes?: number;
+    shared_archive_addon_ids?: string[];
+    rights_notice?: string;
+  };
+}
+
+export interface PreprocessingAddonOut {
+  addon_id: string;
+  kind: "PREPROCESSING";
+  subtype: "MATCHER_PREPROCESSING";
+  display_name: string;
+  version: string;
+  driver_id: string;
+  installation_state: "BUILTIN";
+  runtime_state: "READY" | "MISSING" | "DRIFTED";
+  blocking_reasons: string[];
+  detector_resource_id: string | null;
+  detector_resource_sha256: string | null;
+  input_representation: "SOURCE_IMAGE_REQUIRING_DETECTION" | "AUTHOR_PREALIGNED_ARCFACE112";
+  definition: Record<string, string>;
+  compatible_matcher_ids: string[];
+  leaf_ids_by_matcher: Record<string, string>;
+  selection_scope: "PER_RUN";
+}
+
+export interface TransformAddonOut {
+  addon_id: string;
+  kind: "PREPROCESSING";
+  subtype: "CONTROLLED_DEGRADATION";
+  display_name: string;
+  version: string;
+  driver_id: string;
+  installation_state: "BUILTIN";
+  runtime_state: "READY";
+  operator: string;
+  parameter: string;
+  parameter_contract: NumericParameterContract;
+  selection_scope: "PER_DERIVED_SET";
+}
+
+export interface NumericParameterContract {
+  value_type: "integer" | "number";
+  minimum?: number;
+  maximum?: number;
+  minimum_exclusive?: boolean;
+  maximum_exclusive?: boolean;
+  required?: boolean;
+  blank_behavior?: string;
+  guidance: string;
+}
+
+export interface AddonCatalogOut {
+  schema_version: string;
+  mode: "CLOSED_ALLOWLIST";
+  registry_id: string;
+  registry_sha256: string;
+  matchers: MatcherAddonOut[];
+  datasets: DatasetAddonOut[];
+  preprocessing: PreprocessingAddonOut[];
+  transforms: TransformAddonOut[];
+  analysis_parameters: {
+    target_fmr: NumericParameterContract;
+    bootstrap_replicates: NumericParameterContract;
+    quality_threshold: NumericParameterContract;
+    matcher_threshold: NumericParameterContract;
+    owner_pair_seed: NumericParameterContract;
+  };
+  connections: [];
+  connection_policy: { state: "NOT_ADMITTED_IN_BETA"; reason: string; admission_requires: string[] };
+}
+
+export interface SystemEventOut {
+  system_event_id: string;
+  actor_id: string;
+  event_type: string;
+  subject_id: string;
+  occurred_at: string;
+  details: Record<string, unknown>;
+  evidence_sha256: string;
+}
+
+export interface EmbeddingAssetOut {
+  run_id: string;
+  matrix_id: string;
+  leaf_id: string;
+  matcher_id: string;
+  condition_id: string;
+  dataset_id: string;
+  classification: string;
+  integrity: "VERIFIED" | "MISSING" | "DRIFTED" | "INVALID_FORMAT";
+  integrity_reason: string | null;
+  registered_sha256: string;
+  observed_sha256: string | null;
+  size_bytes: number | null;
+  rows: number | null;
+  dimension: number | null;
+  created_at: string;
+  links: { run: string; export_parquet: string; export_json: string };
 }
 
 export interface RegisteredSample {
@@ -242,7 +437,7 @@ export interface MatcherLeaf {
   created_at: string;
   eer: Record<string, { eer: number; threshold: number; method: string }>;
   operating_points: Record<string, Array<{ target_fmr: number; threshold: number | null; fmr?: number; fnmr?: number; reason?: string }>>;
-  view2_tenfold: Record<string, { mean_accuracy: number | null; std_accuracy: number | null; method: string }>;
+  view2_tenfold: Record<string, { status?: string; reason?: string; mean_accuracy: number | null; std_accuracy: number | null; method: string }>;
   counts: Record<string, number>;
   metrics_sha256: string;
   comparisons_sha256: string;
@@ -251,12 +446,12 @@ export interface MatcherLeaf {
 
 export interface ComparisonRow {
   pair_id: string;
-  fold: number;
+  fold: number | null;
   label: string;
   left_sample_id: string;
   right_sample_id: string;
-  left_subject_id: string;
-  right_subject_id: string;
+  left_subject_id: string | null;
+  right_subject_id: string | null;
   score: number | null;
   failure: string | null;
   failure_side: string | null;
@@ -281,6 +476,7 @@ export interface MatcherErrors {
 
 export interface MatrixStatus {
   matrix_id: string;
+  expected_leaves?: number;
   progress: { phase: string; detail: string };
   leaves: MatcherLeaf[];
 }
@@ -327,7 +523,7 @@ export interface UtilityRequestBody {
 
 export interface UtilityAnalysisOut {
   analysis_id: string;
-  state: "RUNNING" | "COMPLETED" | "FAILED";
+  state: "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "INTERRUPTED";
   error: string | null;
   summary?: UtilitySummary;
   utility?: any;
@@ -337,12 +533,12 @@ export interface UtilityAnalysisOut {
 
 export interface UtilityPairRow {
   pair_id: string;
-  fold: number;
+  fold: number | null;
   label: string;
   left_sample_id: string;
   right_sample_id: string;
-  left_subject_id: string;
-  right_subject_id: string;
+  left_subject_id: string | null;
+  right_subject_id: string | null;
   score: number | null;
   failure: string | null;
   quality_left: number | null;
@@ -386,7 +582,7 @@ export interface CrossMatcherSummary {
 
 export interface CrossMatcherOut {
   analysis_id: string;
-  state: "RUNNING" | "COMPLETED" | "FAILED";
+  state: "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "INTERRUPTED";
   error: string | null;
   summary?: CrossMatcherSummary;
   document?: any;
@@ -434,6 +630,7 @@ export interface DashboardOut {
   supersedes: string | null;
   created_at: string;
   layout_sha256?: string;
+  panel_run_ids: string[];
   panels: number | any[];
   layout?: any;
 }
@@ -441,13 +638,21 @@ export interface DashboardOut {
 export interface ReportOut {
   report_id: string;
   title: string;
+  dataset_id: string | null;
   created_at: string;
   created_by?: string;
   html_sha256?: string;
   pdf_sha256?: string;
   images_embedded?: number;
   images_withheld?: number;
-  links: { html: string; pdf: string; json: string };
+  downloads: Record<"html" | "pdf" | "json", ArtifactDownloadOut>;
+  links: Partial<Record<"html" | "pdf" | "json", string>>;
+}
+
+export interface ArtifactDownloadOut {
+  state: "VERIFIED" | "MISSING" | "DRIFTED" | "UNANCHORED";
+  reason: string | null;
+  href: string | null;
 }
 
 export interface BundleOut {
@@ -457,7 +662,8 @@ export interface BundleOut {
   sha256: string;
   size_bytes?: number;
   created_at: string;
-  links: { download: string };
+  download: ArtifactDownloadOut;
+  links: { download?: string };
 }
 
 export interface ReproductionOut {
@@ -474,16 +680,16 @@ export interface ReproductionOut {
 
 
 export interface IdentificationProtocolOut {
-  protocol_id: string; mode: string; name: string; selection: string; rank_depth: number; gallery_count: number; mated_probe_count: number; nonmated_probe_count: number; subjects_total: number; manifest_sha256: string; created_at: string;
+  protocol_id: string; project_id: string; dataset_id: string; mode: string; name: string; selection: string; rank_depth: number; gallery_count: number; mated_probe_count: number; nonmated_probe_count: number; subjects_total: number; manifest_sha256: string; created_at: string;
 }
 export interface IdentificationSearchSummary {
   search_id: string; run_id: string; protocol_id: string; matcher_id: string; condition_id: string; device: string; gallery_size: number; gallery_template_failures: number; mated_searches: number; nonmated_searches: number; probe_template_failures: number; rank_1: number | null; fnir_at_fpir_0_01: number | null; seconds: number; created_at: string;
   links: { search: string; run: string; candidates: string; protocol: string };
 }
-export interface IdentificationSearchOut { search_id: string; state: "RUNNING" | "COMPLETED" | "FAILED"; run_id?: string; summary?: IdentificationSearchSummary; metrics?: any; progress?: any; error?: string | null }
+export interface IdentificationSearchOut { search_id: string; state: "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "INTERRUPTED"; run_id?: string; summary?: IdentificationSearchSummary; metrics?: any; progress?: any; error?: string | null }
 export interface DerivedSetOut { derived_set_id: string; derived_dataset_id: string; source_dataset_id: string; transforms: any[]; levels: number; source_count: number; derived_count: number; created_at: string; directory: string }
 export interface DegradationSummary { analysis_id: string; run_id: string; derived_set_id: string; matcher_id: string; condition_id: string; matcher_threshold: number; transforms: string[]; levels: number; mated_pairs: number; nonmated_pairs: number; seconds: number; fnmr_by_transform: Record<string, Array<number | null>>; uqs_by_transform: Record<string, Array<number | null>>; created_at?: string; links?: { analysis: string; run: string } }
-export interface DegradationOut { analysis_id: string; state: "RUNNING" | "COMPLETED" | "FAILED"; run_id?: string; summary?: DegradationSummary; document?: any; progress?: any; error?: string | null }
+export interface DegradationOut { analysis_id: string; state: "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "INTERRUPTED"; run_id?: string; summary?: DegradationSummary; document?: any; progress?: any; error?: string | null }
 
 export interface UploadAssessOut {
   run_id: string;
@@ -502,6 +708,29 @@ export interface UploadAssessOut {
 }
 
 export const api = {
+  addons: () => fetch("/api/addons").then((r) => readJson<AddonCatalogOut>(r)),
+  preprocessingProfiles: () => fetch("/api/preprocessing-profiles").then((r) => readJson<PreprocessingAddonOut[]>(r)),
+  matcherAssets: () => fetch("/api/matcher-assets").then((r) => readJson<MatcherAssetOut[]>(r)),
+  pullMatcherSources: (matcher_id: string) =>
+    fetch(`/api/matcher-assets/${encodeURIComponent(matcher_id)}/pull-sources`, { method: "POST" }).then((r) => readJson<{ asset: MatcherAssetOut; event: SystemEventOut }>(r)),
+  pullMatcherCheckpoint: (matcher_id: string) =>
+    fetch(`/api/matcher-assets/${encodeURIComponent(matcher_id)}/pull-checkpoint`, { method: "POST" }).then((r) => readJson<{ asset: MatcherAssetOut; receipt: { receipt_id: string; evidence_sha256: string; action: string; path: string }; event: SystemEventOut }>(r)),
+  pullVerificationDataset: (addon_id: string) =>
+    fetch(`/api/dataset-assets/${encodeURIComponent(addon_id)}/pull`, { method: "POST" }).then((r) => readJson<{ dataset: DatasetAddonOut; receipt: { receipt_id: string; evidence_sha256: string; action: string; archive: { path: string; sha256: string; size_bytes: number } }; event: SystemEventOut }>(r)),
+  importVerificationDataset: (project_id: string, addon_id: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/dataset-assets/${encodeURIComponent(addon_id)}/import`, { method: "POST" }).then((r) => readJson<{ dataset: DatasetOut; protocol: { protocol_id: string; name: string; pair_count: number; mated_count: number; nonmated_count: number; fold_count: number | null; unique_subject_count: number | null }; samples: number; pairs: number }>(r)),
+  loadMatcher: (matcher_id: string) =>
+    fetch(`/api/matcher-assets/${encodeURIComponent(matcher_id)}/load`, { method: "POST" }).then((r) => readJson<{ asset: MatcherAssetOut; event: SystemEventOut }>(r)),
+  unloadMatcher: (matcher_id: string) =>
+    fetch(`/api/matcher-assets/${encodeURIComponent(matcher_id)}/unload`, { method: "POST" }).then((r) => readJson<{ asset: MatcherAssetOut; event: SystemEventOut }>(r)),
+  systemEvents: () => fetch("/api/system-events").then((r) => readJson<SystemEventOut[]>(r)),
+  embeddings: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/embeddings`).then((r) => readJson<EmbeddingAssetOut[]>(r)),
+  importOwnerDirectory: (project_id: string, root: string, name: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/import-owner-directory`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ root, name }) }).then((r) => readJson<{ dataset_id: string; sample_count: number; subject_count: number; source_kind: string; statistics_sha256: string }>(r)),
+  importOwnerManifest: (project_id: string, manifest_path: string, name: string, mapping: Record<string, string>, mapping_name: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/import-owner-manifest`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ manifest_path, name, mapping, mapping_name }) }).then((r) => readJson<{ dataset_id: string; sample_count: number; subject_count: number; source_kind: string; statistics_sha256: string; mapping: Record<string, string> }>(r)),
+  freezeOwnerPairs: (project_id: string, dataset_id: string, seed: number, max_mated_pairs_per_subject = 6, nonmated_multiple = 1) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/${encodeURIComponent(dataset_id)}/protocols/freeze-owner-pairs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ seed, max_mated_pairs_per_subject, nonmated_multiple }) }).then((r) => readJson<{ protocol_id: string; pair_count: number; mated_count: number; nonmated_count: number }>(r)),
   assessUpload: (project_id: string, purpose_scope: string, file: File) =>
     fetch(
       `/api/quality/assess-upload?project_id=${encodeURIComponent(project_id)}&purpose_scope=${encodeURIComponent(purpose_scope)}&filename=${encodeURIComponent(file.name)}`,
@@ -553,11 +782,14 @@ export const api = {
     fetch(`/api/projects/${encodeURIComponent(project_id)}/utility-analyses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => readJson<{ analysis_id: string; state: string; already_recorded?: boolean }>(r)),
   utilityAnalysis: (analysis_id: string) => fetch(`/api/utility-analyses/${encodeURIComponent(analysis_id)}`).then((r) => readJson<UtilityAnalysisOut>(r)),
   utilityPairs: (analysis_id: string, query: string) => fetch(`/api/utility-analyses/${encodeURIComponent(analysis_id)}/pairs?${query}`).then((r) => readJson<{ total: number; rows: UtilityPairRow[] }>(r)),
-  protocols: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/protocols`).then((r) => readJson<Array<{ protocol_id: string; name: string; pair_count: number; mated_count: number; nonmated_count: number }>>(r)),
+  protocols: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/protocols`).then((r) => readJson<Array<{ protocol_id: string; dataset_id: string; name: string; pair_count: number; mated_count: number; nonmated_count: number }>>(r)),
   freezeProtocol: (project_id: string, dataset_id: string) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/${encodeURIComponent(dataset_id)}/protocols/freeze-lfw-view2`, { method: "POST" }).then((r) => readJson<{ protocol_id: string; pair_count: number }>(r)),
-  startMatrix: (project_id: string, protocol_id: string, fixturePairsOnly: boolean) =>
-    fetch(`/api/projects/${encodeURIComponent(project_id)}/protocols/${encodeURIComponent(protocol_id)}/matrix?fixture_pairs_only=${fixturePairsOnly}`, { method: "POST" }).then((r) => readJson<{ matrix_id: string; pairs: number; samples: number }>(r)),
+  startMatrix: (project_id: string, protocol_id: string, fixturePairsOnly: boolean, leafIds?: string[]) => {
+    const query = new URLSearchParams({ fixture_pairs_only: String(fixturePairsOnly) });
+    if (leafIds?.length) query.set("leaves", leafIds.join(","));
+    return fetch(`/api/projects/${encodeURIComponent(project_id)}/protocols/${encodeURIComponent(protocol_id)}/matrix?${query.toString()}`, { method: "POST" }).then((r) => readJson<{ matrix_id: string; pairs: number; samples: number }>(r));
+  },
   matrix: (matrix_id: string) => fetch(`/api/matrices/${encodeURIComponent(matrix_id)}`).then((r) => readJson<MatrixStatus>(r)),
   importExternalScores: (project_id: string, protocol_id: string, resource_id: string) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/protocols/${encodeURIComponent(protocol_id)}/import-external-scores`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ resource_id }) }).then((r) => readJson<MatcherLeaf & { provenance_marker: string; mapping: any }>(r)),
@@ -566,6 +798,7 @@ export const api = {
   matcherErrors: (run_id: string, threshold?: number) =>
     fetch(`/api/matcher-runs/${encodeURIComponent(run_id)}/errors${threshold !== undefined ? `?threshold=${threshold}` : ""}`).then((r) => readJson<MatcherErrors>(r)),
   datasets: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets`).then((r) => readJson<DatasetOut[]>(r)),
+  dataset: (dataset_id: string) => fetch(`/api/datasets/${encodeURIComponent(dataset_id)}`).then((r) => readJson<DatasetOut>(r)),
   importLfw: (project_id: string, verify_hashes: boolean) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/import-registered`, {
       method: "POST",
@@ -612,7 +845,8 @@ export const api = {
   health: () => fetch("/api/health").then((r) => readJson<HealthOut>(r)),
   resources: () => fetch("/api/resources").then((r) => readJson<ResourceOut[]>(r)),
   registeredSamples: () => fetch("/api/samples/registered").then((r) => readJson<RegisteredSample[]>(r)),
-  runs: () => fetch("/api/runs").then((r) => readJson<RunSummaryOut[]>(r)),
+  runs: (projectId: string) =>
+    fetch(`/api/runs?project_id=${encodeURIComponent(projectId)}&limit=10000`).then((r) => readJson<RunSummaryOut[]>(r)),
   assess: (image_path: string, purpose_scope: string, project_id: string | null) =>
     fetch("/api/quality/assess", {
       method: "POST",

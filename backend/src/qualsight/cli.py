@@ -17,6 +17,9 @@ from .api.settings import Settings
 from .api.store import RunStore
 from .engines.ofiq.adapter import OFIQQualityEngine
 from .reproduction import export_run_manifest, reproduce_run
+from .security.local_storage import activate_private_umask, secure_data_tree
+from .security.network_guard import install_network_guard, permit_explicit_setup_network
+from .security.process_lease import DataDirectoryLease, DataDirectoryLeaseError
 
 
 def _engine(settings: Settings) -> OFIQQualityEngine:
@@ -28,7 +31,17 @@ def _engine(settings: Settings) -> OFIQQualityEngine:
     )
 
 
+def _selected_axis(values: list[str] | None, enum_type):
+    """Resolve repeatable CLI choices to one ordered catalog axis."""
+
+    selected = (enum_type(value) for value in values) if values else iter(enum_type)
+    return tuple(dict.fromkeys(selected))
+
+
 def main(argv: list[str] | None = None) -> int:
+    from .matchers.conditions import ConditionId
+    from .matchers.runtime import MatcherId
+
     parser = argparse.ArgumentParser(prog="qualsight")
     sub = parser.add_subparsers(dest="command", required=True)
     assess = sub.add_parser("assess", help="assess one registered image with the registered engine")
@@ -40,6 +53,16 @@ def main(argv: list[str] | None = None) -> int:
     export = sub.add_parser("export-run", help="export an immutable Run manifest")
     export.add_argument("--run-id", required=True)
     export.add_argument("--out", type=Path, required=True)
+    snapshot = sub.add_parser(
+        "snapshot-database",
+        help="create a consistent private SQLite snapshot for an independent verifier or audit",
+    )
+    snapshot.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="new no-clobber path ending in .snapshot.sqlite3",
+    )
     sub.add_parser("serve", help="run the local control plane on 127.0.0.1:8480")
     project_create = sub.add_parser("project-create", help="create a project (lifecycle NEW)")
     project_create.add_argument("--name", required=True)
@@ -58,10 +81,12 @@ def main(argv: list[str] | None = None) -> int:
     freeze = sub.add_parser("freeze-lfw-protocol", help="freeze the registered LFW View 2 protocol over an imported dataset")
     freeze.add_argument("--project-id", required=True)
     freeze.add_argument("--dataset-id", required=True)
-    matrix = sub.add_parser("matrix", help="run the three-matcher × two-condition matrix over a frozen protocol")
+    matrix = sub.add_parser("matrix", help="run a selected matcher × preprocessing product over a frozen protocol")
     matrix.add_argument("--project-id", required=True)
     matrix.add_argument("--protocol-id", required=True)
     matrix.add_argument("--fixture-pairs-only", action="store_true", help="restrict to the registered subset-fixture pairs (gate mode)")
+    matrix.add_argument("--matcher", dest="matcher_ids", action="append", choices=[item.value for item in MatcherId], help="admitted matcher id; repeat to select multiple (default: all)")
+    matrix.add_argument("--preprocessing", dest="condition_ids", action="append", choices=[item.value for item in ConditionId], help="admitted preprocessing profile id; repeat to select multiple (default: all)")
     utility = sub.add_parser("utility", help="run a quality-utility analysis over one matcher Run and one quality job")
     utility.add_argument("--project-id", required=True)
     utility.add_argument("--matcher-run-id", required=True)
@@ -123,6 +148,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     settings = Settings.from_environment()
+    activate_private_umask()
+    secure_data_tree(settings.data_dir, protected_roots=(settings.repository_root, Path.home()))
+    if settings.network_guard:
+        install_network_guard()
     if args.command == "serve":
         import uvicorn
 
@@ -131,8 +160,20 @@ def main(argv: list[str] | None = None) -> int:
         uvicorn.run(create_app(settings), host="127.0.0.1", port=8480, log_level="info")
         return 0
 
-    store = RunStore(settings.database_path)
     try:
+        lease = DataDirectoryLease.acquire(settings.data_dir, owner=f"cli:{args.command}")
+    except DataDirectoryLeaseError as error:
+        print(json.dumps({"error": "DATA_DIRECTORY_BUSY", "detail": str(error)}, sort_keys=True), file=sys.stderr)
+        return 4
+    try:
+        store = RunStore(settings.database_path)
+    except BaseException:
+        lease.close()
+        raise
+    try:
+        if args.command == "snapshot-database":
+            print(json.dumps(store.snapshot_database(args.output), sort_keys=True))
+            return 0
         if args.command == "assess":
             engine = _engine(settings)
             result = engine.assess(args.image, args.scope)
@@ -238,6 +279,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "matrix":
             from .matchers.matrix import MatcherMatrixJob
+            from .matchers.runtime import UPSTREAM_KEYS
             from .matchers.upstream import UpstreamSources
             from .projects import ProjectService
 
@@ -254,11 +296,21 @@ def main(argv: list[str] | None = None) -> int:
                 wanted = {p["pair_id"] for p in fixture["pairs"]}
                 pairs = [pair for pair in pairs if pair.pair_id in wanted]
                 rule = "the registered subset-fixture pairs of the frozen protocol"
+            selected_matchers = _selected_axis(args.matcher_ids, MatcherId)
+            selected_conditions = _selected_axis(args.condition_ids, ConditionId)
+            selected_leaves = [f"{matcher.value} × {condition.value}" for matcher in selected_matchers for condition in selected_conditions]
+            rule += f" (selected matcher x preprocessing product: {selected_leaves})"
             upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir)
-            upstream.acquire()
+            try:
+                for matcher_id in selected_matchers:
+                    for key in UPSTREAM_KEYS[matcher_id]:
+                        upstream.verify(key)
+            except Exception as error:  # noqa: BLE001 - actionable dependency refusal at the CLI boundary
+                raise SystemExit(f"matcher architecture sources are not ready; run `qualsight setup` explicitly: {error}") from error
             job = MatcherMatrixJob(
                 registry=engine.registry, registry_path=settings.registry_path, repository_root=settings.repository_root, upstream=upstream,
                 store=store, project=project, dataset=dataset, protocol=protocol, pairs=pairs, job_root=settings.data_dir / "matrix", selection_rule=rule,
+                matchers=selected_matchers, conditions=selected_conditions,
             )
             print(json.dumps({"matrix_id": job.matrix_id, "pairs": len(job.pairs), "samples": len(job.sample_ids), "job_dir": str(job.job_dir)}, indent=2), file=sys.stderr, flush=True)
             leaves = job.run()
@@ -358,6 +410,7 @@ def main(argv: list[str] | None = None) -> int:
             from .identification.protocol import freeze_lfw_identification
             from .identification.search import IdentificationSearchJob
             from .matchers.upstream import UpstreamSources
+            from .matchers.runtime import MatcherId, UPSTREAM_KEYS
             from .projects import ProjectService
 
             engine = _engine(settings)
@@ -369,7 +422,11 @@ def main(argv: list[str] | None = None) -> int:
             protocol = freeze_lfw_identification(store, project=project, dataset=dataset, selection=args.selection, rank_depth=args.rank_depth, repository_root=settings.repository_root, actor=service.actor)
             print(json.dumps({"protocol_id": protocol["protocol_id"], "gallery": protocol["gallery_count"], "mated_probes": protocol["mated_probe_count"], "nonmated_probes": protocol["nonmated_probe_count"]}, indent=2), file=sys.stderr, flush=True)
             upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir)
-            upstream.acquire()
+            try:
+                for key in UPSTREAM_KEYS[MatcherId(args.matcher_id)]:
+                    upstream.verify(key)
+            except Exception as error:  # noqa: BLE001 - actionable dependency refusal at the CLI boundary
+                raise SystemExit(f"matcher architecture sources are not ready; run `qualsight setup` explicitly: {error}") from error
             job = IdentificationSearchJob(store=store, registry=engine.registry, upstream=upstream, repository_root=settings.repository_root, project=project, protocol=protocol, entries=store.identification_entries(protocol["protocol_id"]), matcher_id=args.matcher_id, condition_id=args.condition_id, job_root=settings.data_dir / "identification", actor=service.actor, quality_job_id=args.quality_job_id)
             result = job.run()
             print(json.dumps({"search_id": result.search_id, "run_id": result.run.run_id, "protocol_id": protocol["protocol_id"], "summary": result.summary, "gallery_effects": result.metrics["gallery_effects"]["gallery_sizes"], "operating_points": result.metrics["open_set"]["EXCLUDE_FAILED_TRIALS"]["operating_points"], "rank_k": {k: v["rate"] for k, v in result.metrics["closed_set"]["EXCLUDE_FAILED_TRIALS"]["rank_k"].items()}}, indent=2))
@@ -393,7 +450,8 @@ def main(argv: list[str] | None = None) -> int:
             from .matchers.upstream import UpstreamSources
 
             upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir)
-            acquired = upstream.acquire()
+            with permit_explicit_setup_network():
+                acquired = upstream.acquire()
             summary = {"upstream_sources": {key: str(path) for key, path in acquired.items()}, "data_dir": str(settings.data_dir), "registry": str(settings.registry_path)}
             if args.verify_registry:
                 import subprocess
@@ -431,7 +489,10 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"path": str(args.out), "manifest_sha256": manifest["manifest_sha256"], "run_id": args.run_id}, indent=2))
             return 0
     finally:
-        store.close()
+        try:
+            store.close()
+        finally:
+            lease.close()
     return 1
 
 

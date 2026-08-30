@@ -69,10 +69,17 @@ def compute_identification_metrics(records: list[SearchRecord], *, gallery_size:
             m_used = list(mated)
             n_used = list(non_mated)
         # Closed set: rank-k, CMC, true-mate rank distribution over the mated searches.
+        rank_limit = min(rank_depth, max(gallery_size, 1))
+        rank_histogram = np.zeros(rank_limit + 1, dtype=np.int64)
+        for record in m_used:
+            if not record.failed and record.true_mate_rank is not None and record.true_mate_rank <= rank_limit:
+                rank_histogram[record.true_mate_rank] += 1
+        cumulative_hits = np.cumsum(rank_histogram)
+
         def hit_at(k: int) -> int:
-            return sum(1 for r in m_used if (not r.failed) and (r.true_mate_rank is not None) and r.true_mate_rank <= k)
+            return int(cumulative_hits[min(k, rank_limit)])
         rank_k = {str(k): {**_rate(hit_at(k), len(m_used)), "k": k} for k in ranks_available}
-        cmc_points = [{"rank": k, "rate": (hit_at(k) / len(m_used)) if m_used else None} for k in range(1, min(rank_depth, max(gallery_size, 1)) + 1)]
+        cmc_points = [{"rank": k, "rate": (hit_at(k) / len(m_used)) if m_used else None} for k in range(1, rank_limit + 1)]
         distribution: dict[str, int] = {}
         for r in m_used:
             if r.failed:
@@ -88,11 +95,41 @@ def compute_identification_metrics(records: list[SearchRecord], *, gallery_size:
         # Open set: FPIR from the non-mated top scores; FNIR/TPIR at thresholds reaching target FPIR.
         top = np.array([r.top_score if (r.top_score is not None and not r.failed) else -np.inf for r in n_used], dtype=np.float64)
         candidates = np.unique(top[np.isfinite(top)])
-        curve = []
-        for threshold in sorted(candidates, reverse=True):
-            fp = int(np.sum(top >= threshold))
-            misses = sum(1 for r in m_used if r.failed or r.true_mate_gallery_failed or r.true_mate_rank is None or r.true_mate_score is None or r.true_mate_score < threshold)
-            curve.append({"threshold": float(threshold), "fpir": fp / len(n_used) if n_used else None, "fnir": misses / len(m_used) if m_used else None})
+        thresholds = np.sort(candidates)[::-1]
+        finite_top = np.sort(top[np.isfinite(top)])
+        false_positives = finite_top.size - np.searchsorted(finite_top, thresholds, side="left")
+        base_misses = sum(
+            1
+            for record in m_used
+            if record.failed
+            or record.true_mate_gallery_failed
+            or record.true_mate_rank is None
+            or record.true_mate_score is None
+        )
+        true_scores = np.sort(
+            np.array(
+                [
+                    record.true_mate_score
+                    for record in m_used
+                    if not record.failed
+                    and not record.true_mate_gallery_failed
+                    and record.true_mate_rank is not None
+                    and record.true_mate_score is not None
+                ],
+                dtype=np.float64,
+            )
+        )
+        missed_mated = base_misses + np.searchsorted(true_scores, thresholds, side="left")
+        curve = [
+            {
+                "threshold": float(threshold),
+                "fpir": int(fp) / len(n_used) if n_used else None,
+                "fnir": int(misses) / len(m_used) if m_used else None,
+                "_false_positives": int(fp),
+                "_misses": int(misses),
+            }
+            for threshold, fp, misses in zip(thresholds, false_positives, missed_mated)
+        ]
         operating_points = []
         for target in TARGET_FPIRS:
             reachable = [p for p in curve if p["fpir"] is not None and p["fpir"] <= target]
@@ -101,8 +138,8 @@ def compute_identification_metrics(records: list[SearchRecord], *, gallery_size:
                 continue
             point = max(reachable, key=lambda p: p["fpir"])  # loosest threshold still at or under target
             threshold = point["threshold"]
-            fp = int(np.sum(top >= threshold))
-            misses = sum(1 for r in m_used if r.failed or r.true_mate_gallery_failed or r.true_mate_rank is None or r.true_mate_score is None or r.true_mate_score < threshold)
+            fp = point["_false_positives"]
+            misses = point["_misses"]
             fpir = _rate(fp, len(n_used))
             fnir = _rate(misses, len(m_used))
             expected_events = target * len(n_used)
@@ -110,7 +147,11 @@ def compute_identification_metrics(records: list[SearchRecord], *, gallery_size:
                                      "fnir": fnir["rate"], "fnir_ci95": [fnir["ci_lower"], fnir["ci_upper"]], "missed_searches": misses, "tpir": (1 - fnir["rate"]) if fnir["rate"] is not None else None,
                                      "mated_included": len(m_used), "nonmated_included": len(n_used), "supported": expected_events >= 5,
                                      "warning": None if expected_events >= 5 else f"fewer than five expected false-positive searches at FPIR {target} ({len(n_used)} non-mated searches); precision unsupported"})
-        result["open_set"][policy] = {"definitions": {"fpir": list(DEFINITIONS["fpir"]), "fnir": list(DEFINITIONS["fnir"]), "tpir": list(DEFINITIONS["tpir"])}, "mated_included": len(m_used), "nonmated_included": len(n_used), "operating_points": operating_points, "fpir_fnir_curve": curve[:: max(1, len(curve) // 200)] if len(curve) > 400 else curve}
+        public_curve = [
+            {key: value for key, value in point.items() if not key.startswith("_")}
+            for point in curve
+        ]
+        result["open_set"][policy] = {"definitions": {"fpir": list(DEFINITIONS["fpir"]), "fnir": list(DEFINITIONS["fnir"]), "tpir": list(DEFINITIONS["tpir"])}, "mated_included": len(m_used), "nonmated_included": len(n_used), "operating_points": operating_points, "fpir_fnir_curve": public_curve[:: max(1, len(public_curve) // 200)] if len(public_curve) > 400 else public_curve}
     result["gallery_effects"] = {"gallery_sizes": [], "note": "populated by the search job by re-evaluating candidate lists restricted to deterministic gallery subsets"}
     text = json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False)
     result["evidence_sha256"] = hashlib.sha256(text.encode("utf-8")).hexdigest()

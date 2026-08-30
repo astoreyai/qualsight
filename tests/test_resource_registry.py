@@ -26,6 +26,17 @@ USE_PERMISSION_RECEIPT_PATH = (
     / "authorizations"
     / "qualsight-owner-use-permission-granted-2026-08-17.json"
 )
+ADDON_ACQUISITION_RECEIPT_PATH = (
+    ROOT
+    / "resources"
+    / "authorizations"
+    / "qualsight-owner-addon-acquisition-2026-08-28.json"
+)
+NEW_MATCHER_RESOURCE_IDS = {
+    "magface-iresnet100-ms1mv2-local-candidate",
+    "topofr-r100-glint360k-local-candidate",
+    "transface-b-glint360k-local-candidate",
+}
 LOCAL_RESEARCH_SCOPES = [
     "QUALSIGHT_LOCAL_LFW_THREE_MATCHER_TWO_PREPROCESSING_V1",
     "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1",
@@ -112,12 +123,12 @@ class ResourceRegistryTests(unittest.TestCase):
 
     def test_real_registry_validates_recorded_bytes(self) -> None:
         summary = validate_registry_file(REGISTRY_PATH)
-        self.assertEqual(summary["resources"], 10)
-        self.assertEqual(summary["artifacts"], 193)
+        self.assertEqual(summary["resources"], 13)
+        self.assertEqual(summary["artifacts"], 205)
         self.assertEqual(summary["checks"], 18)
         self.assertEqual(
             summary["states"],
-            {"APPROVED_LOCAL_RESEARCH_USE": 7, "BLOCKED": 2, "VERIFIED_LIMITED_USE": 1},
+            {"APPROVED_LOCAL_RESEARCH_USE": 10, "BLOCKED": 2, "VERIFIED_LIMITED_USE": 1},
         )
 
     def test_ofiq_runtime_records_exact_configured_model_closure(self) -> None:
@@ -180,6 +191,9 @@ class ResourceRegistryTests(unittest.TestCase):
                 "lfw-funneled-local-candidate",
                 "adaface-ir101-local-candidate",
                 "elasticface-arc-r100-local-candidate",
+                "magface-iresnet100-ms1mv2-local-candidate",
+                "topofr-r100-glint360k-local-candidate",
+                "transface-b-glint360k-local-candidate",
                 "transface-s-glint360k-local-candidate",
                 "insightface-scrfd-10g-local-candidate",
                 "external-scores-lfw-view2-insightface-buffalo-l",
@@ -200,12 +214,20 @@ class ResourceRegistryTests(unittest.TestCase):
                 self.assertEqual(resource["state"], "APPROVED_LOCAL_RESEARCH_USE")
                 if resource_id == "external-scores-lfw-view2-insightface-buffalo-l":
                     self.assertEqual(resource["approved_scopes"], ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"])
+                elif resource_id in NEW_MATCHER_RESOURCE_IDS:
+                    self.assertEqual(resource["approved_scopes"], ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"])
                 elif resource_id != "ofiq-v1-1-2-linux-runtime":
                     self.assertEqual(resource["approved_scopes"], LOCAL_RESEARCH_SCOPES)
                 authorization = resource["owner_authorization"]
                 self.assertEqual(
                     authorization["evidence_artifact_path"],
-                    str(EXTERNAL_SCORES_RECEIPT_PATH if resource_id == "external-scores-lfw-view2-insightface-buffalo-l" else USE_PERMISSION_RECEIPT_PATH),
+                    str(
+                        EXTERNAL_SCORES_RECEIPT_PATH
+                        if resource_id == "external-scores-lfw-view2-insightface-buffalo-l"
+                        else ADDON_ACQUISITION_RECEIPT_PATH
+                        if resource_id in NEW_MATCHER_RESOURCE_IDS
+                        else USE_PERMISSION_RECEIPT_PATH
+                    ),
                 )
                 self.assertLessEqual(
                     set(resource["approved_scopes"]), set(authorization["scopes"])

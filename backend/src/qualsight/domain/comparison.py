@@ -85,23 +85,27 @@ class ProtocolPair(StrictFrozenModel):
 
     pair_id: NonEmptyStr
     protocol_id: NonEmptyStr
-    fold: PositiveInt
+    fold: PositiveInt | None
     source_order: PositiveInt
     label: ComparisonLabel
     left_sample_id: NonEmptyStr
     right_sample_id: NonEmptyStr
-    left_subject_id: NonEmptyStr
-    right_subject_id: NonEmptyStr
+    left_subject_id: NonEmptyStr | None
+    right_subject_id: NonEmptyStr | None
     left_sha256: Sha256
     right_sha256: Sha256
 
     @model_validator(mode="after")
     def validate_label_against_subjects(self) -> ProtocolPair:
-        same_subject = self.left_subject_id == self.right_subject_id
-        if self.label is ComparisonLabel.MATED and not same_subject:
-            raise ValueError("a MATED pair must join two samples of the same subject")
-        if self.label is ComparisonLabel.NON_MATED and same_subject:
-            raise ValueError("a NON_MATED pair must join two samples of different subjects")
+        subjects_recorded = self.left_subject_id is not None and self.right_subject_id is not None
+        if (self.left_subject_id is None) != (self.right_subject_id is None):
+            raise ValueError("pair subject identities must either both be recorded or both be absent")
+        if subjects_recorded:
+            same_subject = self.left_subject_id == self.right_subject_id
+            if self.label is ComparisonLabel.MATED and not same_subject:
+                raise ValueError("a MATED pair must join two samples of the same recorded subject")
+            if self.label is ComparisonLabel.NON_MATED and same_subject:
+                raise ValueError("a NON_MATED pair must join two samples of different recorded subjects")
         if self.left_sample_id == self.right_sample_id:
             raise ValueError("a pair cannot compare a sample with itself")
         return self
@@ -121,9 +125,9 @@ class VerificationProtocolRecord(StrictFrozenModel):
     pair_count: PositiveInt
     mated_count: NonNegativeInt
     nonmated_count: NonNegativeInt
-    fold_count: PositiveInt
+    fold_count: PositiveInt | None
     unique_sample_count: PositiveInt
-    unique_subject_count: PositiveInt
+    unique_subject_count: PositiveInt | None
     pairs_sha256: Sha256
     limitations: tuple[NonEmptyStr, ...]
     created_at: AwareDateTime

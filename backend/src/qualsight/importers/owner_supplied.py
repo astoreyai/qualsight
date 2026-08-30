@@ -23,6 +23,7 @@ import hashlib
 import json
 from pathlib import Path
 import random
+import struct
 
 import cv2
 import numpy as np
@@ -56,6 +57,7 @@ from ..domain.primitives import (
 )
 from ..engines.ofiq.adapter import content_id
 from ..provenance import sha256_bytes, sha256_file
+from ..security.owner_file_lock import serialized_owner_file_mutation
 
 SOURCE_KIND = "OWNER_SUPPLIED_LOCAL_INPUT"
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
@@ -71,16 +73,109 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).astimezone()
 
 
+def _encoded_dimensions(data: bytes, name: str) -> tuple[int, int]:
+    """Read dimensions from admitted image headers without allocating the pixel plane."""
+
+    width = height = 0
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        if len(data) < 24 or data[12:16] != b"IHDR":
+            raise OwnerSuppliedError(f"{name}: PNG header is incomplete")
+        width, height = struct.unpack(">II", data[16:24])
+    elif data.startswith(b"\xff\xd8"):
+        index = 2
+        start_of_frame = {
+            0xC0,
+            0xC1,
+            0xC2,
+            0xC3,
+            0xC5,
+            0xC6,
+            0xC7,
+            0xC9,
+            0xCA,
+            0xCB,
+            0xCD,
+            0xCE,
+            0xCF,
+        }
+        while index + 3 < len(data):
+            if data[index] != 0xFF:
+                index += 1
+                continue
+            while index < len(data) and data[index] == 0xFF:
+                index += 1
+            if index >= len(data):
+                break
+            marker = data[index]
+            index += 1
+            if marker in {0x01, 0xD8, 0xD9} or 0xD0 <= marker <= 0xD7:
+                continue
+            if index + 2 > len(data):
+                break
+            length = struct.unpack(">H", data[index : index + 2])[0]
+            if length < 2 or index + length > len(data):
+                raise OwnerSuppliedError(f"{name}: JPEG segment length is invalid")
+            if marker in start_of_frame:
+                if length < 7:
+                    raise OwnerSuppliedError(f"{name}: JPEG frame header is incomplete")
+                height, width = struct.unpack(">HH", data[index + 3 : index + 7])
+                break
+            index += length
+    elif data.startswith(b"BM"):
+        if len(data) < 26:
+            raise OwnerSuppliedError(f"{name}: BMP header is incomplete")
+        dib_size = struct.unpack("<I", data[14:18])[0]
+        if dib_size == 12:
+            width, height = struct.unpack("<HH", data[18:22])
+        elif dib_size >= 40 and len(data) >= 26:
+            signed_width, signed_height = struct.unpack("<ii", data[18:26])
+            if signed_width <= 0 or signed_height == 0:
+                raise OwnerSuppliedError(f"{name}: BMP dimensions are invalid")
+            width, height = signed_width, abs(signed_height)
+        else:
+            raise OwnerSuppliedError(f"{name}: BMP DIB header is unsupported")
+    elif data.startswith((b"P3", b"P6")):
+        tokens: list[bytes] = []
+        for line in data[:4096].splitlines():
+            content = line.partition(b"#")[0]
+            tokens.extend(content.split())
+            if len(tokens) >= 4:
+                break
+        if len(tokens) < 4 or tokens[0] not in {b"P3", b"P6"}:
+            raise OwnerSuppliedError(f"{name}: PPM header is incomplete")
+        try:
+            width, height, maximum = (int(token) for token in tokens[1:4])
+        except ValueError as error:
+            raise OwnerSuppliedError(f"{name}: PPM dimensions are invalid") from error
+        if maximum <= 0 or maximum > 65535:
+            raise OwnerSuppliedError(f"{name}: PPM sample maximum is invalid")
+    else:
+        raise OwnerSuppliedError(
+            f"{name}: the bytes do not decode as an admitted JPEG, PNG, BMP, or PPM image"
+        )
+    if width <= 0 or height <= 0:
+        raise OwnerSuppliedError(f"{name}: encoded image dimensions are invalid")
+    return width, height
+
+
 def _decode_check(data: bytes, name: str) -> tuple[int, int]:
     if len(data) > MAX_UPLOAD_BYTES:
         raise OwnerSuppliedError(f"{name}: {len(data)} bytes exceeds the {MAX_UPLOAD_BYTES}-byte upload cap")
+    encoded_width, encoded_height = _encoded_dimensions(data, name)
+    if encoded_width * encoded_height > MAX_DECODED_PIXELS:
+        raise OwnerSuppliedError(
+            f"{name}: encoded size {encoded_width}x{encoded_height} exceeds the decode guard"
+        )
     array = np.frombuffer(data, dtype=np.uint8)
     image = cv2.imdecode(array, cv2.IMREAD_COLOR)
     if image is None:
         raise OwnerSuppliedError(f"{name}: the bytes do not decode as an image")
     height, width = image.shape[:2]
-    if height * width > MAX_DECODED_PIXELS:
-        raise OwnerSuppliedError(f"{name}: decoded size {width}x{height} exceeds the decode guard")
+    if (width, height) != (encoded_width, encoded_height):
+        raise OwnerSuppliedError(
+            f"{name}: decoded dimensions {width}x{height} differ from the encoded header "
+            f"{encoded_width}x{encoded_height}"
+        )
     return width, height
 
 
@@ -128,40 +223,42 @@ class OwnerSuppliedAdmission:
         suffix = Path(original_name).suffix.lower()
         if suffix not in IMAGE_SUFFIXES:
             suffix = ".jpg"
-        self.storage_root.mkdir(parents=True, exist_ok=True)
-        target = self.storage_root / f"{digest}{suffix}"
-        if not target.exists():
-            target.write_bytes(data)
-        admitted = AdmittedInput(
-            sha256=digest,
-            path=str(target),
-            size_bytes=len(data),
-            width=width,
-            height=height,
-            original_name=original_name,
-            storage="COPIED",
-        )
-        return self._record(admitted, project_id)
+        with serialized_owner_file_mutation():
+            self.storage_root.mkdir(parents=True, exist_ok=True)
+            target = self.storage_root / f"{digest}{suffix}"
+            if not target.exists():
+                target.write_bytes(data)
+            admitted = AdmittedInput(
+                sha256=digest,
+                path=str(target),
+                size_bytes=len(data),
+                width=width,
+                height=height,
+                original_name=original_name,
+                storage="COPIED",
+            )
+            return self._record(admitted, project_id)
 
     def admit_path(self, path: Path, root: Path, project_id: str) -> AdmittedInput:
-        resolved_root = root.resolve(strict=True)
-        if path.is_symlink():
-            raise OwnerSuppliedError(f"{path}: symlinks are not admitted")
-        resolved = path.resolve(strict=True)
-        if not resolved.is_relative_to(resolved_root):
-            raise OwnerSuppliedError(f"{path}: resolves outside the declared root {root}")
-        data = resolved.read_bytes()
-        width, height = _decode_check(data, str(path))
-        admitted = AdmittedInput(
-            sha256=hashlib.sha256(data).hexdigest(),
-            path=str(resolved),
-            size_bytes=len(data),
-            width=width,
-            height=height,
-            original_name=resolved.name,
-            storage="IN_PLACE",
-        )
-        return self._record(admitted, project_id)
+        with serialized_owner_file_mutation():
+            resolved_root = root.resolve(strict=True)
+            if path.is_symlink():
+                raise OwnerSuppliedError(f"{path}: symlinks are not admitted")
+            resolved = path.resolve(strict=True)
+            if not resolved.is_relative_to(resolved_root):
+                raise OwnerSuppliedError(f"{path}: resolves outside the declared root {root}")
+            data = resolved.read_bytes()
+            width, height = _decode_check(data, str(path))
+            admitted = AdmittedInput(
+                sha256=hashlib.sha256(data).hexdigest(),
+                path=str(resolved),
+                size_bytes=len(data),
+                width=width,
+                height=height,
+                original_name=resolved.name,
+                storage="IN_PLACE",
+            )
+            return self._record(admitted, project_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,6 +328,18 @@ class OwnerSuppliedImporter:
     # -- import ----------------------------------------------------------------
 
     def import_rows(
+        self,
+        project: Project,
+        rows: list[tuple[str, Path]],
+        *,
+        root: Path,
+        name: str,
+        origin: dict[str, object],
+    ) -> OwnerImportResult:
+        with serialized_owner_file_mutation():
+            return self._import_rows_locked(project, rows, root=root, name=name, origin=origin)
+
+    def _import_rows_locked(
         self,
         project: Project,
         rows: list[tuple[str, Path]],

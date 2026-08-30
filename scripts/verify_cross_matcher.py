@@ -1,6 +1,6 @@
 """Independently re-derive a recorded cross-matcher analysis from its contrast pair table and the source Runs.
 
-Usage: python scripts/verify_cross_matcher.py <analysis directory> [<database path>]
+Usage: python scripts/verify_cross_matcher.py <analysis directory> [<database snapshot>]
 
 For every contrast, plain-Python loops recompute from ``contrast_pairs.parquet``
 the error-overlap counts (A only / B only / both / neither) for mated and
@@ -15,8 +15,10 @@ from __future__ import annotations
 
 from itertools import groupby
 import json
+import os
 from pathlib import Path
 import sqlite3
+import stat
 import sys
 
 import pyarrow.parquet as pq
@@ -59,6 +61,44 @@ def _au_erc(units: list[tuple[float, bool]], upper: float) -> float | None:
     return sum((xs[i + 1] - xs[i]) * (ys[i] + ys[i + 1]) / 2 for i in range(len(xs) - 1))
 
 
+def _open_snapshot_descriptor(database: Path) -> tuple[Path, int]:
+    candidate = database.absolute()
+    if not candidate.name.endswith(".snapshot.sqlite3"):
+        raise ValueError(
+            "live database is not accepted; provide a snapshot path ending in .snapshot.sqlite3"
+        )
+    try:
+        descriptor = os.open(
+            candidate,
+            os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError as error:
+        raise ValueError(f"cannot open database snapshot without following links: {candidate}") from error
+    try:
+        status = os.fstat(descriptor)
+        path_status = candidate.lstat()
+        if (
+            not stat.S_ISREG(status.st_mode)
+            or stat.S_ISLNK(path_status.st_mode)
+            or (status.st_dev, status.st_ino) != (path_status.st_dev, path_status.st_ino)
+        ):
+            raise ValueError(f"database snapshot is not a stable regular non-symlink file: {candidate}")
+        if status.st_nlink != 1:
+            raise ValueError(f"database snapshot must be a single-link file: {candidate}")
+        if status.st_uid != os.geteuid():
+            raise ValueError(f"database snapshot is not owned by the current user: {candidate}")
+        return candidate, descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _validated_snapshot_path(database: Path) -> Path:
+    candidate, descriptor = _open_snapshot_descriptor(database)
+    os.close(descriptor)
+    return candidate.resolve(strict=True)
+
+
 def verify(directory: Path, database: Path | None) -> dict[str, object]:
     document = json.loads((directory / "crossmatcher.json").read_text(encoding="utf-8"))
     rows = pq.read_table(directory / "contrast_pairs.parquet").to_pylist()
@@ -68,10 +108,19 @@ def verify(directory: Path, database: Path | None) -> dict[str, object]:
     checks = 0
     leaf_scores: dict[str, dict[str, float | None]] = {}
     if database is not None:
-        connection = sqlite3.connect(str(database))
-        for run_id, parquet in connection.execute("SELECT run_id, comparisons_parquet FROM matcher_leaves"):
-            leaf_scores[run_id] = {r["pair_id"]: r["score"] for r in pq.read_table(parquet).to_pylist()}
-        connection.close()
+        _, descriptor = _open_snapshot_descriptor(database)
+        try:
+            database_uri = f"file:/proc/self/fd/{descriptor}?mode=ro&immutable=1"
+            connection = sqlite3.connect(database_uri, uri=True)
+            try:
+                if connection.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                    raise sqlite3.DatabaseError("database snapshot integrity check failed")
+                for run_id, parquet in connection.execute("SELECT run_id, comparisons_parquet FROM matcher_leaves"):
+                    leaf_scores[run_id] = {r["pair_id"]: r["score"] for r in pq.read_table(parquet).to_pylist()}
+            finally:
+                connection.close()
+        finally:
+            os.close(descriptor)
     for contrast in document["contrasts"]:
         pairs = by_contrast.get(contrast["contrast_id"], [])
         if len(pairs) != contrast["error_overlap"]["processing_failures"]["units"]:

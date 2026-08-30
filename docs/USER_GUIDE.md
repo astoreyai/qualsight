@@ -1,7 +1,7 @@
 # QualSight user guide — the canonical workflow
 
 QualSight is a local, offline research workbench that (1) measures face image quality with the registered
-OFIQ v1.1.2 engine (ISO/IEC 29794-5 reference), (2) runs three frozen face matchers under two frozen
+OFIQ v1.1.2 engine (ISO/IEC 29794-5 reference), (2) runs six frozen face matchers under two frozen
 preprocessing conditions over a frozen 1:1 protocol, (3) relates quality to matcher utility (ERC,
 AU-ERC, risk-coverage, error models, threshold-policy analysis), (4) contrasts matchers and
 preprocessing, and (5) turns every result into provenance-bearing figures, dashboards, reports,
@@ -16,7 +16,8 @@ registered subset fixture (16 LFW images / 10 protocol pairs) with a fresh data 
 console equivalents are named in each step.
 
 Prerequisites: [INSTALL.md](INSTALL.md) completed (`scripts/install.sh`), so the OFIQ v1.1.2 runtime,
-the LFW funneled release, the AdaFace / ElasticFace / TransFace checkpoints, and the SCRFD detector are
+the LFW funneled release, the AdaFace / ElasticFace / MagFace / TopoFR / TransFace-B / TransFace-S
+checkpoints, and the SCRFD detector are
 registered at their pinned paths and `qualsight setup` has acquired the pinned upstream matcher
 sources. Methods, thresholds, and limitations are defined in
 [SCIENTIFIC_METHODS.md](SCIENTIFIC_METHODS.md); the local data controls in [THREAT_MODEL.md](THREAT_MODEL.md).
@@ -25,20 +26,45 @@ sources. Methods, thresholds, and limitations are defined in
 
 ```sh gate
 cd "$QUALSIGHT_ROOT"
-export PYTHONPATH=src:..
+export PYTHONPATH="$QUALSIGHT_ROOT/backend/src:$QUALSIGHT_ROOT"
 export QUALSIGHT_INPUT_RESOURCE_IDS="ofiq-r-01-conformance-input,lfw-funneled-local-candidate"
 QS="$UV run --directory backend --frozen --offline python -m qualsight.cli"
 $QS setup
 ```
 
 `QUALSIGHT_DATA_DIR` selects the data directory (default `var/` in the repository); `QUALSIGHT_ACTOR`
-sets the attributed user id (default `local-user:<login>`); `QUALSIGHT_NETWORK_GUARD=1` refuses any
-non-loopback socket at runtime (see THREAT_MODEL.md).
+sets the attributed user id (default `local-user:<login>`). The network guard is on by default and refuses
+non-loopback sockets except during an operator-requested pull of hash-pinned architecture sources or
+an operator-requested, owner-admitted, hash-pinned checkpoint or verification-dataset archive. Set
+`QUALSIGHT_NETWORK_GUARD=0` only for an explicitly approved unguarded process (see THREAT_MODEL.md).
+
+The console's *Add-ons · Connections* view is the beta's closed allowlisted catalog. It reports six
+matcher drivers, one identity-labeled LFW dataset driver, three pair-verification dataset drivers,
+three matcher-preprocessing profiles (two SCRFD source-image profiles plus the exact publisher-
+prealigned ArcFace-112 pass-through), seven controlled-degradation operators, and no admitted remote API
+connections. It verifies all six registered
+checkpoints and their pinned architecture sources, and exposes explicit source pull, checkpoint
+acquisition, real model load, and unload actions. For each matcher, QualSight can import verified
+owner-held bytes or stream the exact author-published file into private managed storage, verifies its
+registered size and SHA-256 before no-clobber installation, and records a durable receipt. The owner
+authorization is limited to local noncommercial research and does not grant redistribution. The
+author-published MagFace verification archive is likewise hash-pinned, safely extracted, and exposed as
+separate LFW, CFP-FP, and AgeDB-30 pair protocols without inventing identity labels. Direct acquisition
+of the identity-labeled LFW tree remains unavailable because that record lacks an admitted live
+source/redirect and receipt contract. After a matcher matrix, the same
+view inventories and re-hashes each project embedding
+artifact and links to its Run and governed exports.
+
+This is not a package marketplace. Drivers are code-owned and allowlisted so an add-on cannot execute
+arbitrary Python, native commands, or network calls in the API process. Remote API connections are not
+admitted in this local-only beta; admission would require an approved data-flow and classification,
+operator-held secrets outside provenance, endpoint pinning, explicit egress policy, and a local adapter
+with the same immutable Run contract.
 
 ## 1. Create a project (console: *Projects → New project*)
 
 A project fixes the purpose scope every downstream Run must be approved for. The registered LFW
-release and the three matchers approve `QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1`; the OFIQ
+release and the six matchers approve `QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1`; the OFIQ
 conformance image approves `REPRODUCE_OFIQ_CONFORMANCE_TESTS`.
 
 ```sh gate
@@ -97,11 +123,22 @@ rm -rf "$OWNER_ROOT"
 ## 4. Freeze the protocol and run the matcher matrix (console: *Verification*)
 
 The LFW View 2 protocol (6,000 pairs, 10 folds) is frozen from the registered official pair lists
-into an immutable protocol record. The matrix runs AdaFace IR-101, ElasticFace-Arc R100, and
-TransFace-S under both preprocessing conditions (`SCRFD10G_ADAPTIVE_LARGEST_ARCFACE112_JPEG95_V1`
-and `SCRFD10G_640_HIGHEST_CONFIDENCE_ARCFACE112_INMEMORY_V1`) and records six leaf Runs, each keeping
+into an immutable protocol record. The matrix runs AdaFace IR-101, ElasticFace-Arc R100, MagFace
+IResNet-100, TopoFR R100, TransFace-B, and TransFace-S under both preprocessing conditions
+(`SCRFD10G_ADAPTIVE_LARGEST_ARCFACE112_JPEG95_V1` and
+`SCRFD10G_640_HIGHEST_CONFIDENCE_ARCFACE112_INMEMORY_V1`) and records twelve leaf Runs, each keeping
 every protocol pair (a pair without two templates carries an explicit processing failure).
 `--fixture-pairs-only` restricts to the registered 10-pair fixture; omit it for the full protocol.
+
+In the console, the matcher and preprocessing checkboxes select the complete Cartesian product for
+that Run. For example, one matcher and either preprocessing profile records one leaf; six matchers
+and both profiles records twelve. The selection is stored with the resulting immutable Runs and never
+changes a global preprocessing setting. Advanced 1:N and degradation analyses use the same catalog
+for their single matcher/profile selection. Controlled degradation operators are separate: they
+create an explicitly derived dataset and do not silently replace matcher preprocessing.
+
+The CLI exposes the same per-Run product through repeatable `--matcher` and `--preprocessing` flags;
+omitting both preserves the full six-by-two matrix used by the canonical gate below.
 
 ```sh gate
 PROTOCOL_ID=$($QS freeze-lfw-protocol --project-id "$PROJECT_ID" --dataset-id "$DATASET_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin)["protocol_id"])')
@@ -111,7 +148,7 @@ AS_RUN=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next
 echo "$MATRIX_ID $AS_RUN"
 ```
 
-Read the six-leaf metrics (EER, FNMR at FMR ≤ 10⁻¹/10⁻²/10⁻³ with Clopper–Pearson intervals, ROC/DET,
+Read the twelve-leaf metrics (EER, FNMR at FMR ≤ 10⁻¹/10⁻²/10⁻³ with Clopper–Pearson intervals, ROC/DET,
 View-2 ten-fold accuracy) in the console's matrix table, or export them (step 7).
 
 ## 4b. Import externally computed scores (console: *Verification → Externally computed scores*)
@@ -156,7 +193,10 @@ differences, a quality × matcher interaction, threshold transferability, score 
 ```sh gate
 $QS cross-matcher --project-id "$PROJECT_ID" --matrix-id "$MATRIX_ID" --quality-job-id "$JOB_ID" --replicates 100 > "$WORK/cross.json"
 CROSS_DIR=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["directory"])' "$WORK/cross.json")
-$UV run --directory backend --frozen --offline python ../scripts/verify_cross_matcher.py "$CROSS_DIR" "$QUALSIGHT_DATA_DIR/qualsight.sqlite3"
+SNAPSHOT_PATH="$QUALSIGHT_DATA_DIR/cross-verifier-$(date -u +%Y%m%dT%H%M%SZ)-$$.snapshot.sqlite3"
+$QS snapshot-database --output "$SNAPSHOT_PATH"
+$UV run --directory backend --frozen --offline python ../scripts/verify_cross_matcher.py "$CROSS_DIR" "$SNAPSHOT_PATH"
+rm -- "$SNAPSHOT_PATH"
 ```
 
 ## 7. Figures, exports, bundles, reproduction (console: *Figures · dashboards · reports*)

@@ -1,6 +1,6 @@
 """Frozen matcher runtime on real registered bytes (QS-C22 preparation).
 
-Loads the three registered checkpoints strictly into their pinned upstream
+Loads the six registered checkpoints strictly into their pinned upstream
 architectures, runs the registered SCRFD-10G detector under both frozen
 preprocessing conditions on the real LFW subset fixture, and checks the
 embedding contract and pair-score sanity on the fixture's real View 2 pairs.
@@ -17,7 +17,13 @@ import numpy as np
 
 from qualsight.execution.registry_binding import load_resource_registry
 from qualsight.matchers.alignment import ARCFACE_DST, ARCFACE_TEMPLATE_SHA256, umeyama_similarity
-from qualsight.matchers.conditions import CONDITION_DEFINITIONS, ConditionId, adaptive_canvas, preprocess
+from qualsight.matchers.conditions import (
+    CONDITION_DEFINITIONS,
+    SCRFD_CONDITIONS,
+    ConditionId,
+    adaptive_canvas,
+    preprocess,
+)
 from qualsight.matchers.detection import SCRFDDetector
 from qualsight.matchers.runtime import FrozenMatcher, MatcherId, MatcherRuntimeError, cosine_similarity
 from qualsight.matchers.upstream import UpstreamSourceError, UpstreamSources
@@ -41,7 +47,7 @@ class RealMatcherRuntimeTests(unittest.TestCase):
         cls.images = [cv2.imread(str(TREE / image["path"]), cv2.IMREAD_COLOR) for image in cls.fixture["images"]]
         cls.index = {image["path"]: position for position, image in enumerate(cls.fixture["images"])}
         cls.crops = {}
-        for condition in ConditionId:
+        for condition in SCRFD_CONDITIONS:
             results = [preprocess(image, condition, cls.detector) for image in cls.images]
             cls.crops[condition] = results
 
@@ -55,11 +61,25 @@ class RealMatcherRuntimeTests(unittest.TestCase):
         tampered = self.upstream.path_for("adaface_net")
         original = tampered.read_bytes()
         try:
-            tampered.write_bytes(original + b"\n# drift\n")
+            # One-byte-short subsample of the real pinned source; no fabricated test bytes.
+            tampered.write_bytes(original[:-1])
             with self.assertRaises(UpstreamSourceError):
                 self.upstream.verify("adaface_net")
         finally:
             tampered.write_bytes(original)
+
+    def test_executable_matcher_catalog_is_the_six_registered_real_checkpoints(self) -> None:
+        self.assertEqual(
+            {matcher_id.value for matcher_id in MatcherId},
+            {
+                "adaface-ir101-local-candidate",
+                "elasticface-arc-r100-local-candidate",
+                "magface-iresnet100-ms1mv2-local-candidate",
+                "topofr-r100-glint360k-local-candidate",
+                "transface-b-glint360k-local-candidate",
+                "transface-s-glint360k-local-candidate",
+            },
+        )
 
     def test_alignment_matches_the_arcface_template_geometry(self) -> None:
         # Mapping the template onto itself is the identity similarity.
@@ -68,7 +88,7 @@ class RealMatcherRuntimeTests(unittest.TestCase):
         self.assertEqual(len(ARCFACE_TEMPLATE_SHA256), 64)
         self.assertEqual(adaptive_canvas(self.images[0]), 256)  # LFW funneled is 250×250
 
-    def test_both_conditions_detect_every_fixture_face_and_yield_112_crops(self) -> None:
+    def test_both_scrfd_conditions_detect_every_fixture_face_and_yield_112_crops(self) -> None:
         for condition, results in self.crops.items():
             with self.subTest(condition=condition.value):
                 self.assertEqual(len(results), len(self.images))
@@ -110,8 +130,10 @@ class RealMatcherRuntimeTests(unittest.TestCase):
 
     def test_wrong_input_shape_is_refused(self) -> None:
         matcher = FrozenMatcher(MatcherId.ELASTICFACE_ARC_R100, self.registry, self.upstream)
+        real_crop = self.crops[ConditionId.FIXED640_HIGHEST_INMEMORY][0].crop_bgr
+        malformed_real_crop = real_crop[:100, :100][None, ...]
         with self.assertRaises(MatcherRuntimeError):
-            matcher.embed(np.zeros((1, 100, 100, 3), dtype=np.uint8))
+            matcher.embed(malformed_real_crop)
 
 
 if __name__ == "__main__":

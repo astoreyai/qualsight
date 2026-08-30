@@ -83,6 +83,7 @@ class LeafData:
     left_ids: list[str]
     right_ids: list[str]
     left_subjects: np.ndarray
+    subject_sampling_unit: str | None
     threshold: float
     threshold_provenance: dict[str, Any]
 
@@ -165,6 +166,10 @@ class CrossMatcherJob:
         point = next((p for p in metrics["by_policy"]["EXCLUDE_FAILED_TRIALS"]["operating_points"] if p["target_fmr"] == self.request.target_fmr and p.get("threshold") is not None), None)
         if point is None:
             raise CrossMatcherError(f"leaf {row['leaf_id']} has no recorded operating point at FMR {self.request.target_fmr}")
+        subjects_recorded = all(
+            record["left_subject_id"] is not None and record["right_subject_id"] is not None
+            for record in records
+        )
         return LeafData(
             row=row, run=run[0], pair_ids=[r["pair_id"] for r in records],
             labels=np.array([r["label"] == "MATED" for r in records]),
@@ -172,7 +177,12 @@ class CrossMatcherJob:
             failed=np.array([r["failure"] is not None for r in records]),
             failure_kind=[r["failure"] for r in records],
             left_ids=[r["left_sample_id"] for r in records], right_ids=[r["right_sample_id"] for r in records],
-            left_subjects=np.array([r["left_subject_id"] for r in records]),
+            left_subjects=np.array([r["left_subject_id"] for r in records], dtype=object),
+            subject_sampling_unit=(
+                "LEFT_SUBJECT_ID_SHARED_BY_BOTH_RUNS"
+                if subjects_recorded
+                else None
+            ),
             threshold=float(point["threshold"]),
             threshold_provenance={"source": "RECORDED_OPERATING_POINT", "kind": "MATCHER_THRESHOLD", "target_fmr": self.request.target_fmr, "failure_policy": "EXCLUDE_FAILED_TRIALS", "fmr_at_threshold": point["fmr"], "fnmr_at_threshold": point["fnmr"], "matcher_run_id": row["run_id"]},
         )
@@ -211,7 +221,8 @@ class CrossMatcherJob:
                 category = ("BOTH" if (error_a[index] and error_b[index]) else "A_ONLY" if error_a[index] else "B_ONLY" if error_b[index] else "NEITHER")
             pair_rows.append({
                 "contrast_id": contrast_id, "contrast_kind": kind, "pair_id": a.pair_ids[index], "label": "MATED" if mated[index] else "NON_MATED",
-                "left_sample_id": a.left_ids[index], "right_sample_id": a.right_ids[index], "left_subject_id": str(a.left_subjects[index]),
+                "left_sample_id": a.left_ids[index], "right_sample_id": a.right_ids[index],
+                "left_subject_id": None if a.left_subjects[index] is None else str(a.left_subjects[index]),
                 "score_a": None if not np.isfinite(a.scores[index]) else float(a.scores[index]), "score_b": None if not np.isfinite(b.scores[index]) else float(b.scores[index]),
                 "failure_a": a.failure_kind[index], "failure_b": b.failure_kind[index], "error_a": bool(error_a[index]), "error_b": bool(error_b[index]), "category": category,
                 "quality_left": None if not np.isfinite(quality_left[index]) else float(quality_left[index]), "quality_right": None if not np.isfinite(quality_right[index]) else float(quality_right[index]),
@@ -231,10 +242,21 @@ class CrossMatcherJob:
             for name, upper in (("au_erc", 1.0), ("partial_au_erc", request.partial_interval)):
                 value_a = _area_from_units(q, ea, upper)
                 value_b = _area_from_units(q, eb, upper)
-                boot = cluster_bootstrap(clusters, lambda idx, ea=ea, eb=eb, q=q, upper=upper: (lambda x, y: None if x is None or y is None else x - y)(_area_from_units(q[idx], ea[idx], upper), _area_from_units(q[idx], eb[idx], upper)), replicates=request.bootstrap_replicates, seed=request.seed) if q.shape[0] else None
+                boot = (
+                    cluster_bootstrap(clusters, lambda idx, ea=ea, eb=eb, q=q, upper=upper: (lambda x, y: None if x is None or y is None else x - y)(_area_from_units(q[idx], ea[idx], upper), _area_from_units(q[idx], eb[idx], upper)), replicates=request.bootstrap_replicates, seed=request.seed)
+                    if q.shape[0] and a.subject_sampling_unit is not None
+                    else (
+                        {
+                            "status": "NOT_ASSESSED_IDENTITY_UNAVAILABLE",
+                            "reason": "The protocol authority does not record subject identities, so paired subject-cluster uncertainty cannot be estimated.",
+                        }
+                        if a.subject_sampling_unit is None
+                        else None
+                    )
+                )
                 if boot is not None:
                     boot["method"] = "PAIRED_CLUSTER_BOOTSTRAP_PERCENTILE"
-                    boot["sampling_unit"] = "LEFT_SUBJECT_ID_SHARED_BY_BOTH_RUNS"
+                    boot["sampling_unit"] = a.subject_sampling_unit
                 differences.setdefault(label, {})[name] = {"integration_domain": [0.0, upper], "a": value_a, "b": value_b, "difference_a_minus_b": None if value_a is None or value_b is None else value_a - value_b, "uncertainty": boot, "comparison_units": int(q.shape[0])}
         # Quality × matcher interaction on pooled mated units (both scored, with quality).
         selection = usable & mated
@@ -242,7 +264,11 @@ class CrossMatcherJob:
         design = np.column_stack((np.concatenate((q, q)), np.concatenate((np.zeros(q.shape[0]), np.ones(q.shape[0]))), np.concatenate((np.zeros(q.shape[0]), q))))
         outcome = np.concatenate(((a.scores[selection] < a.threshold).astype(np.float64), (b.scores[selection] < b.threshold).astype(np.float64)))
         interaction = logistic_regression_multi(design, outcome, ["pair_quality", "is_b", "pair_quality_x_is_b"]) if q.shape[0] else {"status": "UNSUPPORTED_BY_SAMPLE"}
-        interaction["note"] = "Pooled mated units appear once per matcher; the two rows of a pair share a subject, so Wald intervals assume more independence than the design has and are labelled approximate."
+        interaction["note"] = (
+            "Pooled mated units appear once per matcher; recorded subject identities define dependence, and Wald intervals remain approximate."
+            if a.subject_sampling_unit is not None
+            else "Pooled point estimates are computed from authoritative pair labels, but identity-dependent interaction uncertainty is not assessed because subject identities are unavailable."
+        )
         # Threshold transferability: A's threshold applied to B's scores and vice versa (own units, EXCLUDE_FAILED_TRIALS).
         def rates(leaf: LeafData, threshold: float) -> dict[str, Any]:
             scored = (~leaf.failed) & np.isfinite(leaf.scores)
@@ -317,7 +343,11 @@ class CrossMatcherJob:
             "matcher_sets": self.sets,
             "pair_quality_policy": {"id": self.policy.value, "version": PAIR_QUALITY_POLICY_VERSION, "definition": POLICY_DEFINITIONS[self.policy]},
             "target_fmr": request.target_fmr, "partial_interval": request.partial_interval,
-            "uncertainty": {"method": "PAIRED_CLUSTER_BOOTSTRAP_PERCENTILE", "sampling_unit": "LEFT_SUBJECT_ID_SHARED_BY_BOTH_RUNS", "replicates": request.bootstrap_replicates, "seed": request.seed, "confidence_level": CONFIDENCE_LEVEL},
+            "uncertainty": (
+                {"status": "ESTIMATED", "method": "PAIRED_CLUSTER_BOOTSTRAP_PERCENTILE", "sampling_unit": first.subject_sampling_unit, "replicates": request.bootstrap_replicates, "seed": request.seed, "confidence_level": CONFIDENCE_LEVEL}
+                if first.subject_sampling_unit is not None
+                else {"status": "NOT_ASSESSED_IDENTITY_UNAVAILABLE", "method": "NOT_APPLICABLE_WITHOUT_RECORDED_SUBJECT_IDENTITIES", "sampling_unit": None, "replicates": 0, "requested_replicates": request.bootstrap_replicates, "seed": request.seed, "confidence_level": CONFIDENCE_LEVEL, "reason": "The protocol authority does not record subject identities."}
+            ),
             "contrasts": contrasts,
             "rules": ["matcher contrasts hold the preprocessing condition fixed", "preprocessing contrasts hold the matcher and the protocol fixed", "no pooled cross-condition number is reported", "no single matcher-independence score is defined"],
         }
@@ -342,6 +372,7 @@ class CrossMatcherJob:
     def _run(self, started: datetime, seconds: float, document: dict[str, Any], document_path: Path, pairs_path: Path, leaves: list[LeafData]) -> tuple[CompletedRun, Experiment]:
         request = self.request
         source = leaves[0].run
+        uncertainty_estimated = document["uncertainty"].get("status") == "ESTIMATED"
         model_hashes: list[DomainArtifactIdentity] = []
         seen: set[str] = set()
         for leaf in leaves:
@@ -373,24 +404,32 @@ class CrossMatcherJob:
             quality_engine=self.quality_run.quality_engine, quality_engine_configuration=self.quality_run.quality_engine_configuration,
             model_hashes=tuple(model_hashes),
             matcher=ComponentBinding(state=ComponentState.CONFIGURED, component_id="cross-matcher-set", version=hashlib.sha256("\n".join(run_ids).encode("utf-8")).hexdigest()[:16], configuration_sha256=sha256_bytes("\n".join(run_ids).encode("utf-8")), artifact_hashes=tuple(identity.sha256 for identity in model_hashes)),
-            matcher_preprocessing=ComponentBinding(state=ComponentState.CONFIGURED, component_id="both-recorded-conditions", version="1.0.0", configuration_sha256=sha256_bytes(json.dumps(sorted(self.sets["fixed_condition"].keys())).encode("utf-8"))),
+            matcher_preprocessing=ComponentBinding(state=ComponentState.CONFIGURED, component_id="recorded-condition-set", version="1.0.0", configuration_sha256=sha256_bytes(json.dumps(sorted(self.sets["fixed_condition"].keys())).encode("utf-8"))),
             operating_thresholds=ComponentBinding(state=ComponentState.CONFIGURED, component_id="per-run-recorded-operating-point", version="1.0.0", configuration_sha256=sha256_bytes(json.dumps({"target_fmr": request.target_fmr}, sort_keys=True).encode("utf-8"))),
             statistical_methods=ComponentBinding(state=ComponentState.CONFIGURED, component_id="qualsight.analysis.crossmatcher+metrics.statistics", version="1.0.0", configuration_sha256=sha256_bytes(json.dumps({"partial_interval": request.partial_interval, "replicates": request.bootstrap_replicates, "seed": request.seed}, sort_keys=True).encode("utf-8"))),
-            confidence_interval_method=ComponentBinding(state=ComponentState.CONFIGURED, component_id="PAIRED_CLUSTER_BOOTSTRAP_PERCENTILE_95+CLOPPER_PEARSON_95+WALD", version="1.0.0"),
-            randomness=ComponentBinding(state=ComponentState.CONFIGURED, component_id="numpy.random.default_rng", version="PCG64", configuration_sha256=sha256_bytes(str(request.seed).encode("utf-8"))),
-            random_seeds=(request.seed,), application_version=application_version(self.repository_root / "backend" / "pyproject.toml"), repository=repository_identity(self.repository_root),
+            confidence_interval_method=(
+                ComponentBinding(state=ComponentState.CONFIGURED, component_id="PAIRED_CLUSTER_BOOTSTRAP_PERCENTILE_95+CLOPPER_PEARSON_95+WALD", version="1.0.0")
+                if uncertainty_estimated
+                else ComponentBinding(state=ComponentState.NOT_APPLICABLE, reason="Paired subject-cluster intervals were not assessed because the protocol records no subject identities.")
+            ),
+            randomness=(
+                ComponentBinding(state=ComponentState.CONFIGURED, component_id="numpy.random.default_rng", version="PCG64", configuration_sha256=sha256_bytes(str(request.seed).encode("utf-8")))
+                if uncertainty_estimated
+                else ComponentBinding(state=ComponentState.NOT_APPLICABLE, reason="No cluster bootstrap was executed because subject identities are unavailable.")
+            ),
+            random_seeds=(request.seed,) if uncertainty_estimated else (), application_version=application_version(self.repository_root / "backend" / "pyproject.toml"), repository=repository_identity(self.repository_root),
             environment=environment_identity(self.repository_root / "uv.lock", {}), hardware=hardware_identity("numpy on CPU"),
             start_time=started, end_time=_now(), runtime_seconds=round(seconds, 3), initialization_ms=0, assessment_ms=int(seconds * 1000),
             configuration=configuration, metrics=tuple(observations), artifacts=tuple(artifacts),
             logs=(LogRecord(stream="stdout", sha256=sha256_bytes(b""), text=""), LogRecord(stream="stderr", sha256=sha256_bytes(b""), text="")),
-            warnings=("interaction models pool units across two Runs that share subjects; Wald intervals are approximate",),
+            warnings=(("interaction models pool units across two Runs that share recorded subjects; Wald intervals are approximate",) if uncertainty_estimated else ("identity-dependent uncertainty is not assessed because the protocol authority records no subject identities",)),
             provenance_limits=tuple(sorted({limit for leaf in leaves for limit in leaf.run.provenance_limits})) + ("Cross-matcher results are QualSight-executed contrasts of recorded Runs; matcher contrasts never pool preprocessing conditions.",),
             exit_code=0, status=RunStatus.COMPLETED, scientific_support=ScientificSupportState.NOT_ASSESSED,
         )
         experiment = Experiment(
             experiment_id=experiment_id, project_id=self.project.project_id, dataset_id=self.rows[0]["dataset_id"], name=f"cross-matcher: matrix {request.matrix_id[-12:]} × {request.quality_measure} ({self.policy.value})",
             created_by=self.actor, created_at=started,
-            protocol=VerificationProtocol(kind=ProtocolKind.VERIFICATION, protocol_id=self.rows[0]["protocol_id"], pair_manifest=self.protocol.pair_manifest, identity_schema=ComponentBinding(state=ComponentState.CONFIGURED, component_id="lfw-directory-identity", version="1.0.0")),
+            protocol=VerificationProtocol(kind=ProtocolKind.VERIFICATION, protocol_id=self.rows[0]["protocol_id"], pair_manifest=self.protocol.pair_manifest, identity_schema=source.subject_protocol),
             configuration=configuration,
         )
         return run, experiment

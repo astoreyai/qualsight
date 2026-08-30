@@ -14,6 +14,7 @@ matcher, the preprocessing condition, and the threshold.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
@@ -89,7 +90,7 @@ def _mean(values: list[float | None]) -> float | None:
 
 
 class DegradationAnalysisJob:
-    def __init__(self, *, store: Any, registry: Any, upstream: Any, repository_root: Path, project: Any, request: DegradationRequest, job_root: Path, actor: str, purpose_scope: str = "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1") -> None:
+    def __init__(self, *, store: Any, registry: Any, upstream: Any, repository_root: Path, project: Any, request: DegradationRequest, job_root: Path, actor: str, purpose_scope: str = "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1", runtime_manager: Any | None = None) -> None:
         self.store = store
         self.registry = registry
         self.upstream = upstream
@@ -98,6 +99,7 @@ class DegradationAnalysisJob:
         self.request = request
         self.actor = actor
         self.purpose_scope = purpose_scope
+        self.runtime_manager = runtime_manager
         derived = store.derived_set(request.derived_set_id)
         if derived is None or derived["project_id"] != project.project_id:
             raise DegradationAnalysisError("derived set is not recorded in this project")
@@ -147,6 +149,11 @@ class DegradationAnalysisJob:
         return None if result.failure is not None or result.crop_bgr is None else result.crop_bgr
 
     def run(self) -> DegradationResult:
+        lease = self.runtime_manager.lease(self.matcher_id) if self.runtime_manager is not None else nullcontext(FrozenMatcher(self.matcher_id, self.registry, self.upstream))
+        with lease as matcher:
+            return self._execute(matcher)
+
+    def _execute(self, matcher: FrozenMatcher) -> DegradationResult:
         started = _now()
         clock = time.perf_counter()
         request = self.request
@@ -157,7 +164,6 @@ class DegradationAnalysisJob:
         pairs = [p for p in self.store.protocol_pairs(self.protocol.protocol_id, limit=1_000_000) if p.left_sample_id in source_set]
         # Templates: originals (left and right of the selected pairs) and every derived left image.
         self.progress = {"phase": "templates", "detail": "originals"}
-        matcher = FrozenMatcher(self.matcher_id, self.registry, self.upstream)
         original_ids = sorted({p.left_sample_id for p in pairs} | {p.right_sample_id for p in pairs})
         crops: list[np.ndarray] = []
         index: dict[str, int] = {}

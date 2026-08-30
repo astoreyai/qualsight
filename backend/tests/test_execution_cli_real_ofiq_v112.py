@@ -133,6 +133,56 @@ class RealOFIQv112LifecycleTests(unittest.TestCase):
         self.assertFalse(running.cancel())
         self.assertIs(running.collect(), record)
 
+    def test_real_execution_deadline_terminates_the_process_group(self) -> None:
+        adapter = RegisteredCLIAdapter.from_registry(
+            descriptor=build_ofiq_transport_descriptor(
+                self.registry, OFIQ_V112_RUNTIME_RESOURCE_ID
+            ),
+            registry=self.registry,
+            runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID,
+            input_resource_ids=(OFIQ_INPUT_RESOURCE_ID,),
+            repository_root=ROOT,
+            execution_timeout_seconds=0.01,
+            output_limit_bytes=16 * 1024 * 1024,
+        )
+        request = adapter.create_request(
+            arguments=("-c", self.config.path, "-i", self.image.path),
+            input_artifacts=(self.image,),
+            purpose_scope=CONFORMANCE_SCOPE,
+        )
+        running = adapter.start(adapter.prepare(request))
+        pid = running.process_id
+        record = running.collect()
+        self.assertEqual(record.state, LifecycleState.FAILED)
+        self.assertEqual(record.failure.kind, "TIMEOUT")
+        self.assertLessEqual(len(record.stdout.content), 16 * 1024 * 1024)
+        self.assertLessEqual(len(record.stderr.content), 16 * 1024 * 1024)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pid, 0)
+
+    def test_real_execution_output_capture_limit_terminates_the_process_group(self) -> None:
+        adapter = RegisteredCLIAdapter.from_registry(
+            descriptor=build_ofiq_transport_descriptor(
+                self.registry, OFIQ_V112_RUNTIME_RESOURCE_ID
+            ),
+            registry=self.registry,
+            runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID,
+            input_resource_ids=(OFIQ_INPUT_RESOURCE_ID,),
+            repository_root=ROOT,
+            execution_timeout_seconds=120.0,
+            output_limit_bytes=1,
+        )
+        request = adapter.create_request(
+            arguments=("-c", self.config.path, "-i", self.image.path),
+            input_artifacts=(self.image,),
+            purpose_scope=CONFORMANCE_SCOPE,
+        )
+        record = adapter.start(adapter.prepare(request)).collect()
+        self.assertEqual(record.state, LifecycleState.FAILED)
+        self.assertEqual(record.failure.kind, "OUTPUT_LIMIT_EXCEEDED")
+        self.assertLessEqual(len(record.stdout.content), 1)
+        self.assertLessEqual(len(record.stderr.content), 1)
+
     def test_cancel_after_completion_returns_false(self) -> None:
         running = self.adapter.start(self.adapter.prepare(self._request()))
         deadline = time.monotonic() + 60.0

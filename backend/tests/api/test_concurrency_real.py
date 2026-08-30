@@ -10,6 +10,8 @@ uploads (all recorded; content-addressed ids never collide).
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+import hashlib
 from pathlib import Path
 import shutil
 import tempfile
@@ -24,6 +26,9 @@ from qualsight.execution.registry_binding import (
     OFIQ_INPUT_RESOURCE_ID,
     OFIQ_V112_RUNTIME_RESOURCE_ID,
 )
+from qualsight.api.store import RunStore
+from qualsight.importers.owner_supplied import OwnerSuppliedAdmission, SOURCE_KIND
+from qualsight.security.purge import purge_project
 
 ROOT = Path(__file__).resolve().parents[3]
 LFW_RESOURCE_ID = "lfw-funneled-local-candidate"
@@ -42,7 +47,7 @@ class ConcurrencyRealTests(unittest.TestCase):
             runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID,
             input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, LFW_RESOURCE_ID),
         )
-        cls.client = TestClient(create_app(settings))
+        cls.client = TestClient(create_app(settings), base_url="http://127.0.0.1")
         cls.client.__enter__()
         project = cls.client.post(
             "/api/projects",
@@ -97,6 +102,39 @@ class ConcurrencyRealTests(unittest.TestCase):
         self.assertEqual(errors, [])
         type(self).dataset_id = imported.json()["dataset_id"]
 
+    def test_z_purge_and_real_upload_are_mutually_exclusive_and_leave_no_residual_project_data(self) -> None:
+        """A real owner-photo assessment either finishes before purge or is refused; it cannot write through purge."""
+
+        data = (LFW_TREE / "Colin_Powell" / "Colin_Powell_0002.jpg").read_bytes()
+        start = threading.Barrier(2)
+
+        def upload():
+            start.wait()
+            return self.client.post(
+                "/api/quality/assess-upload",
+                params={"project_id": self.project_id, "purpose_scope": RESEARCH_SCOPE, "filename": "purge_race_photo.jpg"},
+                content=data,
+                headers={"content-type": "application/octet-stream"},
+            )
+
+        def purge():
+            start.wait()
+            return self.client.post(f"/api/projects/{self.project_id}/purge", json={"confirm": self.project_id})
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            upload_future = pool.submit(upload)
+            purge_future = pool.submit(purge)
+            upload_response = upload_future.result(timeout=120)
+            purge_response = purge_future.result(timeout=120)
+
+        self.assertIn(upload_response.status_code, {201, 409}, upload_response.text)
+        self.assertIn(purge_response.status_code, {201, 409}, purge_response.text)
+        if purge_response.status_code == 409:
+            purge_response = self.client.post(f"/api/projects/{self.project_id}/purge", json={"confirm": self.project_id})
+        self.assertEqual(purge_response.status_code, 201, purge_response.text)
+        self.assertTrue(purge_response.json()["verified"], purge_response.json())
+        self.assertEqual(self.client.get(f"/api/projects/{self.project_id}/datasets").json(), [])
+
     def test_concurrent_identical_uploads_admit_once_without_conflict(self) -> None:
         data = (LFW_TREE / "Colin_Powell" / "Colin_Powell_0002.jpg").read_bytes()
 
@@ -136,6 +174,94 @@ class ConcurrencyRealTests(unittest.TestCase):
         self.assertTrue(all(r.status_code == 201 for r in responses), [(r.status_code, r.text[:200]) for r in responses])
         shas = {r.json()["image_sha256"] for r in responses}
         self.assertEqual(len(shas), 4)
+
+
+class OwnerFileCrossProjectRaceTests(unittest.TestCase):
+    def test_cross_project_admission_during_purge_preserves_the_new_reference_bytes(self) -> None:
+        data_dir = Path(tempfile.mkdtemp(prefix="qualsight-owner-race-", dir="/mnt/projects"))
+        settings = Settings(
+            repository_root=ROOT,
+            registry_path=ROOT / "resources" / "resource-registry.json",
+            data_dir=data_dir,
+            runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID,
+            input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, LFW_RESOURCE_ID),
+        )
+        try:
+            with TestClient(create_app(settings), base_url="http://127.0.0.1") as client:
+                projects = []
+                for name in ("owner-file race source", "owner-file race destination"):
+                    response = client.post(
+                        "/api/projects",
+                        json={"name": name, "description": "Real cross-project owner-file purge race gate.", "purpose_scope": RESEARCH_SCOPE},
+                    )
+                    self.assertEqual(response.status_code, 201, response.text)
+                    projects.append(response.json()["project_id"])
+
+            store = RunStore(settings.database_path)
+            try:
+                owner_root = data_dir / "owner_supplied"
+                owner_root.mkdir(parents=True, exist_ok=True)
+                managed_paths: list[Path] = []
+                admitted_at = datetime.now(timezone.utc).astimezone().isoformat()
+                for source in sorted(LFW_TREE.glob("*/*.jpg")):
+                    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+                    target = owner_root / f"{digest}.jpg"
+                    if target.exists():
+                        continue
+                    target.hardlink_to(source)
+                    store.record_owner_supplied(
+                        {
+                            "path": str(target),
+                            "sha256": digest,
+                            "project_id": projects[0],
+                            "actor_id": "local-user:race-gate",
+                            "original_name": source.name,
+                            "size_bytes": source.stat().st_size,
+                            "storage": "COPIED",
+                            "source_kind": SOURCE_KIND,
+                            "admitted_at": admitted_at,
+                        }
+                    )
+                    managed_paths.append(target)
+
+                managed_paths.sort()
+                self.assertGreaterEqual(len(managed_paths), 13_000)
+                sentinel = managed_paths[0]
+                shared_target = managed_paths[-1]
+                shared_bytes = shared_target.read_bytes()
+                admission = OwnerSuppliedAdmission(store, data_dir, "local-user:race-gate")
+
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    purge_future = pool.submit(
+                        purge_project,
+                        store,
+                        data_dir=data_dir,
+                        project_id=projects[0],
+                        actor="local-user:race-gate",
+                        confirm=projects[0],
+                    )
+                    deadline = time.monotonic() + 30
+                    while sentinel.exists() and time.monotonic() < deadline:
+                        if purge_future.done():
+                            self.fail("purge completed before the real-file traversal race window was observed")
+                        time.sleep(0.0005)
+                    self.assertFalse(sentinel.exists(), "purge did not begin unlinking the recorded real files")
+                    self.assertFalse(purge_future.done(), "purge traversal ended before the destination admission")
+                    self.assertTrue(shared_target.exists(), "the last sorted managed file was deleted before admission could start")
+
+                    admitted = admission.admit_bytes(shared_bytes, "shared_during_purge.jpg", projects[1])
+                    purge_record = purge_future.result(timeout=60)
+
+                self.assertTrue(purge_record["verified"], purge_record)
+                self.assertEqual(admitted.path, str(shared_target))
+                self.assertTrue(shared_target.exists(), "the purge deleted bytes after the second project admitted the same managed path")
+                self.assertEqual(hashlib.sha256(shared_target.read_bytes()).hexdigest(), admitted.sha256)
+                destination_records = store.owner_supplied_for_project(projects[1])
+                self.assertEqual([record["path"] for record in destination_records], [str(shared_target)])
+            finally:
+                store.close()
+        finally:
+            shutil.rmtree(data_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

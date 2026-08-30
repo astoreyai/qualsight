@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 
 interface EvidenceSide {
   sample_id: string;
-  subject_id: string;
+  subject_id: string | null;
   path: string | null;
   sha256: string | null;
   face_count: number | null;
@@ -29,7 +29,7 @@ interface EvidenceOut {
   matcher_id: string;
   condition_id: string;
   provenance_marker: string;
-  pair: { pair_id: string; label: string; fold: number; score: number | null; failure: string | null; failure_side: string | null };
+  pair: { pair_id: string; label: string; fold: number | null; score: number | null; failure: string | null; failure_side: string | null };
   sides: { left: EvidenceSide; right: EvidenceSide };
   thresholds: Array<{ kind: string; name: string; threshold: number; policy: string }>;
   decision_rule: string;
@@ -111,6 +111,7 @@ export function PairEvidence({ runId, pairId, onClose }: { runId: string; pairId
   if (error) return <p className="error" role="alert">{error}</p>;
   if (!evidence) return <p className="status" role="status">Loading recorded evidence…</p>;
   const externallyComputed = evidence.condition_id === "EXTERNALLY_COMPUTED";
+  const publisherPrealigned = evidence.condition_id === "AUTHOR_PREALIGNED_ARCFACE112_INMEMORY_V1";
   return (
     <div className="pair-evidence" data-testid="pair-evidence">
       <div className="pair-evidence-head">
@@ -125,12 +126,12 @@ export function PairEvidence({ runId, pairId, onClose }: { runId: string; pairId
           const side = evidence.sides[sideName];
           return (
             <div key={sideName} className="pair-evidence-side" data-testid={`evidence-${sideName}`}>
-              <h5>{sideName} · {side.subject_id}</h5>
-              {side.links && <img className="original" src={side.links.image} alt={`${sideName} original ${side.subject_id}`} />}
+              <h5>{sideName} · {side.subject_id ?? "subject identity unavailable"}</h5>
+              {side.links && <img className="original" src={side.links.image} alt={`${sideName} recorded biometric sample ${side.sample_id}; ${side.subject_id ? `subject ${side.subject_id}` : "subject identity unavailable"}`} />}
               {side.links && !externallyComputed && (
                 <figure className="crop">
                   <img src={side.links.crop} alt={`${sideName} aligned 112x112 crop as compared`} data-testid={`evidence-crop-${sideName}`} />
-                  <figcaption>compared 112×112 crop (recomputed under {evidence.condition_id})</figcaption>
+                  <figcaption>{publisherPrealigned ? "compared publisher-prealigned 112×112 image (hash-verified pass-through)" : `compared 112×112 crop (recomputed under ${evidence.condition_id})`}</figcaption>
                 </figure>
               )}
               {externallyComputed && (
@@ -156,6 +157,7 @@ export function PairEvidence({ runId, pairId, onClose }: { runId: string; pairId
         </p>
         <ScoreDistribution evidence={evidence} />
         <table className="measures" data-testid="evidence-decisions">
+          <caption>Recorded matcher-threshold decisions for the selected pair</caption>
           <thead>
             <tr><th scope="col">Recorded threshold (kind: MATCHER THRESHOLD)</th><th scope="col">Value</th><th scope="col">Decision</th></tr>
           </thead>
@@ -177,6 +179,7 @@ export function PairEvidence({ runId, pairId, onClose }: { runId: string; pairId
           <div className="pair-evidence-sides">
             {(["left", "right"] as const).map((sideName) => (
               <table key={sideName} className="measures">
+                <caption>{sideName} sample quality measures below the batch median</caption>
                 <thead>
                   <tr><th scope="col">{sideName}: measure</th><th scope="col">value</th><th scope="col">batch median</th></tr>
                 </thead>

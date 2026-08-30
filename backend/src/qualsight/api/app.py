@@ -10,25 +10,45 @@ to the local console viewer, and only when they are registered inputs.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 import cv2
+import asyncio
 import hashlib
 import json
+import logging
+import math
 import mimetypes
+import os
+import stat
 import threading
+import tempfile
+import time
+import uuid
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote, urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..domain.entities import AuditEvent, AuditEventType, DataClassification
 from ..domain.primitives import CanonicalJson
 from ..domain.run import CompletedRun
+from ..addons import ANALYSIS_PARAMETER_CONTRACTS, catalog as addon_catalog, dataset_addons, preprocessing_profiles
+from ..dataset_acquisition import (
+    MANIFEST_NAME as DATASET_ACQUISITION_MANIFEST_NAME,
+    DatasetAcquisitionError,
+    VerificationDatasetStore,
+)
+from ..verification_datasets import (
+    AcquiredVerificationDatasetImporter,
+    SOURCE_KIND as VERIFICATION_DATASET_SOURCE_KIND,
+    VerificationDatasetImportError,
+)
 from ..engines.ofiq.adapter import OFIQEngineError, OFIQQualityEngine, OFIQSingleSampleResult
 from ..datasets import DatasetImportError, RegisteredDatasetImporter
 from ..engines.ofiq.batch import BatchJobError, OFIQBatchJob
@@ -42,9 +62,12 @@ from ..reporting import figures as figure_module
 from ..reporting.dashboards import DashboardError, load_dashboard, save_dashboard
 from ..reporting.exports import ExportError, export_table
 from ..reporting.reports import ReportBuilder, ReportError
-from ..security.network_guard import guard_status, install_network_guard
+from ..security.network_guard import guard_status, install_network_guard, permit_explicit_setup_network
+from ..security.local_storage import activate_private_umask, secure_data_tree
+from ..security.process_lease import DataDirectoryLease
 from ..importers.external_scores import EXTERNAL_CONDITION_ID, ExternalScoreImportError, ExternalScoreImporter
 from ..importers.owner_supplied import (
+    MAX_UPLOAD_BYTES,
     SOURCE_KIND as OWNER_SOURCE_KIND,
     OwnerSuppliedAdmission,
     OwnerSuppliedError,
@@ -57,17 +80,52 @@ from ..transforms.derived import DerivedSetError, build_derived_set
 from ..transforms.degradation import DegradationAnalysisError, DegradationAnalysisJob, DegradationRequest
 from ..transforms.operators import PARAMETER_NAMES
 from ..matchers.matrix import dataset_resource_of
-from ..security.purge import PurgeError, SCOPE_STATEMENT, purge_project, purge_targets
+from ..security.purge import PurgeError, SCOPE_STATEMENT, purge_project, purge_targets, reconcile_incomplete_purges
 from ..matchers.upstream import UpstreamSources
+from ..matchers.lifecycle import MatcherLifecycleError, MatcherRuntimeManager
+from ..matchers.runtime import MatcherId
 from .evidence import EvidenceError, HONESTY_STATEMENT, detection_geometry, ofiq_landmarks, pair_evidence, recompute_crop
 from ..execution.contracts import ContractValidationError, ExecutionOutcomeError
+from ..execution.bounded_executor import BoundedExecutor, ExecutorOverloaded, ExecutorReservation
 from ..provenance import artifact_identity
 from .settings import Settings
 from .store import ImmutableRecordConflict, RunStore
 
+API_CONTRACT_VERSION = "1.0.0"
+
 
 class ApiModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+async def read_bounded_request_body(request: Request, *, maximum_bytes: int) -> bytes:
+    """Read an ASGI body incrementally and stop before it can exceed the admission cap."""
+
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_bytes = int(content_length)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail="Content-Length must be an integer") from error
+        if declared_bytes < 0:
+            raise HTTPException(status_code=400, detail="Content-Length cannot be negative")
+        if declared_bytes > maximum_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"request body exceeds the {maximum_bytes}-byte upload cap",
+                headers={"X-QualSight-Bytes-Read": "0"},
+            )
+
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > maximum_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"request body exceeds the {maximum_bytes}-byte upload cap",
+                headers={"X-QualSight-Bytes-Read": str(len(body))},
+            )
+        body.extend(chunk)
+    return bytes(body)
 
 
 class MeasureOut(ApiModel):
@@ -108,7 +166,7 @@ class OwnerManifestImportRequest(ApiModel):
 
 
 class OwnerPairsRequest(ApiModel):
-    seed: int = Field(ge=0)
+    seed: int = Field(ge=ANALYSIS_PARAMETER_CONTRACTS["owner_pair_seed"]["minimum"])
     max_mated_pairs_per_subject: int = Field(default=6, ge=1, le=1000)
     nonmated_multiple: float = Field(default=1.0, gt=0, le=100)
 
@@ -118,11 +176,17 @@ class UtilityAnalysisRequest(ApiModel):
     quality_job_id: str = Field(min_length=1)
     quality_measure: str = Field(default="UnifiedQualityScore", min_length=1)
     pair_quality_policy: str = Field(default="pair.quality.min", min_length=1)
-    target_fmr: float = Field(default=0.001, gt=0, lt=1)
-    matcher_threshold: float | None = None
-    quality_threshold: float | None = None
+    target_fmr: float = Field(default=0.001, gt=ANALYSIS_PARAMETER_CONTRACTS["target_fmr"]["minimum"], lt=ANALYSIS_PARAMETER_CONTRACTS["target_fmr"]["maximum"], allow_inf_nan=ANALYSIS_PARAMETER_CONTRACTS["target_fmr"]["allow_inf_nan"])
+    matcher_threshold: float | None = Field(
+        default=None,
+        allow_inf_nan=ANALYSIS_PARAMETER_CONTRACTS["matcher_threshold"]["allow_inf_nan"],
+    )
+    quality_threshold: float | None = Field(
+        default=None,
+        allow_inf_nan=ANALYSIS_PARAMETER_CONTRACTS["quality_threshold"]["allow_inf_nan"],
+    )
     partial_interval: float = Field(default=0.2, gt=0, le=1)
-    bootstrap_replicates: int = Field(default=1000, ge=0, le=100_000)
+    bootstrap_replicates: int = Field(default=1000, ge=ANALYSIS_PARAMETER_CONTRACTS["bootstrap_replicates"]["minimum"], le=ANALYSIS_PARAMETER_CONTRACTS["bootstrap_replicates"]["maximum"])
     seed: int = Field(default=20260817, ge=0)
 
 
@@ -131,9 +195,9 @@ class CrossMatcherRequestBody(ApiModel):
     quality_job_id: str = Field(min_length=1)
     quality_measure: str = Field(default="UnifiedQualityScore", min_length=1)
     pair_quality_policy: str = Field(default="pair.quality.min", min_length=1)
-    target_fmr: float = Field(default=0.001, gt=0, lt=1)
+    target_fmr: float = Field(default=0.001, gt=ANALYSIS_PARAMETER_CONTRACTS["target_fmr"]["minimum"], lt=ANALYSIS_PARAMETER_CONTRACTS["target_fmr"]["maximum"], allow_inf_nan=ANALYSIS_PARAMETER_CONTRACTS["target_fmr"]["allow_inf_nan"])
     partial_interval: float = Field(default=0.2, gt=0, le=1)
-    bootstrap_replicates: int = Field(default=1000, ge=0, le=100_000)
+    bootstrap_replicates: int = Field(default=1000, ge=ANALYSIS_PARAMETER_CONTRACTS["bootstrap_replicates"]["minimum"], le=ANALYSIS_PARAMETER_CONTRACTS["bootstrap_replicates"]["maximum"])
     seed: int = Field(default=20260817, ge=0)
 
 
@@ -201,7 +265,9 @@ class DegradationAnalysisRequestBody(ApiModel):
     baseline_quality_job_id: str | None = None
     matcher_id: str = Field(min_length=1)
     condition_id: str = Field(min_length=1)
-    matcher_threshold: float
+    matcher_threshold: float = Field(
+        allow_inf_nan=ANALYSIS_PARAMETER_CONTRACTS["matcher_threshold"]["allow_inf_nan"]
+    )
     protocol_id: str | None = None
 
 
@@ -410,35 +476,200 @@ def _resource_out(engine: OFIQQualityEngine, resource_id: str) -> ResourceOut:
     )
 
 
+def _validation_error_json(value: Any) -> Any:
+    """Preserve validation detail while making rejected non-finite inputs JSON-safe."""
+
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else repr(value)
+    if isinstance(value, dict):
+        return {str(key): _validation_error_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_validation_error_json(item) for item in value]
+    return str(value)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_environment()
     state: dict[str, Any] = {}
+    process_started = time.monotonic()
+    request_metrics_lock = threading.Lock()
+    request_metrics: dict[str, Any] = {
+        "requests": 0,
+        "responses_by_status": {},
+        "total_duration_seconds": 0.0,
+    }
+    operations_logger = logging.getLogger("qualsight.operations")
+
+    activate_private_umask()
+    secure_data_tree(settings.data_dir, protected_roots=(settings.repository_root, Path.home()))
 
     if settings.network_guard:
         install_network_guard()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        state["engine"] = OFIQQualityEngine(
-            registry_path=settings.registry_path,
-            repository_root=settings.repository_root,
-            runtime_resource_id=settings.runtime_resource_id,
-            input_resource_ids=settings.input_resource_ids,
-        )
-        state["store"] = RunStore(settings.database_path)
+        lease = DataDirectoryLease.acquire(settings.data_dir, owner="api-server")
+        cleanup_lock = threading.Lock()
+        cleaned = {"value": False}
+
+        def close_runtime_resources() -> None:
+            with cleanup_lock:
+                if cleaned["value"]:
+                    return
+                cleaned["value"] = True
+            if "matcher_manager" in state:
+                state["matcher_manager"].unload_all()
+            if "store" in state:
+                state["store"].close()
+            lease.close()
+
         try:
+            state["engine"] = OFIQQualityEngine(
+                registry_path=settings.registry_path,
+                repository_root=settings.repository_root,
+                runtime_resource_id=settings.runtime_resource_id,
+                input_resource_ids=settings.input_resource_ids,
+                execution_timeout_seconds=settings.native_execution_timeout_seconds,
+                output_limit_bytes=settings.native_output_limit_bytes,
+            )
+            state["store"] = RunStore(settings.database_path)
+            state["reconciled_operations"] = state["store"].reconcile_interrupted_operations()
+            state["reconciled_purges"] = reconcile_incomplete_purges(
+                state["store"], data_dir=settings.data_dir
+            )
+            state["upstream"] = UpstreamSources(
+                settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json",
+                settings.data_dir,
+            )
+            state["matcher_manager"] = MatcherRuntimeManager(state["engine"].registry, state["upstream"])
             yield
         finally:
-            state["store"].close()
+            state["shutting_down"] = True
+            for quality_job in tuple(jobs.values()):
+                quality_job.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+            if executor.wait_for_idle(timeout_seconds=settings.shutdown_drain_seconds):
+                executor.shutdown(wait=True, cancel_futures=False)
+                close_runtime_resources()
+            else:
+                state["shutdown_drain_timed_out"] = True
+
+                def reap_after_scientific_work() -> None:
+                    while not executor.wait_for_idle(timeout_seconds=60.0):
+                        continue
+                    executor.shutdown(wait=True, cancel_futures=False)
+                    close_runtime_resources()
+
+                threading.Thread(
+                    target=reap_after_scientific_work,
+                    name="qualsight-shutdown-reaper",
+                    daemon=True,
+                ).start()
 
     app = FastAPI(title="QualSight", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error_response(_: Request, error: RequestValidationError) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": _validation_error_json(error.errors())})
+
+    @app.middleware("http")
+    async def record_structured_request(request: Request, call_next):
+        request_id = uuid.uuid4().hex
+        started = time.perf_counter()
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            response.headers["X-QualSight-Request-ID"] = request_id
+            response.headers["X-QualSight-API-Version"] = API_CONTRACT_VERSION
+            return response
+        finally:
+            duration = time.perf_counter() - started
+            with request_metrics_lock:
+                request_metrics["requests"] += 1
+                key = str(status_code)
+                request_metrics["responses_by_status"][key] = request_metrics["responses_by_status"].get(key, 0) + 1
+                request_metrics["total_duration_seconds"] += duration
+            operations_logger.info(
+                json.dumps(
+                    {
+                        "event": "http_request",
+                        "request_id": request_id,
+                        "method": request.method,
+                        "path": request.url.path,
+                        "status": status_code,
+                        "duration_ms": round(duration * 1000, 3),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+
+    @app.middleware("http")
+    async def enforce_local_browser_boundary(request: Request, call_next):
+        """Reject DNS-rebinding hosts and cross-site browser mutations of the loopback API."""
+
+        allowed_hosts = {"127.0.0.1", "localhost"}
+        try:
+            request_host = urlsplit(f"//{request.headers.get('host', '')}").hostname
+        except ValueError:
+            request_host = None
+        if request_host not in allowed_hosts:
+            return JSONResponse(status_code=400, content={"detail": "request Host is not an admitted loopback control-plane name"})
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            origin = request.headers.get("origin")
+            if origin:
+                try:
+                    origin_host = urlsplit(origin).hostname
+                except ValueError:
+                    origin_host = None
+                if origin_host not in allowed_hosts:
+                    return JSONResponse(status_code=403, content={"detail": "cross-site mutation of the local control plane is refused"})
+        parts = request.url.path.strip("/").split("/")
+        mutation_project = (
+            parts[2]
+            if request.method in {"POST", "PUT", "PATCH", "DELETE"}
+            and len(parts) >= 3
+            and parts[:2] == ["api", "projects"]
+            and not request.url.path.endswith("/purge")
+            else None
+        )
+        if mutation_project:
+            with job_lock:
+                if mutation_project in purging_projects:
+                    return JSONResponse(status_code=409, content={"detail": "project purge is in progress; new work is refused"})
+                active_project_mutations[mutation_project] = active_project_mutations.get(mutation_project, 0) + 1
+        try:
+            return await call_next(request)
+        finally:
+            if mutation_project:
+                with job_lock:
+                    remaining = active_project_mutations[mutation_project] - 1
+                    if remaining:
+                        active_project_mutations[mutation_project] = remaining
+                    else:
+                        del active_project_mutations[mutation_project]
 
     def engine() -> OFIQQualityEngine:
         return state["engine"]
 
     def store() -> RunStore:
         return state["store"]
+
+    def matcher_manager() -> MatcherRuntimeManager:
+        return state["matcher_manager"]
+
+    def matcher_upstream() -> UpstreamSources:
+        return state["upstream"]
+
+    def verification_dataset_store() -> VerificationDatasetStore:
+        return VerificationDatasetStore(
+            settings.repository_root / "resources" / "manifests" / DATASET_ACQUISITION_MANIFEST_NAME,
+            settings.data_dir,
+        )
 
     def projects() -> ProjectService:
         return ProjectService(store(), engine(), actor_id=settings.actor)
@@ -455,9 +686,98 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         store().record_audit_event(event)
 
+    def record_system_action(event_type: str, subject_id: str, details: dict[str, Any]) -> dict[str, Any]:
+        occurred = datetime.now(timezone.utc).astimezone().isoformat()
+        payload = {"actor_id": settings.actor, "event_type": event_type, "subject_id": subject_id, "occurred_at": occurred, "details": details}
+        event_id = f"system-event:sha256:{hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()}"
+        record = {"system_event_id": event_id, **payload}
+        evidence = store().record_system_event(record)
+        return {**record, "evidence_sha256": evidence}
+
     jobs: dict[str, OFIQBatchJob] = {}
     job_lock = threading.Lock()
-    executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="qualsight-batch")
+    purging_projects: set[str] = set()
+    active_project_mutations: dict[str, int] = {}
+    active_global_mutations = {"count": 0}
+    matcher_control_lock = threading.RLock()
+    executor = BoundedExecutor(
+        max_workers=settings.scientific_workers,
+        max_pending=settings.scientific_pending,
+        thread_name_prefix="qualsight-scientific",
+    )
+
+    def reserve_scientific_work(operation_id: str) -> ExecutorReservation:
+        try:
+            return executor.reserve()
+        except ExecutorOverloaded as error:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "SCIENTIFIC_WORK_CAPACITY_EXHAUSTED",
+                    "operation_id": operation_id,
+                    "message": str(error),
+                    "capacity": executor.status(),
+                },
+            ) from error
+
+    def admit_scientific_operation(
+        *,
+        operation_id: str,
+        operation_kind: str,
+        project_id: str,
+        request: dict[str, Any],
+        output_path: Path,
+    ) -> tuple[dict[str, Any], ExecutorReservation | None]:
+        """Reserve bounded capacity before making a new operation durable."""
+
+        existing = store().operation(operation_id)
+        if existing is not None:
+            return existing, None
+        reservation = reserve_scientific_work(operation_id)
+        try:
+            operation, created = store().admit_operation(
+                operation_id=operation_id,
+                operation_kind=operation_kind,
+                project_id=project_id,
+                request=request,
+                output_path=output_path,
+            )
+        except BaseException:
+            reservation.release()
+            raise
+        if not created:
+            reservation.release()
+            return operation, None
+        return operation, reservation
+
+    def require_project_not_purging_locked(project_id: str) -> None:
+        if project_id in purging_projects or store().active_purge_journal(project_id) is not None:
+            raise HTTPException(status_code=409, detail="project purge is in progress; new work is refused")
+
+    @contextmanager
+    def admitted_mutation(project_id: str | None):
+        """Keep purge mutually exclusive with one state-changing request."""
+
+        with job_lock:
+            if project_id is None:
+                if purging_projects:
+                    raise HTTPException(status_code=409, detail="a project purge is in progress; unscoped new work is refused")
+                active_global_mutations["count"] += 1
+            else:
+                require_project_not_purging_locked(project_id)
+                active_project_mutations[project_id] = active_project_mutations.get(project_id, 0) + 1
+        try:
+            yield
+        finally:
+            with job_lock:
+                if project_id is None:
+                    active_global_mutations["count"] -= 1
+                else:
+                    remaining = active_project_mutations[project_id] - 1
+                    if remaining:
+                        active_project_mutations[project_id] = remaining
+                    else:
+                        del active_project_mutations[project_id]
 
     def job_out(job: OFIQBatchJob | None, row: dict[str, Any] | None) -> JobOut:
         if job is not None:
@@ -500,6 +820,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             parquet_path=row["parquet_path"],
             engine_version=row["engine_version"],
             dataset_id=row["dataset_id"],
+        )
+
+    def operation_job_out(row: dict[str, Any]) -> JobOut:
+        request = json.loads(row["request_json"])
+        return JobOut(
+            job_id=row["operation_id"],
+            state=row["state"],
+            total=int(request["sample_count"]),
+            assessed=0,
+            failed=0,
+            integrity_failures=0,
+            not_assessed=0,
+            chunks=int(request["chunks"]),
+            started_at=row["started_at"],
+            ended_at=row["ended_at"],
+            cancellation_requested=False,
+            run_id=None,
+            error=row["error"],
+            resource_use={},
+            parquet_path=None,
+            engine_version=None,
+            dataset_id=request["dataset_id"],
         )
 
     @app.post("/api/projects/{project_id}/datasets/{dataset_id}/quality-batch", response_model=JobOut, status_code=202)
@@ -547,32 +889,54 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(status_code=409, detail="the dataset resource and the engine share no approved scope")
             purpose_scope = common[0]
         try:
-            job = OFIQBatchJob(
-                engine=engine(),
-                store=store(),
-                project=project,
-                dataset=dataset,
-                samples=samples,
-                purpose_scope=purpose_scope,
-                job_root=settings.data_dir / "jobs",
-                chunks=request.chunks,
-                selection_rule=rule,
-                execution=request.execution,
-            )
+            with job_lock:
+                require_project_not_purging_locked(project_id)
+                job = OFIQBatchJob(
+                    engine=engine(),
+                    store=store(),
+                    project=project,
+                    dataset=dataset,
+                    samples=samples,
+                    purpose_scope=purpose_scope,
+                    job_root=settings.data_dir / "jobs",
+                    chunks=request.chunks,
+                    selection_rule=rule,
+                    execution=request.execution,
+                )
+                operation, reservation = admit_scientific_operation(
+                    operation_id=job.job_id,
+                    operation_kind="QUALITY_BATCH",
+                    project_id=project_id,
+                    request={
+                        **request.model_dump(mode="json"),
+                        "dataset_id": dataset_id,
+                        "purpose_scope": purpose_scope,
+                        "sample_count": len(samples),
+                        "selection_rule": rule,
+                    },
+                    output_path=job.job_dir,
+                )
+                if reservation is None:
+                    return operation_job_out(operation)
+                jobs[job.job_id] = job
         except BatchJobError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
-        with job_lock:
-            jobs[job.job_id] = job
 
         def _run() -> None:
             try:
+                store().start_operation(job.job_id)
                 job.run()
             except Exception:  # noqa: BLE001 - state carries the error
                 pass
             finally:
+                terminal_state = job.state if job.state in {"COMPLETED", "FAILED", "CANCELLED"} else "FAILED"
+                terminal_error = job.error if terminal_state == "FAILED" else None
+                if terminal_state == "FAILED" and not terminal_error:
+                    terminal_error = f"quality batch ended from nonterminal state {job.state}"
+                store().finish_operation(job.job_id, state=terminal_state, error=terminal_error)
                 store().finish_job(job.job_id, job.ended_at.isoformat() if job.ended_at else "", job.state)
 
-        executor.submit(_run)
+        reservation.submit(_run)
         record_action(project_id, AuditEventType.RUN_STARTED, "QualityBatchJob", job.job_id, {"dataset_id": dataset_id, "samples": len(samples), "selection_rule": rule, "purpose_scope": purpose_scope})
         return job_out(job, None)
 
@@ -584,7 +948,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return job_out(job, None)
         row = store().job(job_id)
         if row is None:
-            raise HTTPException(status_code=404, detail="job is not recorded")
+            operation = store().operation(job_id)
+            if operation is None or operation["operation_kind"] != "QUALITY_BATCH":
+                raise HTTPException(status_code=404, detail="job is not recorded")
+            return operation_job_out(operation)
         return job_out(None, row)
 
     @app.post("/api/jobs/{job_id}/cancel", response_model=JobOut)
@@ -604,6 +971,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             with job_lock:
                 job = jobs.get(row["job_id"])
             items.append(job_out(job, row) if job is None else job_out(job, None))
+        recorded_ids = {row["job_id"] for row in rows}
+        items.extend(
+            operation_job_out(row)
+            for row in store().operations_for_project(project_id)
+            if row["operation_kind"] == "QUALITY_BATCH" and row["operation_id"] not in recorded_ids
+        )
         return items
 
     @app.get("/api/jobs/{job_id}/distribution")
@@ -762,6 +1135,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             evidence_sha256=_hashlib.sha256(view.project.model_dump_json().encode("utf-8")).hexdigest(),
         )
 
+    def operation_out(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "operation_id": row["operation_id"],
+            "operation_kind": row["operation_kind"],
+            "project_id": row["project_id"],
+            "state": row["state"],
+            "accepted_at": row["accepted_at"],
+            "started_at": row["started_at"],
+            "ended_at": row["ended_at"],
+            "request": json.loads(row["request_json"]),
+            "output_path": row["output_path"],
+            "error": row["error"],
+            "links": {
+                "operation": f"/api/operations/{row['operation_id']}",
+                "project": f"/api/projects/{row['project_id']}",
+            },
+        }
+
+    @app.get("/api/operations/{operation_id}")
+    def operation_status(operation_id: str) -> JSONResponse:
+        row = store().operation(operation_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="operation is not recorded")
+        return JSONResponse(content=operation_out(row))
+
+    @app.get("/api/projects/{project_id}/operations")
+    def project_operations(project_id: str) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
+        return JSONResponse(
+            content=[operation_out(row) for row in store().operations_for_project(project_id)]
+        )
+
     @app.post("/api/projects", response_model=ProjectOut, status_code=201)
     def create_project(request: ProjectCreate) -> ProjectOut:
         view = projects().create(
@@ -823,6 +1229,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if descriptor.get("source_kind") == "OWNER_SUPPLIED_LOCAL_INPUT":
             # Decision 30: the runtime grant is the scope authority for owner-supplied data.
             return None, tuple(eng.runtime.approved_scopes), tuple(eng.runtime.approved_scopes)
+        if descriptor.get("source_kind") == VERIFICATION_DATASET_SOURCE_KIND:
+            approved = tuple(descriptor.get("approved_scopes", ()))
+            common = tuple(scope for scope in approved if scope in eng.runtime.approved_scopes)
+            return None, approved, common
         try:
             resource = eng.registry.resource(resource_id) if resource_id else None
         except Exception:  # noqa: BLE001 - unknown resource id in an old record
@@ -1016,40 +1426,85 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             pairs = [pair for pair in pairs if pair.pair_id in wanted]
             rule = "the registered subset-fixture pairs of the frozen protocol"
         matcher_filter = condition_filter = None
-        if leaves:
+        if leaves is not None:
             from ..matchers.matrix import LEAF_IDS
 
             wanted_leaves = {item.strip() for item in leaves.split(",") if item.strip()}
+            if not wanted_leaves:
+                raise HTTPException(status_code=422, detail="matrix leaf selection must name at least one leaf")
             unknown = wanted_leaves - set(LEAF_IDS.values())
             if unknown:
                 raise HTTPException(status_code=422, detail=f"unknown matrix leaves: {sorted(unknown)}")
             matcher_filter = tuple(sorted({m for (m, c), leaf in LEAF_IDS.items() if leaf in wanted_leaves}, key=lambda m: m.value))
             condition_filter = tuple(sorted({c for (m, c), leaf in LEAF_IDS.items() if leaf in wanted_leaves}, key=lambda c: c.value))
+            expanded_leaves = {LEAF_IDS[(matcher, condition)] for matcher in matcher_filter for condition in condition_filter}
+            if expanded_leaves != wanted_leaves:
+                raise HTTPException(
+                    status_code=422,
+                    detail="matrix leaf selection must name a complete matcher x preprocessing Cartesian product",
+                )
             rule += f" (leaf selection {sorted(wanted_leaves)}: the matcher x condition cross product of the named leaves)"
-        upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir)
         try:
-            upstream.acquire()
             extra = {}
-            if matcher_filter:
+            if matcher_filter is not None:
                 extra = {"matchers": matcher_filter, "conditions": condition_filter}
-            job = MatcherMatrixJob(
-                registry=engine().registry, registry_path=settings.registry_path, repository_root=settings.repository_root, upstream=upstream,
-                store=store(), project=project, dataset=dataset, protocol=protocol, pairs=pairs, job_root=settings.data_dir / "matrix", selection_rule=rule, **extra,
-            )
+            selected_matchers = matcher_filter if matcher_filter is not None else tuple(MatcherId)
+            matcher_manager().require_ready(selected_matchers)
+            with job_lock:
+                require_project_not_purging_locked(project_id)
+                job = MatcherMatrixJob(
+                    registry=engine().registry, registry_path=settings.registry_path, repository_root=settings.repository_root, upstream=matcher_upstream(),
+                    store=store(), project=project, dataset=dataset, protocol=protocol, pairs=pairs, job_root=settings.data_dir / "matrix", selection_rule=rule, **extra,
+                    runtime_manager=matcher_manager(),
+                    detector_workers=settings.detector_workers,
+                )
+                operation, reservation = admit_scientific_operation(
+                    operation_id=job.matrix_id,
+                    operation_kind="MATCHER_MATRIX",
+                    project_id=project_id,
+                    request={
+                        "protocol_id": protocol_id,
+                        "fixture_pairs_only": fixture_pairs_only,
+                        "leaves": leaves,
+                        "pair_count": len(job.pairs),
+                        "sample_count": len(job.sample_ids),
+                        "expected_leaf_count": job.expected_leaf_count,
+                        "selection_rule": rule,
+                    },
+                    output_path=job.job_dir,
+                )
+                if reservation is None:
+                    return JSONResponse(
+                        status_code=200,
+                        content={
+                            "matrix_id": job.matrix_id,
+                            "state": operation["state"],
+                            "error": operation["error"],
+                            "already_recorded": True,
+                        },
+                    )
+                matrices[job.matrix_id] = job
+        except HTTPException:
+            raise
         except (MatrixError, Exception) as error:  # noqa: BLE001 - surfaced as a typed HTTP error
             raise HTTPException(status_code=409, detail=str(error)) from error
-        with job_lock:
-            matrices[job.matrix_id] = job
 
         def _run() -> None:
             try:
+                store().start_operation(job.matrix_id)
                 job.run()
+                store().finish_operation(job.matrix_id, state="COMPLETED")
             except Exception as error:  # noqa: BLE001
-                job.progress = {"phase": "failed", "detail": f"{type(error).__name__}: {error}"}
+                detail = f"{type(error).__name__}: {error}"
+                job.progress = {"phase": "failed", "detail": detail}
+                store().finish_operation(job.matrix_id, state="FAILED", error=detail)
+            finally:
+                with job_lock:
+                    matrices.pop(job.matrix_id, None)
 
-        executor.submit(_run)
+        reservation.submit(_run)
         record_action(project_id, AuditEventType.RUN_STARTED, "MatcherMatrix", job.matrix_id, {"protocol_id": protocol_id, "pairs": len(job.pairs), "samples": len(job.sample_ids), "selection_rule": rule})
-        return JSONResponse(status_code=202, content={"matrix_id": job.matrix_id, "pairs": len(job.pairs), "samples": len(job.sample_ids), "progress": job.progress})
+        return JSONResponse(status_code=202, content={"matrix_id": job.matrix_id, "pairs": len(job.pairs), "samples": len(job.sample_ids), "expected_leaves": job.expected_leaf_count, "progress": job.progress})
 
     @app.post("/api/projects/{project_id}/protocols/{protocol_id}/import-external-scores", status_code=201)
     def import_external_scores(project_id: str, protocol_id: str, request: ExternalScoreImportRequest) -> JSONResponse:
@@ -1137,22 +1592,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
-        upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir)
         try:
-            upstream.acquire()
-            job = DegradationAnalysisJob(store=store(), registry=engine().registry, upstream=upstream, repository_root=settings.repository_root, project=project, request=DegradationRequest(**request.model_dump()), job_root=settings.data_dir / "analyses", actor=projects().actor)
-        except (DegradationAnalysisError, ContractValidationError) as error:
+            matcher_manager().require_ready((request.matcher_id,))
+            with job_lock:
+                require_project_not_purging_locked(project_id)
+                job = DegradationAnalysisJob(store=store(), registry=engine().registry, upstream=matcher_upstream(), repository_root=settings.repository_root, project=project, request=DegradationRequest(**request.model_dump()), job_root=settings.data_dir / "analyses", actor=projects().actor, runtime_manager=matcher_manager())
+                operation, reservation = admit_scientific_operation(
+                    operation_id=job.analysis_id,
+                    operation_kind="DEGRADATION_ANALYSIS",
+                    project_id=project_id,
+                    request=request.model_dump(mode="json"),
+                    output_path=job.directory,
+                )
+                if reservation is None:
+                    return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": operation["state"], "error": operation["error"], "already_recorded": True})
+                degradations[job.analysis_id] = job
+        except (DegradationAnalysisError, ContractValidationError, MatcherLifecycleError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
-        with job_lock:
-            degradations[job.analysis_id] = job
 
         def _run() -> None:
             try:
+                store().start_operation(job.analysis_id)
                 job.run()
+                store().finish_operation(job.analysis_id, state="COMPLETED")
             except Exception as error:  # noqa: BLE001
-                job.progress = {"phase": "failed", "detail": f"{type(error).__name__}: {error}"}
+                detail = f"{type(error).__name__}: {error}"
+                job.progress = {"phase": "failed", "detail": detail}
+                store().finish_operation(job.analysis_id, state="FAILED", error=detail)
 
-        executor.submit(_run)
+        reservation.submit(_run)
         record_action(project_id, AuditEventType.RUN_STARTED, "DegradationAnalysis", job.analysis_id, {"derived_set_id": request.derived_set_id, "quality_job_id": request.quality_job_id, "matcher_id": request.matcher_id, "matcher_threshold": request.matcher_threshold})
         return JSONResponse(status_code=202, content={"analysis_id": job.analysis_id, "state": "RUNNING"})
 
@@ -1163,7 +1631,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             live = degradations.get(analysis_id)
         if row is None:
             if live is None:
-                raise HTTPException(status_code=404, detail="degradation analysis is not recorded")
+                operation = store().operation(analysis_id)
+                if operation is None or operation["operation_kind"] != "DEGRADATION_ANALYSIS":
+                    raise HTTPException(status_code=404, detail="degradation analysis is not recorded")
+                return JSONResponse(content={"analysis_id": analysis_id, "state": operation["state"], "progress": {"phase": operation["state"].lower(), "detail": operation["error"] or ""}, "error": operation["error"]})
             return JSONResponse(content={"analysis_id": analysis_id, "state": "FAILED" if live.progress["phase"] == "failed" else "RUNNING", "progress": live.progress, "error": live.progress["detail"] if live.progress["phase"] == "failed" else None})
         return JSONResponse(content={"analysis_id": analysis_id, "state": "COMPLETED", "run_id": row["run_id"], "summary": json.loads(row["summary_json"]), "document": json.loads((Path(row["directory"]) / "degradation.json").read_text(encoding="utf-8")), "document_sha256": row["document_sha256"]})
 
@@ -1221,22 +1692,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         protocol = store().identification_protocol(protocol_id)
         if protocol is None or protocol["project_id"] != project_id:
             raise HTTPException(status_code=404, detail="identification protocol is not recorded in this project")
-        upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir)
         try:
-            upstream.acquire()
-            job = IdentificationSearchJob(store=store(), registry=engine().registry, upstream=upstream, repository_root=settings.repository_root, project=project, protocol=protocol, entries=store().identification_entries(protocol_id), matcher_id=request.matcher_id, condition_id=request.condition_id, job_root=settings.data_dir / "identification", actor=projects().actor, purpose_scope=request.purpose_scope, quality_job_id=request.quality_job_id)
-        except (IdentificationSearchError, ContractValidationError) as error:
+            matcher_manager().require_ready((request.matcher_id,))
+            with job_lock:
+                require_project_not_purging_locked(project_id)
+                job = IdentificationSearchJob(store=store(), registry=engine().registry, upstream=matcher_upstream(), repository_root=settings.repository_root, project=project, protocol=protocol, entries=store().identification_entries(protocol_id), matcher_id=request.matcher_id, condition_id=request.condition_id, job_root=settings.data_dir / "identification", actor=projects().actor, purpose_scope=request.purpose_scope, quality_job_id=request.quality_job_id, runtime_manager=matcher_manager())
+                operation, reservation = admit_scientific_operation(
+                    operation_id=job.search_id,
+                    operation_kind="IDENTIFICATION_SEARCH",
+                    project_id=project_id,
+                    request={"protocol_id": protocol_id, **request.model_dump(mode="json")},
+                    output_path=job.directory,
+                )
+                if reservation is None:
+                    return JSONResponse(status_code=200, content={"search_id": job.search_id, "state": operation["state"], "error": operation["error"], "already_recorded": True})
+                searches[job.search_id] = job
+        except (IdentificationSearchError, ContractValidationError, MatcherLifecycleError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
-        with job_lock:
-            searches[job.search_id] = job
 
         def _run() -> None:
             try:
+                store().start_operation(job.search_id)
                 job.run()
+                store().finish_operation(job.search_id, state="COMPLETED")
             except Exception as error:  # noqa: BLE001
-                job.progress = {"phase": "failed", "detail": f"{type(error).__name__}: {error}"}
+                detail = f"{type(error).__name__}: {error}"
+                job.progress = {"phase": "failed", "detail": detail}
+                store().finish_operation(job.search_id, state="FAILED", error=detail)
 
-        executor.submit(_run)
+        reservation.submit(_run)
         record_action(project_id, AuditEventType.RUN_STARTED, "IdentificationSearch", job.search_id, {"protocol_id": protocol_id, "matcher_id": request.matcher_id, "condition_id": request.condition_id})
         return JSONResponse(status_code=202, content={"search_id": job.search_id, "state": "RUNNING", "progress": job.progress})
 
@@ -1247,7 +1731,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             live = searches.get(search_id)
         if row is None:
             if live is None:
-                raise HTTPException(status_code=404, detail="identification search is not recorded")
+                operation = store().operation(search_id)
+                if operation is None or operation["operation_kind"] != "IDENTIFICATION_SEARCH":
+                    raise HTTPException(status_code=404, detail="identification search is not recorded")
+                return JSONResponse(content={"search_id": search_id, "state": operation["state"], "progress": {"phase": operation["state"].lower(), "detail": operation["error"] or ""}, "error": operation["error"]})
             return JSONResponse(content={"search_id": search_id, "state": "FAILED" if live.progress["phase"] == "failed" else "RUNNING", "progress": live.progress, "error": live.progress["detail"] if live.progress["phase"] == "failed" else None})
         return JSONResponse(content={"search_id": search_id, "state": "COMPLETED", "run_id": row["run_id"], "summary": search_summary(row), "metrics": json.loads(row["metrics_json"]), "metrics_sha256": row["metrics_sha256"], "candidates_sha256": row["candidates_sha256"]})
 
@@ -1288,9 +1775,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with job_lock:
             job = matrices.get(matrix_id)
         rows = store().matcher_leaves(matrix_id=matrix_id)
-        if job is None and not rows:
+        operation = store().operation(matrix_id)
+        if job is None and not rows and operation is None:
             raise HTTPException(status_code=404, detail="matrix is not recorded")
-        return JSONResponse(content={"matrix_id": matrix_id, "progress": job.progress if job else {"phase": "completed" if len(rows) == 6 else "partial", "detail": f"{len(rows)} leaves recorded"}, "leaves": [leaf_summary(row) for row in rows]})
+        if job is not None:
+            expected_leaves = job.expected_leaf_count
+        elif rows:
+            expected_leaves = int(rows[0]["expected_leaf_count"])
+        else:
+            expected_leaves = int(json.loads(operation["request_json"])["expected_leaf_count"])
+        persisted_state = operation["state"] if operation is not None else ("COMPLETED" if len(rows) == expected_leaves else "FAILED")
+        persisted_progress = {
+            "phase": persisted_state.lower(),
+            "detail": operation["error"] if operation is not None and operation["error"] else f"{len(rows)}/{expected_leaves} leaves recorded",
+        }
+        live_state = "RUNNING" if job is not None and job.progress["phase"] not in {"completed", "failed"} else persisted_state
+        return JSONResponse(content={"matrix_id": matrix_id, "state": live_state, "error": operation["error"] if operation is not None else None, "expected_leaves": expected_leaves, "progress": job.progress if job else persisted_progress, "leaves": [leaf_summary(row) for row in rows]})
 
     @app.get("/api/projects/{project_id}/matcher-leaves")
     def project_matcher_leaves(project_id: str) -> JSONResponse:
@@ -1332,8 +1832,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         run_id: str,
         label: str | None = Query(default=None),
         failed_only: bool = Query(default=False),
-        min_score: float | None = Query(default=None),
-        max_score: float | None = Query(default=None),
+        min_score: float | None = Query(default=None, allow_inf_nan=ANALYSIS_PARAMETER_CONTRACTS["matcher_threshold"]["allow_inf_nan"]),
+        max_score: float | None = Query(default=None, allow_inf_nan=ANALYSIS_PARAMETER_CONTRACTS["matcher_threshold"]["allow_inf_nan"]),
         limit: int = Query(default=100, ge=1, le=10_000),
         offset: int = Query(default=0, ge=0),
     ) -> JSONResponse:
@@ -1355,7 +1855,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/matcher-runs/{run_id}/errors")
     def matcher_run_errors(
         run_id: str,
-        threshold: float | None = Query(default=None),
+        threshold: float | None = Query(default=None, allow_inf_nan=ANALYSIS_PARAMETER_CONTRACTS["matcher_threshold"]["allow_inf_nan"]),
         policy: Literal["EXCLUDE_FAILED_TRIALS", "FAILURES_AS_REJECT"] = Query(default="EXCLUDE_FAILED_TRIALS"),
         limit: int = Query(default=200, ge=1, le=10_000),
     ) -> JSONResponse:
@@ -1383,8 +1883,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         run_id: str,
         quality_job_id: str = Query(min_length=1),
         policy: str = Query(default="pair.quality.min"),
-        target_fmr: float = Query(default=0.001, gt=0, lt=1),
-        threshold: float | None = Query(default=None),
+        target_fmr: float = Query(
+            default=0.001,
+            gt=ANALYSIS_PARAMETER_CONTRACTS["target_fmr"]["minimum"],
+            lt=ANALYSIS_PARAMETER_CONTRACTS["target_fmr"]["maximum"],
+            allow_inf_nan=ANALYSIS_PARAMETER_CONTRACTS["target_fmr"]["allow_inf_nan"],
+        ),
+        threshold: float | None = Query(default=None, allow_inf_nan=ANALYSIS_PARAMETER_CONTRACTS["matcher_threshold"]["allow_inf_nan"]),
     ) -> JSONResponse:
         """ERC of one matcher Run against the UnifiedQualityScore of a recorded quality job."""
 
@@ -1460,20 +1965,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if existing is not None:
             return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": "COMPLETED", "already_recorded": True, "summary": analysis_summary(existing)})
         with job_lock:
+            require_project_not_purging_locked(project_id)
             if job.analysis_id in analyses:
                 return JSONResponse(status_code=202, content={"analysis_id": job.analysis_id, "state": analyses[job.analysis_id]["state"]})
-            analyses[job.analysis_id] = {"state": "RUNNING", "error": None}
+            operation, reservation = admit_scientific_operation(
+                operation_id=job.analysis_id,
+                operation_kind="UTILITY_ANALYSIS",
+                project_id=project_id,
+                request=request.model_dump(mode="json"),
+                output_path=job.directory,
+            )
+            if reservation is None:
+                return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": operation["state"], "error": operation["error"], "already_recorded": True})
+            analyses[job.analysis_id] = {"state": "QUEUED", "error": None, "project_id": project_id}
 
         def _run() -> None:
             try:
+                store().start_operation(job.analysis_id)
+                with job_lock:
+                    analyses[job.analysis_id] = {"state": "RUNNING", "error": None, "project_id": project_id}
                 job.run()
+                store().finish_operation(job.analysis_id, state="COMPLETED")
                 with job_lock:
-                    analyses[job.analysis_id] = {"state": "COMPLETED", "error": None}
+                    analyses[job.analysis_id] = {"state": "COMPLETED", "error": None, "project_id": project_id}
             except Exception as error:  # noqa: BLE001 - surfaced through the status endpoint
+                detail = f"{type(error).__name__}: {error}"
+                store().finish_operation(job.analysis_id, state="FAILED", error=detail)
                 with job_lock:
-                    analyses[job.analysis_id] = {"state": "FAILED", "error": f"{type(error).__name__}: {error}"}
+                    analyses[job.analysis_id] = {"state": "FAILED", "error": detail, "project_id": project_id}
 
-        executor.submit(_run)
+        reservation.submit(_run)
         record_action(project_id, AuditEventType.RUN_STARTED, "UtilityAnalysis", job.analysis_id, {"matcher_run_id": request.matcher_run_id, "quality_job_id": request.quality_job_id, "quality_measure": request.quality_measure, "pair_quality_policy": request.pair_quality_policy})
         return JSONResponse(status_code=202, content={"analysis_id": job.analysis_id, "state": "RUNNING"})
 
@@ -1488,7 +2009,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             live = analyses.get(analysis_id)
         if row is None:
             if live is None:
-                raise HTTPException(status_code=404, detail="utility analysis is not recorded")
+                operation = store().operation(analysis_id)
+                if operation is None or operation["operation_kind"] != "UTILITY_ANALYSIS":
+                    raise HTTPException(status_code=404, detail="utility analysis is not recorded")
+                return JSONResponse(content={"analysis_id": analysis_id, "state": operation["state"], "error": operation["error"]})
             return JSONResponse(content={"analysis_id": analysis_id, "state": live["state"], "error": live["error"]})
         content: dict[str, Any] = {"analysis_id": analysis_id, "state": "COMPLETED", "error": None, "summary": analysis_summary(row)}
         if include == "full":
@@ -1571,20 +2095,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if existing is not None:
             return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": "COMPLETED", "already_recorded": True, "summary": cross_summary(existing)})
         with job_lock:
+            require_project_not_purging_locked(project_id)
             if job.analysis_id in cross_jobs:
                 return JSONResponse(status_code=202, content={"analysis_id": job.analysis_id, "state": cross_jobs[job.analysis_id]["state"]})
-            cross_jobs[job.analysis_id] = {"state": "RUNNING", "error": None}
+            operation, reservation = admit_scientific_operation(
+                operation_id=job.analysis_id,
+                operation_kind="CROSS_MATCHER_ANALYSIS",
+                project_id=project_id,
+                request=request.model_dump(mode="json"),
+                output_path=job.directory,
+            )
+            if reservation is None:
+                return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": operation["state"], "error": operation["error"], "already_recorded": True})
+            cross_jobs[job.analysis_id] = {"state": "QUEUED", "error": None, "project_id": project_id}
 
         def _run() -> None:
             try:
+                store().start_operation(job.analysis_id)
+                with job_lock:
+                    cross_jobs[job.analysis_id] = {"state": "RUNNING", "error": None, "project_id": project_id}
                 job.run()
+                store().finish_operation(job.analysis_id, state="COMPLETED")
                 with job_lock:
-                    cross_jobs[job.analysis_id] = {"state": "COMPLETED", "error": None}
+                    cross_jobs[job.analysis_id] = {"state": "COMPLETED", "error": None, "project_id": project_id}
             except Exception as error:  # noqa: BLE001
+                detail = f"{type(error).__name__}: {error}"
+                store().finish_operation(job.analysis_id, state="FAILED", error=detail)
                 with job_lock:
-                    cross_jobs[job.analysis_id] = {"state": "FAILED", "error": f"{type(error).__name__}: {error}"}
+                    cross_jobs[job.analysis_id] = {"state": "FAILED", "error": detail, "project_id": project_id}
 
-        executor.submit(_run)
+        reservation.submit(_run)
         record_action(project_id, AuditEventType.RUN_STARTED, "CrossMatcherAnalysis", job.analysis_id, {"matrix_id": request.matrix_id, "quality_job_id": request.quality_job_id})
         return JSONResponse(status_code=202, content={"analysis_id": job.analysis_id, "state": "RUNNING"})
 
@@ -1599,7 +2139,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             live = cross_jobs.get(analysis_id)
         if row is None:
             if live is None:
-                raise HTTPException(status_code=404, detail="cross-matcher analysis is not recorded")
+                operation = store().operation(analysis_id)
+                if operation is None or operation["operation_kind"] != "CROSS_MATCHER_ANALYSIS":
+                    raise HTTPException(status_code=404, detail="cross-matcher analysis is not recorded")
+                return JSONResponse(content={"analysis_id": analysis_id, "state": operation["state"], "error": operation["error"]})
             return JSONResponse(content={"analysis_id": analysis_id, "state": live["state"], "error": live["error"]})
         content: dict[str, Any] = {"analysis_id": analysis_id, "state": "COMPLETED", "error": None, "summary": cross_summary(row)}
         if include == "full":
@@ -1653,15 +2196,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/annotations", status_code=201)
     def create_annotation(request: AnnotationCreate) -> JSONResponse:
+        with job_lock:
+            require_project_not_purging_locked(request.project_id)
+            active_project_mutations[request.project_id] = active_project_mutations.get(request.project_id, 0) + 1
         try:
-            projects().require_writable(request.project_id)
-        except KeyError as error:
-            raise HTTPException(status_code=404, detail="project is not recorded") from error
-        except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        note = store().record_annotation(project_id=request.project_id, subject_type=request.subject_type, subject_id=request.subject_id, actor_id=projects().actor, text=request.text, context=request.context)
-        record_action(request.project_id, AuditEventType.ANNOTATION_MODIFIED, request.subject_type, request.subject_id, {"annotation_id": note["annotation_id"], "evidence_sha256": note["evidence_sha256"]})
-        return JSONResponse(status_code=201, content=note)
+            try:
+                projects().require_writable(request.project_id)
+            except KeyError as error:
+                raise HTTPException(status_code=404, detail="project is not recorded") from error
+            except ProjectLifecycleError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            note = store().record_annotation(project_id=request.project_id, subject_type=request.subject_type, subject_id=request.subject_id, actor_id=projects().actor, text=request.text, context=request.context)
+            record_action(request.project_id, AuditEventType.ANNOTATION_MODIFIED, request.subject_type, request.subject_id, {"annotation_id": note["annotation_id"], "evidence_sha256": note["evidence_sha256"]})
+            return JSONResponse(status_code=201, content=note)
+        finally:
+            with job_lock:
+                remaining = active_project_mutations[request.project_id] - 1
+                if remaining:
+                    active_project_mutations[request.project_id] = remaining
+                else:
+                    del active_project_mutations[request.project_id]
 
     @app.get("/api/annotations")
     def list_annotations(subject_id: str | None = Query(default=None), project_id: str | None = Query(default=None)) -> JSONResponse:
@@ -1671,10 +2225,140 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # -- Phase 5: figures, dashboards, reports, exports, bundles, reproduction ------
 
+    def figure_provenance_file_sha256(row: dict[str, Any], provenance: dict[str, Any]) -> str:
+        recorded_sha256 = row["provenance_sha256"]
+        legacy_database_sha256 = hashlib.sha256(row["provenance_json"].encode("utf-8")).hexdigest()
+        if recorded_sha256 != legacy_database_sha256:
+            return recorded_sha256
+        original_bytes = (json.dumps(provenance, indent=2, sort_keys=True, allow_nan=False) + "\n").encode("utf-8")
+        return hashlib.sha256(original_bytes).hexdigest()
+
     def figure_summary(row: dict[str, Any]) -> dict[str, Any]:
         provenance = json.loads(row["provenance_json"])
-        return {"figure_id": row["figure_id"], "kind": row["kind"], "title": row["title"], "created_at": row["created_at"], "source_run_ids": json.loads(row["source_run_ids_json"]), "provenance_sha256": row["provenance_sha256"],
+        return {"figure_id": row["figure_id"], "kind": row["kind"], "title": row["title"], "created_at": row["created_at"], "source_run_ids": json.loads(row["source_run_ids_json"]), "provenance_sha256": figure_provenance_file_sha256(row, provenance),
                 "files": {name: f"/api/figures/{row['figure_id']}/file?format={name}" for name in ("png", "svg", "pdf", "csv", "provenance")}, "sha256": {name: item["sha256"] for name, item in provenance["files"].items()}, "metric_definitions": provenance["metric_definitions"], "thresholds": provenance["thresholds"]}
+
+    def require_recorded_file(path: Path, expected_sha256: str, label: str) -> str:
+        if not path.is_file():
+            raise HTTPException(status_code=410, detail=f"{label} file is missing")
+        observed = artifact_identity(path).sha256
+        if observed != expected_sha256:
+            raise HTTPException(status_code=409, detail=f"{label} bytes drifted from their recorded SHA-256")
+        return observed
+
+    def open_recorded_snapshot(path: Path, expected_sha256: str, label: str) -> tuple[Any, str]:
+        """Copy and verify one open inode, then serve only that immutable snapshot."""
+
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path, flags)
+        except FileNotFoundError as error:
+            raise HTTPException(status_code=410, detail=f"{label} file is missing") from error
+        except OSError as error:
+            raise HTTPException(status_code=409, detail=f"{label} file cannot be opened safely: {error}") from error
+        source = os.fdopen(descriptor, "rb")
+        snapshot = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
+        try:
+            before = os.fstat(source.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                raise HTTPException(status_code=409, detail=f"{label} is not a regular file")
+            digest = hashlib.sha256()
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+                snapshot.write(chunk)
+            after = os.fstat(source.fileno())
+            if (
+                (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+            ):
+                raise HTTPException(status_code=409, detail=f"{label} changed while it was being verified")
+            observed = digest.hexdigest()
+            if observed != expected_sha256:
+                raise HTTPException(status_code=409, detail=f"{label} bytes drifted from their recorded SHA-256")
+            snapshot.seek(0)
+            return snapshot, observed
+        except Exception:
+            snapshot.close()
+            raise
+        finally:
+            source.close()
+
+    def recorded_snapshot_response(
+        snapshot: Any,
+        *,
+        media_type: str,
+        filename: str | None,
+        headers: dict[str, str],
+    ) -> StreamingResponse:
+        snapshot.seek(0, os.SEEK_END)
+        content_length = snapshot.tell()
+        snapshot.seek(0)
+
+        def body() -> Any:
+            try:
+                while chunk := snapshot.read(1024 * 1024):
+                    yield chunk
+            finally:
+                snapshot.close()
+
+        response_headers = dict(headers)
+        response_headers["Content-Length"] = str(content_length)
+        if filename is not None:
+            response_headers["Content-Disposition"] = f"attachment; filename*=utf-8''{quote(filename)}"
+        return StreamingResponse(body(), media_type=media_type, headers=response_headers)
+
+    def recorded_download(path: Path, expected_sha256: str | None, label: str, href: str) -> dict[str, Any]:
+        if not expected_sha256:
+            return {
+                "state": "UNANCHORED",
+                "reason": f"legacy {label} has no database-anchored SHA-256; regenerate it before download",
+                "href": None,
+            }
+        try:
+            require_recorded_file(path, expected_sha256, label)
+        except HTTPException as error:
+            return {
+                "state": "MISSING" if error.status_code == 410 else "DRIFTED",
+                "reason": str(error.detail),
+                "href": None,
+            }
+        return {"state": "VERIFIED", "reason": None, "href": href}
+
+    def report_summary(row: dict[str, Any]) -> dict[str, Any]:
+        downloads = {
+            format_name: recorded_download(
+                Path(row["directory"]) / f"report.{format_name}",
+                row[f"{format_name}_sha256"],
+                f"report {format_name}",
+                f"/api/reports/{row['report_id']}/file?format={format_name}",
+            )
+            for format_name in ("html", "pdf", "json")
+        }
+        return {
+            "report_id": row["report_id"],
+            "title": row["title"],
+            "created_at": row["created_at"],
+            "created_by": row["created_by"],
+            "html_sha256": row["html_sha256"],
+            "pdf_sha256": row["pdf_sha256"],
+            "dataset_id": json.loads(row["spec_json"]).get("dataset_id"),
+            "downloads": downloads,
+            "links": {
+                format_name: download["href"]
+                for format_name, download in downloads.items()
+                if download["href"] is not None
+            },
+        }
+
+    def bundle_summary(row: dict[str, Any]) -> dict[str, Any]:
+        href = f"/api/bundles/{row['bundle_id']}/file"
+        download = recorded_download(Path(row["path"]), row["sha256"], "bundle", href)
+        return {
+            **{key: value for key, value in row.items() if key != "manifest_json"},
+            "manifest": json.loads(row["manifest_json"]),
+            "download": download,
+            "links": {"download": href} if download["href"] is not None else {},
+        }
 
     @app.post("/api/projects/{project_id}/figures", status_code=201)
     def create_figure(project_id: str, request: FigureCreate) -> JSONResponse:
@@ -1705,7 +2389,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(content={**figure_summary(row), "provenance": json.loads(row["provenance_json"])})
 
     @app.get("/api/figures/{figure_id}/file")
-    def figure_file(figure_id: str, format: Literal["png", "svg", "pdf", "csv", "provenance"] = Query(default="png")) -> FileResponse:
+    def figure_file(figure_id: str, format: Literal["png", "svg", "pdf", "csv", "provenance"] = Query(default="png")) -> StreamingResponse:
         row = store().figure(figure_id)
         if row is None:
             raise HTTPException(status_code=404, detail="figure is not recorded")
@@ -1716,9 +2400,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         else:
             path = Path(provenance["files"][format]["path"])
             media = {"png": "image/png", "svg": "image/svg+xml", "pdf": "application/pdf", "csv": "text/csv"}[format]
-        if not path.exists():
-            raise HTTPException(status_code=410, detail="figure file is missing")
-        return FileResponse(str(path), media_type=media, filename=f"{figure_id.replace(':', '_')}.{'provenance.json' if format == 'provenance' else format}")
+        if format == "provenance":
+            if not path.is_file():
+                raise HTTPException(status_code=410, detail="figure provenance file is missing")
+            expected_sha256 = figure_provenance_file_sha256(row, provenance)
+            snapshot, observed_sha256 = open_recorded_snapshot(path, expected_sha256, "figure provenance")
+            try:
+                observed_record = json.loads(snapshot.read().decode("utf-8"))
+                snapshot.seek(0)
+            except (UnicodeDecodeError, ValueError) as error:
+                snapshot.close()
+                raise HTTPException(status_code=409, detail=f"figure provenance is unreadable: {error}") from error
+            if observed_record != provenance:
+                snapshot.close()
+                raise HTTPException(status_code=409, detail="figure provenance content drifted from its recorded evidence")
+        else:
+            snapshot, observed_sha256 = open_recorded_snapshot(path, provenance["files"][format]["sha256"], "figure")
+        return recorded_snapshot_response(snapshot, media_type=media, filename=f"{figure_id.replace(':', '_')}.{'provenance.json' if format == 'provenance' else format}", headers={"X-QualSight-Sha256": observed_sha256})
 
     @app.post("/api/projects/{project_id}/dashboards", status_code=201)
     def create_dashboard(project_id: str, request: DashboardCreate) -> JSONResponse:
@@ -1736,7 +2434,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/projects/{project_id}/dashboards")
     def project_dashboards(project_id: str) -> JSONResponse:
-        return JSONResponse(content=[{"dashboard_id": row["dashboard_id"], "name": row["name"], "template": row["template"], "version": row["version"], "supersedes": row["supersedes"], "created_at": row["created_at"], "layout_sha256": row["evidence_sha256"], "panels": len(json.loads(row["layout_json"])["panels"])} for row in store().dashboards(project_id=project_id)])
+        return JSONResponse(content=[{"dashboard_id": row["dashboard_id"], "name": row["name"], "template": row["template"], "version": row["version"], "supersedes": row["supersedes"], "created_at": row["created_at"], "layout_sha256": row["evidence_sha256"], "panels": len(json.loads(row["layout_json"])["panels"]), "panel_run_ids": json.loads(row["panel_run_ids_json"])} for row in store().dashboards(project_id=project_id)])
 
     @app.get("/api/dashboards/{dashboard_id}")
     def dashboard_detail(dashboard_id: str) -> JSONResponse:
@@ -1758,21 +2456,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ReportError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         record_action(project_id, AuditEventType.ARTIFACT_EXPORTED, "Report", record["report_id"], {"title": record["title"], "image_policy": record["image_policy"], "images_embedded": record["images_embedded"], "images_withheld": record["images_withheld"], "html_sha256": record["files"]["html"]["sha256"], "pdf_sha256": record["files"]["pdf"]["sha256"]})
-        return JSONResponse(status_code=201, content={**record, "links": {"html": f"/api/reports/{record['report_id']}/file?format=html", "pdf": f"/api/reports/{record['report_id']}/file?format=pdf", "json": f"/api/reports/{record['report_id']}/file?format=json"}})
+        summary = report_summary(store().report(record["report_id"]))
+        return JSONResponse(status_code=201, content={**record, "dataset_id": record["spec"].get("dataset_id"), "downloads": summary["downloads"], "links": summary["links"]})
 
     @app.get("/api/projects/{project_id}/reports")
     def project_reports(project_id: str) -> JSONResponse:
-        return JSONResponse(content=[{"report_id": row["report_id"], "title": row["title"], "created_at": row["created_at"], "created_by": row["created_by"], "html_sha256": row["html_sha256"], "pdf_sha256": row["pdf_sha256"], "links": {"html": f"/api/reports/{row['report_id']}/file?format=html", "pdf": f"/api/reports/{row['report_id']}/file?format=pdf", "json": f"/api/reports/{row['report_id']}/file?format=json"}} for row in store().reports(project_id=project_id)])
+        return JSONResponse(content=[report_summary(row) for row in store().reports(project_id=project_id)])
 
     @app.get("/api/reports/{report_id}/file")
-    def report_file(report_id: str, format: Literal["html", "pdf", "json", "provenance"] = Query(default="html")) -> FileResponse:
+    def report_file(report_id: str, format: Literal["html", "pdf", "json", "provenance"] = Query(default="html")) -> StreamingResponse:
         row = store().report(report_id)
         if row is None:
             raise HTTPException(status_code=404, detail="report is not recorded")
         name = {"html": "report.html", "pdf": "report.pdf", "json": "report.json", "provenance": "report.provenance.json"}[format]
         path = Path(row["directory"]) / name
         media = {"html": "text/html", "pdf": "application/pdf", "json": "application/json", "provenance": "application/json"}[format]
-        return FileResponse(str(path), media_type=media, filename=f"{report_id.replace(':', '_')}-{name}")
+        expected_sha256 = {
+            "html": row["html_sha256"],
+            "pdf": row["pdf_sha256"],
+            "json": row["json_sha256"],
+            "provenance": row["provenance_sha256"],
+        }[format]
+        if not expected_sha256:
+            raise HTTPException(status_code=409, detail=f"legacy report has no database-anchored {format} SHA-256; regenerate it before download")
+        snapshot, observed_sha256 = open_recorded_snapshot(path, expected_sha256, "report provenance" if format == "provenance" else "report")
+        if format == "provenance":
+            try:
+                provenance_record = json.loads(snapshot.read().decode("utf-8"))
+                snapshot.seek(0)
+            except (UnicodeDecodeError, ValueError) as error:
+                snapshot.close()
+                raise HTTPException(status_code=409, detail=f"report provenance is unreadable: {error}") from error
+            if provenance_record.get("report_id") != row["report_id"] or provenance_record.get("project_id") != row["project_id"]:
+                snapshot.close()
+                raise HTTPException(status_code=409, detail="report provenance identity drifted from its database record")
+            if provenance_record.get("provenance") != json.loads(row["provenance_json"]):
+                snapshot.close()
+                raise HTTPException(status_code=409, detail="report provenance content drifted from its database record")
+            database_file_hashes = {"html": row["html_sha256"], "pdf": row["pdf_sha256"], "json": row["json_sha256"]}
+            if {key: provenance_record.get("files", {}).get(key, {}).get("sha256") for key in database_file_hashes} != database_file_hashes:
+                snapshot.close()
+                raise HTTPException(status_code=409, detail="report provenance file hashes drifted from their database records")
+        return recorded_snapshot_response(snapshot, media_type=media, filename=f"{report_id.replace(':', '_')}-{name}", headers={"X-QualSight-Sha256": observed_sha256})
 
     def _project_of_ref(category: str, ref: str) -> str | None:
         if category == "quality_results":
@@ -1789,7 +2514,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return None
 
     @app.get("/api/exports/{category}")
-    def export_category(category: str, ref: str = Query(min_length=1), format: Literal["csv", "json", "parquet"] = Query(default="csv")) -> FileResponse:
+    def export_category(category: str, ref: str = Query(min_length=1), format: Literal["csv", "json", "parquet"] = Query(default="csv")) -> StreamingResponse:
         try:
             record = export_table(store(), category=category, ref=ref, fmt=format, root=settings.data_dir / "exports")
         except ExportError as error:
@@ -1798,7 +2523,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         project_of_export = record["source"].get("project_id") or _project_of_ref(category, ref)
         if project_of_export:
             record_action(project_of_export, AuditEventType.ARTIFACT_EXPORTED, "Export", record["export_id"], {"category": category, "ref": ref, "format": format, "rows": record["rows"], "sha256": record["sha256"], "classification": record["classification"]})
-        return FileResponse(record["path"], media_type=media, filename=f"{category}-{ref[-12:]}.{format}", headers={"X-QualSight-Export-Id": record["export_id"], "X-QualSight-Export-Sha256": record["sha256"], "X-QualSight-Export-Rows": str(record["rows"]), "X-QualSight-Classification": record["classification"]})
+        snapshot, observed_sha256 = open_recorded_snapshot(Path(record["path"]), record["sha256"], "export")
+        return recorded_snapshot_response(snapshot, media_type=media, filename=f"{category}-{ref[-12:]}.{format}", headers={"X-QualSight-Export-Id": record["export_id"], "X-QualSight-Export-Sha256": observed_sha256, "X-QualSight-Export-Rows": str(record["rows"]), "X-QualSight-Classification": record["classification"]})
 
     @app.post("/api/projects/{project_id}/bundles", status_code=201)
     def create_bundle(project_id: str, request: BundleCreate) -> JSONResponse:
@@ -1810,29 +2536,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except bundle_module.BundleError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         record_action(project_id, AuditEventType.ARTIFACT_EXPORTED, "Bundle", record["bundle_id"], {"run_id": request.run_id, "sha256": record["sha256"], "size_bytes": record["size_bytes"]})
-        return JSONResponse(status_code=201, content={**record, "links": {"download": f"/api/bundles/{record['bundle_id']}/file"}})
+        summary = bundle_summary(next(row for row in store().experiment_bundles(project_id=project_id) if row["bundle_id"] == record["bundle_id"]))
+        return JSONResponse(status_code=201, content={**record, "download": summary["download"], "links": summary["links"]})
 
     @app.get("/api/projects/{project_id}/bundles")
     def project_bundles(project_id: str) -> JSONResponse:
-        return JSONResponse(content=[{**{k: v for k, v in row.items() if k != "manifest_json"}, "manifest": json.loads(row["manifest_json"]), "links": {"download": f"/api/bundles/{row['bundle_id']}/file"}} for row in store().experiment_bundles(project_id=project_id)])
+        return JSONResponse(content=[bundle_summary(row) for row in store().experiment_bundles(project_id=project_id)])
 
     @app.get("/api/bundles/{bundle_id}/file")
-    def bundle_file(bundle_id: str) -> FileResponse:
+    def bundle_file(bundle_id: str) -> StreamingResponse:
         rows = [row for row in store().experiment_bundles() if row["bundle_id"] == bundle_id]
         if not rows:
             raise HTTPException(status_code=404, detail="bundle is not recorded")
-        return FileResponse(rows[0]["path"], media_type="application/zip", filename=Path(rows[0]["path"]).name)
+        path = Path(rows[0]["path"])
+        snapshot, observed_sha256 = open_recorded_snapshot(path, rows[0]["sha256"], "bundle")
+        return recorded_snapshot_response(snapshot, media_type="application/zip", filename=path.name, headers={"X-QualSight-Sha256": observed_sha256})
 
     @app.post("/api/reproductions", status_code=201)
     def reproduce(request: ReproduceRequest) -> JSONResponse:
         path = Path(request.bundle_path)
         if not path.exists():
             raise HTTPException(status_code=404, detail="bundle file does not exist")
-        result = bundle_module.reproduce_bundle(path, store=store(), registry=engine().registry, repository_root=settings.repository_root, work_root=settings.data_dir / "reproductions", project_service=projects(), engine=engine())
-        original = store().run(result.original_run_id)
-        if original is not None:
-            record_action(original[0].project_id, AuditEventType.RUN_COMPLETED, "Reproduction", result.reproduction_id, {"original_run_id": result.original_run_id, "state": result.state, "compared_values": result.compared_values, "bundle_sha256": result.bundle_sha256})
-        return JSONResponse(status_code=201, content=asdict(result))
+        with admitted_mutation(None):
+            result = bundle_module.reproduce_bundle(path, store=store(), registry=engine().registry, repository_root=settings.repository_root, work_root=settings.data_dir / "reproductions", project_service=projects(), engine=engine())
+            original = store().run(result.original_run_id)
+            if original is not None:
+                record_action(original[0].project_id, AuditEventType.RUN_COMPLETED, "Reproduction", result.reproduction_id, {"original_run_id": result.original_run_id, "state": result.state, "compared_values": result.compared_values, "bundle_sha256": result.bundle_sha256})
+            return JSONResponse(status_code=201, content=asdict(result))
 
     @app.get("/api/reproductions")
     def list_reproductions(original_run_id: str | None = Query(default=None), project_id: str | None = Query(default=None)) -> JSONResponse:
@@ -1871,18 +2601,518 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             network_guard=guard_status(),
         )
 
+    @app.get("/api/live")
+    def live() -> JSONResponse:
+        """Process liveness only; dependency checks belong to readiness."""
+
+        return JSONResponse(content={"status": "alive"})
+
+    @app.get("/api/version")
+    def api_version() -> JSONResponse:
+        return JSONResponse(
+            content={
+                "contract_version": API_CONTRACT_VERSION,
+                "compatibility": "all /api routes in this beta implement contract version 1.0.0",
+            }
+        )
+
+    @app.get("/api/metrics")
+    def operational_metrics() -> JSONResponse:
+        with request_metrics_lock:
+            requests = int(request_metrics["requests"])
+            responses = dict(request_metrics["responses_by_status"])
+            total_duration = float(request_metrics["total_duration_seconds"])
+        return JSONResponse(
+            content={
+                "kind": "QUALSIGHT_LOCAL_OPERATIONAL_METRICS_V1",
+                "uptime_seconds": round(time.monotonic() - process_started, 3),
+                "http": {
+                    "requests": requests,
+                    "responses_by_status": responses,
+                    "mean_duration_ms": round(total_duration * 1000 / requests, 3) if requests else None,
+                },
+                "scientific_work": executor.status(),
+                "database": store().operational_status(),
+                "reconciled_at_startup": {
+                    "operations": len(state.get("reconciled_operations", [])),
+                    "purges": len(state.get("reconciled_purges", [])),
+                },
+                "shutting_down": bool(state.get("shutting_down", False)),
+            }
+        )
+
+    @app.get("/api/ready")
+    def ready() -> JSONResponse:
+        """Report whether durable state, runtime bytes, and work admission are usable."""
+
+        checks: dict[str, Any] = {}
+        ready_state = not bool(state.get("shutting_down", False))
+        checks["shutdown"] = {"ok": ready_state}
+        try:
+            database = store().operational_status()
+            checks["database"] = {"ok": True, **database}
+            if database["unresolved_purges"]:
+                ready_state = False
+        except Exception as error:  # noqa: BLE001 - dependency failure belongs in readiness
+            checks["database"] = {"ok": False, "error": f"{type(error).__name__}: {error}"}
+            ready_state = False
+
+        try:
+            data_status = settings.data_dir.stat()
+            file_system = os.statvfs(settings.data_dir)
+            storage_ok = settings.data_dir.is_dir() and stat.S_IMODE(data_status.st_mode) == 0o700
+            checks["storage"] = {
+                "ok": storage_ok,
+                "path": str(settings.data_dir),
+                "mode": oct(stat.S_IMODE(data_status.st_mode)),
+                "available_bytes": file_system.f_bavail * file_system.f_frsize,
+            }
+            ready_state = ready_state and storage_ok
+        except OSError as error:
+            checks["storage"] = {"ok": False, "error": f"{type(error).__name__}: {error}"}
+            ready_state = False
+
+        runtime_artifacts: list[dict[str, Any]] = []
+        runtime_ok = True
+        for role in ("BINARY", "CONFIGURATION"):
+            identity = engine().runtime.artifact(role).identity
+            artifact_path = Path(identity.path or "")
+            try:
+                artifact_status = artifact_path.stat()
+                artifact_ok = artifact_path.is_file() and artifact_status.st_size == identity.size_bytes
+            except OSError:
+                artifact_ok = False
+            runtime_ok = runtime_ok and artifact_ok
+            runtime_artifacts.append({"role": role, "path": str(artifact_path), "ok": artifact_ok})
+        checks["core_runtime"] = {"ok": runtime_ok, "artifacts": runtime_artifacts}
+        ready_state = ready_state and runtime_ok
+
+        capacity = executor.status()
+        checks["scientific_capacity"] = capacity
+        if capacity["available"] == 0:
+            ready_state = False
+
+        guard = guard_status()
+        guard_ok = not settings.network_guard or bool(guard["installed"])
+        checks["network_guard"] = {"ok": guard_ok, **guard}
+        ready_state = ready_state and guard_ok
+        return JSONResponse(
+            status_code=200 if ready_state else 503,
+            content={"status": "ready" if ready_state else "not_ready", "checks": checks},
+        )
+
+    @app.get("/api/matcher-assets")
+    def matcher_assets() -> JSONResponse:
+        return JSONResponse(content=matcher_manager().catalog())
+
+    @app.get("/api/addons")
+    def addons() -> JSONResponse:
+        """Closed allowlist of executable and importable beta capabilities."""
+
+        return JSONResponse(
+            content=addon_catalog(
+                engine().registry,
+                matcher_manager().catalog(),
+                settings.data_dir,
+            )
+        )
+
+    @app.post("/api/dataset-assets/{addon_id}/pull")
+    def pull_verification_dataset(addon_id: str) -> JSONResponse:
+        with admitted_mutation(None):
+            request_event = record_system_action(
+                "VERIFICATION_DATASET_ACQUISITION_REQUESTED",
+                addon_id,
+                {},
+            )
+            dataset_store = verification_dataset_store()
+            try:
+                dataset_store.status(addon_id)
+                with permit_explicit_setup_network():
+                    receipt = dataset_store.acquire()
+            except DatasetAcquisitionError as error:
+                record_system_action(
+                    "VERIFICATION_DATASET_ACQUISITION_FAILED",
+                    addon_id,
+                    {
+                        "request_event_id": request_event["system_event_id"],
+                        "reason": str(error),
+                    },
+                )
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            status = dataset_store.status(addon_id, verify_images=True)
+            event = record_system_action(
+                "VERIFICATION_DATASET_ACQUISITION_COMPLETED",
+                addon_id,
+                {
+                    "request_event_id": request_event["system_event_id"],
+                    "receipt_id": receipt["receipt_id"],
+                    "archive_sha256": receipt["archive"]["sha256"],
+                    "archive_size_bytes": receipt["archive"]["size_bytes"],
+                    "protocol_state": status["runtime_state"],
+                },
+            )
+            dataset = next(
+                item
+                for item in dataset_addons(engine().registry, settings.data_dir)
+                if item["addon_id"] == addon_id
+            )
+            return JSONResponse(content={"dataset": dataset, "receipt": receipt, "event": event})
+
+    @app.post(
+        "/api/projects/{project_id}/dataset-assets/{addon_id}/import",
+        status_code=201,
+    )
+    def import_verification_dataset(project_id: str, addon_id: str) -> JSONResponse:
+        try:
+            project = projects().require_writable(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        with admitted_mutation(project_id):
+            importer = AcquiredVerificationDatasetImporter(
+                verification_dataset_store(),
+                store(),
+                projects().actor,
+            )
+            try:
+                result = importer.import_addon(project, addon_id)
+            except VerificationDatasetImportError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+        return JSONResponse(
+            status_code=201,
+            content={
+                "dataset": dataset_out(result.dataset, result.statistics_sha256).model_dump(
+                    mode="json"
+                ),
+                "protocol": result.protocol.model_dump(mode="json"),
+                "samples": result.samples,
+                "pairs": result.pairs,
+            },
+        )
+
+    @app.get("/api/preprocessing-profiles")
+    def matcher_preprocessing_profiles() -> JSONResponse:
+        return JSONResponse(content=preprocessing_profiles(engine().registry))
+
+    def capture_architecture_sources(matcher_id: str) -> list[dict[str, Any]]:
+        snapshots: list[dict[str, Any]] = []
+        for item in matcher_manager().status(matcher_id)["architecture_sources"]:
+            path = Path(item["path"])
+            if not os.path.lexists(path):
+                snapshots.append({"path": path, "bytes": None, "mode": None})
+                continue
+            current = path.lstat()
+            if path.is_symlink() or not stat.S_ISREG(current.st_mode):
+                raise HTTPException(status_code=409, detail=f"architecture source is not a regular file: {path}")
+            snapshots.append({"path": path, "bytes": path.read_bytes(), "mode": stat.S_IMODE(current.st_mode)})
+        return snapshots
+
+    def restore_architecture_sources(snapshots: list[dict[str, Any]]) -> None:
+        for snapshot in snapshots:
+            path = snapshot["path"]
+            before = snapshot["bytes"]
+            if before is None:
+                if os.path.lexists(path):
+                    current = path.lstat()
+                    if path.is_symlink() or not stat.S_ISREG(current.st_mode):
+                        raise RuntimeError(f"refusing to remove a non-regular architecture source during rollback: {path}")
+                    path.unlink()
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                temporary: Path | None = None
+                try:
+                    with tempfile.NamedTemporaryFile(mode="w+b", prefix=f".{path.name}.", suffix=".rollback", dir=path.parent, delete=False) as handle:
+                        temporary = Path(handle.name)
+                        os.fchmod(handle.fileno(), snapshot["mode"])
+                        handle.write(before)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    os.replace(temporary, path)
+                    temporary = None
+                finally:
+                    if temporary is not None:
+                        temporary.unlink(missing_ok=True)
+            if path.parent.is_dir():
+                directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+
+    def rollback_checkpoint_acquisition(
+        receipt: dict[str, Any],
+        *,
+        managed_existed: bool,
+        receipt_paths_before: set[Path],
+    ) -> None:
+        target = Path(receipt["target_path"])
+        receipt_path = Path(receipt["path"])
+        if not managed_existed and receipt["action"] != "REUSED_VERIFIED_MANAGED":
+            if target.is_symlink() or not target.is_file():
+                raise RuntimeError(f"new managed checkpoint cannot be safely rolled back: {target}")
+            identity = artifact_identity(target)
+            if identity.sha256 != receipt["artifact"]["sha256"] or identity.size_bytes != receipt["artifact"]["size_bytes"]:
+                raise RuntimeError("new managed checkpoint changed before rollback")
+            target.unlink()
+        if receipt_path not in receipt_paths_before:
+            if receipt_path.is_symlink() or not receipt_path.is_file():
+                raise RuntimeError(f"new acquisition receipt cannot be safely rolled back: {receipt_path}")
+            persisted = json.loads(receipt_path.read_text(encoding="utf-8"))
+            if persisted != {key: value for key, value in receipt.items() if key != "path"}:
+                raise RuntimeError("new acquisition receipt changed before rollback")
+            receipt_path.unlink()
+        for directory_path in {target.parent, receipt_path.parent}:
+            if directory_path.is_dir():
+                directory = os.open(directory_path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+
+    @app.post("/api/matcher-assets/{matcher_id}/pull-sources")
+    def pull_matcher_sources(matcher_id: str) -> JSONResponse:
+        with matcher_control_lock, matcher_manager().exclusive_control():
+            request_event = record_system_action("MATCHER_ARCHITECTURE_SOURCES_PULL_REQUESTED", matcher_id, {})
+            snapshots = capture_architecture_sources(matcher_id)
+            try:
+                with permit_explicit_setup_network():
+                    status = matcher_manager().pull_architecture_sources(matcher_id)
+            except MatcherLifecycleError as error:
+                record_system_action("MATCHER_ARCHITECTURE_SOURCES_PULL_FAILED", matcher_id, {"request_event_id": request_event["system_event_id"], "reason": str(error)})
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            try:
+                event = record_system_action(
+                    "MATCHER_ARCHITECTURE_SOURCES_PULLED",
+                    matcher_id,
+                    {"request_event_id": request_event["system_event_id"], "source_states": {item["key"]: item["state"] for item in status["architecture_sources"]}},
+                )
+            except Exception as event_error:
+                try:
+                    restore_architecture_sources(snapshots)
+                except Exception as rollback_error:
+                    raise RuntimeError(
+                        f"source-pull completion event failed and source rollback failed: {rollback_error}"
+                    ) from event_error
+                raise
+            return JSONResponse(content={"asset": status, "event": event})
+
+    @app.post("/api/matcher-assets/{matcher_id}/pull-checkpoint")
+    def pull_matcher_checkpoint(matcher_id: str) -> JSONResponse:
+        with matcher_control_lock, matcher_manager().exclusive_control():
+            request_event = record_system_action(
+                "MATCHER_CHECKPOINT_ACQUISITION_REQUESTED",
+                matcher_id,
+                {},
+            )
+            acquisition_before = matcher_manager().status(matcher_id)["checkpoint_acquisition"]
+            managed_path = Path(acquisition_before["managed_path"])
+            managed_existed = os.path.lexists(managed_path)
+            receipt_root = settings.data_dir / "acquisition-receipts" / matcher_id
+            receipt_paths_before = set(receipt_root.glob("*.json")) if receipt_root.is_dir() else set()
+            try:
+                with permit_explicit_setup_network():
+                    result = matcher_manager().acquire_checkpoint(matcher_id)
+            except MatcherLifecycleError as error:
+                record_system_action(
+                    "MATCHER_CHECKPOINT_ACQUISITION_FAILED",
+                    matcher_id,
+                    {
+                        "request_event_id": request_event["system_event_id"],
+                        "reason": str(error),
+                    },
+                )
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            receipt = result["receipt"]
+            try:
+                event = record_system_action(
+                    "MATCHER_CHECKPOINT_ACQUISITION_COMPLETED",
+                    matcher_id,
+                    {
+                        "request_event_id": request_event["system_event_id"],
+                        "action": receipt["action"],
+                        "checkpoint_sha256": receipt["artifact"]["sha256"],
+                        "checkpoint_size_bytes": receipt["artifact"]["size_bytes"],
+                        "receipt_id": receipt["receipt_id"],
+                        "receipt_evidence_sha256": receipt["evidence_sha256"],
+                    },
+                )
+            except Exception as event_error:
+                try:
+                    rollback_checkpoint_acquisition(
+                        receipt,
+                        managed_existed=managed_existed,
+                        receipt_paths_before=receipt_paths_before,
+                    )
+                except Exception as rollback_error:
+                    raise RuntimeError(
+                        f"checkpoint completion event failed and acquisition rollback failed: {rollback_error}"
+                    ) from event_error
+                raise
+            return JSONResponse(
+                content={"asset": result["asset"], "receipt": receipt, "event": event}
+            )
+
+    @app.post("/api/matcher-assets/{matcher_id}/load")
+    def load_matcher_asset(matcher_id: str) -> JSONResponse:
+        with matcher_control_lock, matcher_manager().exclusive_control():
+            request_event = record_system_action("MATCHER_LOAD_REQUESTED", matcher_id, {})
+            before = matcher_manager().status(matcher_id)
+            try:
+                status = matcher_manager().load(matcher_id)
+            except MatcherLifecycleError as error:
+                record_system_action("MATCHER_LOAD_FAILED", matcher_id, {"request_event_id": request_event["system_event_id"], "reason": str(error)})
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            try:
+                event = record_system_action(
+                    "MATCHER_LOADED",
+                    matcher_id,
+                    {"request_event_id": request_event["system_event_id"], "device": status["runtime"]["device"], "parameter_count": status["runtime"]["parameter_count"], "checkpoint_sha256": status["checkpoint"]["registered_sha256"]},
+                )
+            except Exception as event_error:
+                if before["runtime"]["state"] == "UNLOADED":
+                    try:
+                        matcher_manager().unload(matcher_id)
+                    except Exception as rollback_error:
+                        raise RuntimeError(
+                            f"matcher load completion event failed and runtime rollback failed: {rollback_error}"
+                        ) from event_error
+                raise
+            return JSONResponse(content={"asset": status, "event": event})
+
+    @app.post("/api/matcher-assets/{matcher_id}/unload")
+    def unload_matcher_asset(matcher_id: str) -> JSONResponse:
+        with matcher_control_lock, matcher_manager().exclusive_control():
+            request_event = record_system_action("MATCHER_UNLOAD_REQUESTED", matcher_id, {})
+            before = matcher_manager().status(matcher_id)
+            try:
+                status = matcher_manager().unload(matcher_id)
+            except MatcherLifecycleError as error:
+                record_system_action("MATCHER_UNLOAD_FAILED", matcher_id, {"request_event_id": request_event["system_event_id"], "reason": str(error)})
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            try:
+                event = record_system_action("MATCHER_UNLOADED", matcher_id, {"request_event_id": request_event["system_event_id"], "runtime_state": status["runtime"]["state"]})
+            except Exception as event_error:
+                if before["runtime"]["state"] == "LOADED":
+                    try:
+                        matcher_manager().load(matcher_id)
+                    except Exception as rollback_error:
+                        raise RuntimeError(
+                            f"matcher unload completion event failed and runtime rollback failed: {rollback_error}"
+                        ) from event_error
+                raise
+            return JSONResponse(content={"asset": status, "event": event})
+
+    @app.get("/api/system-events")
+    def system_events(limit: int = Query(default=100, ge=1, le=1000)) -> JSONResponse:
+        return JSONResponse(content=store().system_events(limit=limit))
+
+    @app.get("/api/projects/{project_id}/embeddings")
+    def project_embeddings(project_id: str) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
+        import numpy as np
+
+        items: list[dict[str, Any]] = []
+        for leaf in store().matcher_leaves(project_id=project_id):
+            found = store().run(leaf["run_id"])
+            if found is None:
+                continue
+            artifact = next((item for item in found[0].artifacts if item.uri.endswith("embeddings.npy")), None)
+            if artifact is None:
+                continue
+            path = Path(artifact.uri)
+            if not path.is_file():
+                integrity = "MISSING"
+                integrity_reason = "recorded embedding file is missing"
+                observed_sha256 = None
+                rows = dimension = None
+                size_bytes = None
+            else:
+                observed = artifact_identity(path)
+                observed_sha256 = observed.sha256
+                integrity = "VERIFIED" if observed.sha256 == artifact.sha256 and observed.size_bytes == artifact.size_bytes else "DRIFTED"
+                integrity_reason = None if integrity == "VERIFIED" else "embedding bytes differ from the immutable Run artifact record"
+                size_bytes = observed.size_bytes
+                rows = dimension = None
+                if integrity == "VERIFIED":
+                    try:
+                        array = np.load(path, mmap_mode="r", allow_pickle=False)
+                    except (OSError, ValueError) as error:
+                        integrity = "INVALID_FORMAT"
+                        integrity_reason = f"recorded embedding is not a readable NumPy array: {type(error).__name__}"
+                    else:
+                        rows = int(array.shape[0]) if array.ndim == 2 else None
+                        dimension = int(array.shape[1]) if array.ndim == 2 else None
+                        if array.ndim != 2:
+                            integrity = "INVALID_FORMAT"
+                            integrity_reason = f"recorded embedding has {array.ndim} dimensions; expected 2"
+            items.append(
+                {
+                    "run_id": leaf["run_id"],
+                    "matrix_id": leaf["matrix_id"],
+                    "leaf_id": leaf["leaf_id"],
+                    "matcher_id": leaf["matcher_id"],
+                    "condition_id": leaf["condition_id"],
+                    "dataset_id": leaf["dataset_id"],
+                    "classification": artifact.classification.value,
+                    "integrity": integrity,
+                    "integrity_reason": integrity_reason,
+                    "registered_sha256": artifact.sha256,
+                    "observed_sha256": observed_sha256,
+                    "size_bytes": size_bytes,
+                    "rows": rows,
+                    "dimension": dimension,
+                    "created_at": artifact.created_at.isoformat(),
+                    "links": {
+                        "run": f"/api/runs/{leaf['run_id']}",
+                        "export_parquet": f"/api/exports/embeddings?ref={leaf['run_id']}&format=parquet",
+                        "export_json": f"/api/exports/embeddings?ref={leaf['run_id']}&format=json",
+                    },
+                }
+            )
+        return JSONResponse(content=items)
+
     @app.get("/api/projects/{project_id}/purge-scope")
     def project_purge_scope(project_id: str) -> JSONResponse:
         if store().project(project_id) is None:
             raise HTTPException(status_code=404, detail="project is not recorded")
         return JSONResponse(content={"project_id": project_id, "scope": SCOPE_STATEMENT, "targets": purge_targets(store(), settings.data_dir, project_id)})
 
+    def active_work_for_project_locked(project_id: str) -> list[str]:
+        active: list[str] = []
+        if active_global_mutations["count"]:
+            active.append(f"{active_global_mutations['count']} unscoped state-changing request(s)")
+        if active_project_mutations.get(project_id, 0):
+            active.append(f"{active_project_mutations[project_id]} state-changing request(s)")
+        active.extend(f"quality job {job.job_id}" for job in jobs.values() if job.project.project_id == project_id and not job.ended_at)
+        active.extend(f"matcher matrix {job.matrix_id}" for job in matrices.values() if job.project.project_id == project_id and job.progress["phase"] not in {"completed", "failed"})
+        active.extend(f"degradation analysis {job.analysis_id}" for job in degradations.values() if job.project.project_id == project_id and job.progress["phase"] not in {"completed", "failed"})
+        active.extend(f"identification search {job.search_id}" for job in searches.values() if job.project.project_id == project_id and job.progress["phase"] not in {"completed", "failed"})
+        active.extend(f"utility analysis {analysis_id}" for analysis_id, item in analyses.items() if item.get("project_id") == project_id and item["state"] == "RUNNING")
+        active.extend(f"cross-matcher analysis {analysis_id}" for analysis_id, item in cross_jobs.items() if item.get("project_id") == project_id and item["state"] == "RUNNING")
+        return active
+
     @app.post("/api/projects/{project_id}/purge", status_code=201)
     def project_purge(project_id: str, request: PurgeRequest) -> JSONResponse:
+        with job_lock:
+            if project_id in purging_projects:
+                raise HTTPException(status_code=409, detail="project purge is already in progress")
+            active = active_work_for_project_locked(project_id)
+            if active:
+                raise HTTPException(status_code=409, detail="purge refused while project work is active: " + "; ".join(active))
+            purging_projects.add(project_id)
         try:
-            record = purge_project(store(), data_dir=settings.data_dir, project_id=project_id, actor=settings.actor, confirm=request.confirm)
-        except PurgeError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            try:
+                record = purge_project(store(), data_dir=settings.data_dir, project_id=project_id, actor=settings.actor, confirm=request.confirm)
+            except PurgeError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+        finally:
+            with job_lock:
+                purging_projects.discard(project_id)
+        if not record["verified"]:
+            raise HTTPException(status_code=409, detail={"message": "purge did not verify; inspect the recorded failure evidence", "record": record})
         record_action(project_id, AuditEventType.DATASET_PURGED, "Project", project_id, {"purge_id": record["purge_id"], "deleted": len(record["deleted"]), "already_absent": len(record["already_absent"]), "failed": len(record["failed"]), "verified": record["verified"], "scope": SCOPE_STATEMENT})
         return JSONResponse(status_code=201, content=record)
 
@@ -2023,7 +3253,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return items
 
     @app.get("/api/samples/image")
-    def sample_image(path: str = Query(min_length=1)) -> FileResponse:
+    def sample_image(path: str = Query(min_length=1)) -> StreamingResponse:
         """Serve a registered image or a recorded dataset sample to the local console.
 
         Only bytes that are either registered DATA artifacts or samples recorded
@@ -2044,17 +3274,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         media_type = mimetypes.guess_type(path)[0]
         if media_type is None or not media_type.startswith("image/"):
             raise HTTPException(status_code=415, detail="artifact is not a displayable image")
-        current = artifact_identity(Path(path))
-        if current.sha256 != expected_sha256:
-            raise HTTPException(status_code=409, detail="image bytes drifted from their recorded identity")
-        return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-store"})
+        snapshot, observed_sha256 = open_recorded_snapshot(Path(path), expected_sha256, "image")
+        return recorded_snapshot_response(snapshot, media_type=media_type, filename=None, headers={"Cache-Control": "no-store", "X-QualSight-Sha256": observed_sha256})
 
-    @app.post(
-        "/api/quality/assess",
-        response_model=AssessResponse,
-        responses={422: {"model": AssessmentFailure}},
-    )
-    def assess(request: AssessRequest) -> AssessResponse | JSONResponse:
+    def _assess(request: AssessRequest) -> AssessResponse | JSONResponse:
         eng = engine()
         target_project = None
         if request.project_id is not None:
@@ -2127,6 +3350,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ),
         )
 
+    @app.post(
+        "/api/quality/assess",
+        response_model=AssessResponse,
+        responses={422: {"model": AssessmentFailure}},
+    )
+    def assess(request: AssessRequest) -> AssessResponse | JSONResponse:
+        with admitted_mutation(request.project_id):
+            return _assess(request)
+
     @app.post("/api/quality/assess-upload", status_code=201)
     async def assess_upload(
         request: Request,
@@ -2136,18 +3368,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> JSONResponse:
         """QS-Y81 (decision 30): assess one operator-uploaded photo with the registered engine, recorded as a Run."""
 
-        data = await request.body()
+        data = await read_bounded_request_body(request, maximum_bytes=MAX_UPLOAD_BYTES)
         if not data:
             raise HTTPException(status_code=422, detail="the request body is empty")
-        from starlette.concurrency import run_in_threadpool
+
+        try:
+            project = projects().require_writable(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
         def _process() -> dict[str, Any]:
-            try:
-                project = projects().require_writable(project_id)
-            except KeyError as error:
-                raise HTTPException(status_code=404, detail="project is not recorded") from error
-            except ProjectLifecycleError as error:
-                raise HTTPException(status_code=409, detail=str(error)) from error
             importer = OwnerSuppliedImporter(store(), settings.data_dir, projects().actor)
             try:
                 admitted = importer.admission.admit_bytes(data, filename, project_id)
@@ -2220,8 +3452,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 },
             }
 
-        payload = await run_in_threadpool(_process)
-        return JSONResponse(status_code=201, content=payload)
+        with admitted_mutation(project_id):
+            reservation = reserve_scientific_work(
+                f"owner-upload:sha256:{hashlib.sha256(data).hexdigest()}"
+            )
+            payload = await asyncio.wrap_future(reservation.submit(_process))
+            return JSONResponse(status_code=201, content=payload)
 
     @app.post("/api/projects/{project_id}/datasets/import-owner-directory", status_code=201)
     def import_owner_directory(project_id: str, request: OwnerDirectoryImportRequest) -> JSONResponse:
@@ -2321,8 +3557,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         })
 
     @app.get("/api/runs", response_model=list[RunSummaryOut])
-    def runs(limit: int = Query(default=200, ge=1, le=10_000)) -> list[RunSummaryOut]:
-        return [RunSummaryOut(**asdict(item)) for item in store().run_summaries(limit)]
+    def runs(
+        project_id: str = Query(min_length=1),
+        limit: int = Query(default=200, ge=1, le=10_000),
+    ) -> list[RunSummaryOut]:
+        return [
+            RunSummaryOut(**asdict(item))
+            for item in store().run_summaries(limit, project_id=project_id)
+        ]
 
     @app.get("/api/runs/{run_id}")
     def run(run_id: str) -> JSONResponse:

@@ -198,6 +198,8 @@ class OFIQQualityEngine:
         repository_root: Path,
         runtime_resource_id: str = OFIQ_V112_RUNTIME_RESOURCE_ID,
         input_resource_ids: tuple[str, ...],
+        execution_timeout_seconds: float = 7200.0,
+        output_limit_bytes: int = 16 * 1024 * 1024,
     ) -> None:
         self.registry_path = registry_path.resolve(strict=True)
         self.repository_root = repository_root.resolve(strict=True)
@@ -217,6 +219,8 @@ class OFIQQualityEngine:
                 runtime_resource_id=runtime_resource_id,
                 input_resource_ids=(resource.resource_id,),
                 repository_root=self.repository_root,
+                execution_timeout_seconds=execution_timeout_seconds,
+                output_limit_bytes=output_limit_bytes,
             )
             for resource in self.input_resources
         }
@@ -228,6 +232,8 @@ class OFIQQualityEngine:
             runtime_resource_id=runtime_resource_id,
             input_resource_ids=(),
             repository_root=self.repository_root,
+            execution_timeout_seconds=execution_timeout_seconds,
+            output_limit_bytes=output_limit_bytes,
         )
         self.configuration = self.runtime.artifact("CONFIGURATION").identity
         self.executable = self.runtime.artifact("BINARY").identity

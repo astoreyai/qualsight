@@ -42,7 +42,7 @@ class PairEvidenceRealTests(unittest.TestCase):
             runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID,
             input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, LFW_RESOURCE_ID),
         )
-        cls.client = TestClient(create_app(settings))
+        cls.client = TestClient(create_app(settings), base_url="http://127.0.0.1")
         cls.client.__enter__()
         project = cls.client.post(
             "/api/projects",
@@ -72,6 +72,8 @@ class PairEvidenceRealTests(unittest.TestCase):
         cls.protocol_id = cls.client.post(
             f"/api/projects/{cls.project_id}/datasets/{cls.dataset_id}/protocols/freeze-lfw-view2"
         ).json()["protocol_id"]
+        pulled = cls.client.post("/api/matcher-assets/adaface-ir101-local-candidate/pull-sources")
+        assert pulled.status_code == 200, pulled.text
         matrix = cls.client.post(
             f"/api/projects/{cls.project_id}/protocols/{cls.protocol_id}/matrix",
             params={"fixture_pairs_only": "true", "leaves": "QS-C22.AS"},

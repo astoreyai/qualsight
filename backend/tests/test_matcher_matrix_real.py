@@ -1,7 +1,7 @@
 """QS-C22/QS-C23 on real data: matcher × preprocessing leaves over frozen protocol pairs.
 
-Uses the ten fixture pairs of the frozen LFW View 2 protocol so the six real
-Runs execute in seconds; the full-protocol matrix is run by the CLI and
+Uses the ten fixture pairs of the frozen LFW View 2 protocol so the twelve real
+SCRFD-source Runs execute in seconds; the full-protocol matrix is run by the CLI and
 recorded in the ledger. Checks that every pair is retained with a score or an
 explicit failure, that matcher and preprocessing identities are recorded
 separately, and that the metric engine reconciles to an independent
@@ -23,8 +23,8 @@ from fastapi.testclient import TestClient
 from qualsight.api import Settings, create_app
 from qualsight.domain.comparison import ProtocolPair
 from qualsight.execution.registry_binding import OFIQ_INPUT_RESOURCE_ID, OFIQ_V112_RUNTIME_RESOURCE_ID
-from qualsight.matchers.conditions import ConditionId
-from qualsight.matchers.matrix import LEAF_IDS, MatcherMatrixJob
+from qualsight.matchers.conditions import SCRFD_CONDITIONS, ConditionId
+from qualsight.matchers.matrix import LEAF_IDS, MatcherMatrixJob, MatrixError
 from qualsight.matchers.runtime import MatcherId
 from qualsight.matchers.upstream import UpstreamSources
 from qualsight.metrics.verification import ComparisonInputs, compute_verification_metrics
@@ -46,7 +46,7 @@ class RealMatcherMatrixTests(unittest.TestCase):
             runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID,
             input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, LFW_RESOURCE_ID),
         )
-        cls.client = TestClient(create_app(settings))
+        cls.client = TestClient(create_app(settings), base_url="http://127.0.0.1")
         cls.client.__enter__()
         project = cls.client.post("/api/projects", json={"name": "matrix gate", "description": "QS-C22 real.", "purpose_scope": RESEARCH_SCOPE}).json()
         cls.project_id = project["project_id"]
@@ -55,9 +55,7 @@ class RealMatcherMatrixTests(unittest.TestCase):
         cls.dataset_id = imported.json()["dataset_id"]
         frozen = cls.client.post(f"/api/projects/{cls.project_id}/datasets/{cls.dataset_id}/protocols/freeze-lfw-view2").json()
         cls.protocol_id = frozen["protocol_id"]
-        app = cls.client.app
         # Reach the live store/engine of the app to build the job in-process.
-        cls.store = app.router.lifespan_context  # placeholder to keep a reference
         from qualsight.api.store import RunStore
         from qualsight.execution.registry_binding import load_resource_registry
 
@@ -85,9 +83,16 @@ class RealMatcherMatrixTests(unittest.TestCase):
         cls.client.__exit__(None, None, None)
         shutil.rmtree(cls.data_dir, ignore_errors=True)
 
-    def test_six_leaves_keep_every_pair_with_score_or_explicit_failure(self) -> None:
-        self.assertEqual(len(self.leaves), 6)
-        self.assertEqual({leaf.leaf_id for leaf in self.leaves}, set(LEAF_IDS.values()))
+    def test_twelve_source_image_leaves_keep_every_pair_with_score_or_explicit_failure(self) -> None:
+        self.assertEqual(len(self.leaves), 12)
+        expected = {
+            leaf_id
+            for (matcher, condition), leaf_id in LEAF_IDS.items()
+            if matcher in MatcherId and condition in SCRFD_CONDITIONS
+        }
+        self.assertEqual({leaf.leaf_id for leaf in self.leaves}, expected)
+        self.assertIsNotNone(self.job.template_set_sha256)
+        self.assertEqual(list(self.job.job_dir.glob(".*-crops.npy")), [])
         for leaf in self.leaves:
             with self.subTest(leaf=leaf.leaf_id):
                 table = pq.read_table(leaf.comparisons_parquet).to_pylist()
@@ -102,6 +107,14 @@ class RealMatcherMatrixTests(unittest.TestCase):
                 self.assertEqual(run.matcher_preprocessing.component_id, leaf.condition_id.value)
                 self.assertEqual(len(run.model_hashes), 2)
                 configuration = json.loads(run.configuration.text)
+                self.assertEqual(
+                    configuration["template_storage"]["kind"],
+                    "NUMPY_DISK_BACKED_MEMMAP_V1",
+                )
+                self.assertEqual(
+                    configuration["template_storage"]["write_verification"],
+                    "SHA256_MATCHES_PREPROCESS_OUTPUT",
+                )
                 self.assertEqual(configuration["pair_selection"]["pair_count"], 10)
                 self.assertFalse(configuration["pair_selection"]["complete_protocol"])
                 self.assertEqual(configuration["preprocessing"]["condition_id"], leaf.condition_id.value)
@@ -113,6 +126,31 @@ class RealMatcherMatrixTests(unittest.TestCase):
                 recorded = self.run_store.matcher_leaf(run.run_id)
                 self.assertEqual(recorded["leaf_id"], leaf.leaf_id)
                 self.assertEqual(recorded["comparison_count"], 10)
+
+    def test_matrix_axes_reject_empty_and_duplicate_catalog_selections(self) -> None:
+        invalid_axes = (
+            ("empty matchers", (), tuple(ConditionId)),
+            ("empty preprocessing", tuple(MatcherId), ()),
+            ("duplicate matcher", (MatcherId.ADAFACE_IR101, MatcherId.ADAFACE_IR101), (ConditionId.ADAPTIVE_LARGEST_JPEG95,)),
+            ("duplicate preprocessing", (MatcherId.ADAFACE_IR101,), (ConditionId.ADAPTIVE_LARGEST_JPEG95, ConditionId.ADAPTIVE_LARGEST_JPEG95)),
+        )
+        for index, (label, matchers, conditions) in enumerate(invalid_axes):
+            with self.subTest(case=label), self.assertRaises(MatrixError):
+                MatcherMatrixJob(
+                    registry=self.registry,
+                    registry_path=ROOT / "resources" / "resource-registry.json",
+                    repository_root=ROOT,
+                    upstream=self.job.upstream,
+                    store=self.run_store,
+                    project=self.project,
+                    dataset=self.dataset,
+                    protocol=self.protocol,
+                    pairs=self.pairs,
+                    job_root=self.data_dir / f"invalid-matrix-{index}",
+                    matchers=matchers,
+                    conditions=conditions,
+                    selection_rule="the real registered invalid-axis contract gate",
+                )
 
     def test_conditions_and_matchers_are_separate_identities_never_pooled(self) -> None:
         by_key = {(leaf.matcher_id, leaf.condition_id): leaf for leaf in self.leaves}
@@ -128,7 +166,7 @@ class RealMatcherMatrixTests(unittest.TestCase):
             self.assertNotEqual(by_key[(matcher_id, ConditionId.ADAPTIVE_LARGEST_JPEG95)].run.run_id, by_key[(matcher_id, ConditionId.FIXED640_HIGHEST_INMEMORY)].run.run_id)
         # Same condition, different matchers → different Runs.
         run_ids = {leaf.run.run_id for leaf in self.leaves}
-        self.assertEqual(len(run_ids), 6)
+        self.assertEqual(len(run_ids), 12)
 
     def test_metrics_reconcile_to_an_independent_recomputation(self) -> None:
         for leaf in self.leaves:

@@ -203,7 +203,7 @@ UNSUPPORTED_BIN_TRIALS = 30
 
 @dataclass(frozen=True, slots=True)
 class UtilityInputs(ErcInputs):
-    subject_left: np.ndarray  # str
+    subject_left: np.ndarray  # object; string identities or None when not recorded
     subject_right: np.ndarray
 
 
@@ -272,6 +272,7 @@ def compute_utility_analysis(
     bootstrap_replicates: int = 1000,
     seed: int = 20260817,
     quality_cutoff_for_prediction: float | None = None,
+    uncertainty_sampling_unit: str | None = "LEFT_SUBJECT_ID_OF_THE_COMPARISON_UNIT",
 ) -> dict[str, object]:
     """ERC plus the PRD §20 family over one matcher Run and one quality measure.
 
@@ -290,7 +291,27 @@ def compute_utility_analysis(
         "quality_conditioned": {},
         "association": {},
         "failure_prediction": {},
-        "uncertainty": {"method": "CLUSTER_BOOTSTRAP_PERCENTILE", "sampling_unit": "LEFT_SUBJECT_ID_OF_THE_COMPARISON_UNIT", "replicates": int(bootstrap_replicates), "seed": int(seed), "confidence_level": CONFIDENCE_LEVEL},
+        "uncertainty": (
+            {
+                "status": "ESTIMATED",
+                "method": "CLUSTER_BOOTSTRAP_PERCENTILE",
+                "sampling_unit": uncertainty_sampling_unit,
+                "replicates": int(bootstrap_replicates),
+                "seed": int(seed),
+                "confidence_level": CONFIDENCE_LEVEL,
+            }
+            if uncertainty_sampling_unit is not None
+            else {
+                "status": "NOT_ASSESSED_IDENTITY_UNAVAILABLE",
+                "method": "NOT_APPLICABLE_WITHOUT_RECORDED_SUBJECT_IDENTITIES",
+                "sampling_unit": None,
+                "replicates": 0,
+                "requested_replicates": int(bootstrap_replicates),
+                "seed": int(seed),
+                "confidence_level": CONFIDENCE_LEVEL,
+                "reason": "The protocol authority does not record subject identities, so subject-cluster dependence cannot be estimated without inventing a sampling unit.",
+            }
+        ),
     }
     edges = bin_edges if bin_edges is not None else _default_bin_edges(quality[usable] if np.any(usable) else np.array([0.0, 1.0]), quality_range)
     result["quality_conditioned"]["bin_edges"] = edges
@@ -304,8 +325,20 @@ def compute_utility_analysis(
         # Areas under the recorded ERC (interval recorded), with cluster-bootstrap CIs.
         full = _area_from_units(q, errors, 1.0)
         partial = _area_from_units(q, errors, partial_interval)
-        boot_full = cluster_bootstrap(clusters, lambda idx: _area_from_units(q[idx], errors[idx], 1.0), replicates=bootstrap_replicates, seed=seed) if n else None
-        boot_partial = cluster_bootstrap(clusters, lambda idx: _area_from_units(q[idx], errors[idx], partial_interval), replicates=bootstrap_replicates, seed=seed + 1) if n else None
+        unavailable_uncertainty = {
+            "status": "NOT_ASSESSED_IDENTITY_UNAVAILABLE",
+            "reason": "Subject identities are not recorded by the protocol authority.",
+        }
+        boot_full = (
+            cluster_bootstrap(clusters, lambda idx: _area_from_units(q[idx], errors[idx], 1.0), replicates=bootstrap_replicates, seed=seed)
+            if n and uncertainty_sampling_unit is not None
+            else (unavailable_uncertainty if uncertainty_sampling_unit is None else None)
+        )
+        boot_partial = (
+            cluster_bootstrap(clusters, lambda idx: _area_from_units(q[idx], errors[idx], partial_interval), replicates=bootstrap_replicates, seed=seed + 1)
+            if n and uncertainty_sampling_unit is not None
+            else (unavailable_uncertainty if uncertainty_sampling_unit is None else None)
+        )
         result["areas"][kind] = {
             "au_erc": {"definition": AU_ERC_DEFINITION, "integration_domain": [0.0, 1.0], "integration_method": "TRAPEZOID_OVER_RECORDED_STEP_POINTS", "value": full, "comparison_units": n, "uncertainty": boot_full},
             "partial_au_erc": {"definition": PARTIAL_AU_ERC_DEFINITION, "integration_domain": [0.0, float(partial_interval)], "integration_method": "TRAPEZOID_OVER_RECORDED_STEP_POINTS", "value": partial, "comparison_units": n, "uncertainty": boot_partial},

@@ -1,0 +1,241 @@
+{
+  "schema_version": "1.0.0",
+  "manifest_id": "matcher-checkpoint-acquisition-v1",
+  "policy": "Checkpoint acquisition is an explicit operator action for owner-approved local noncommercial research. Every entry preserves its factual third-party-rights status, including repository-license-only and no-license-found states; admission does not assert a third-party grant. Every transfer is HTTPS-only, host-allowlisted, streamed with a fixed byte bound, SHA-256 verified before no-clobber atomic promotion, and recorded in a durable receipt. Checkpoints are never bundled with QualSight.",
+  "entries": [
+    {
+      "resource_id": "adaface-ir101-local-candidate",
+      "admission_state": "ADMITTED_LOCAL_NONCOMMERCIAL",
+      "admission_reason": "The operator explicitly authorized local noncommercial research acquisition while the factual rights status remains repository-license-only and redistribution remains prohibited.",
+      "third_party_rights_status": "REPOSITORY_LICENSE_ONLY",
+      "published_evidence": {
+        "repository_url": "https://github.com/mk-minchul/AdaFace",
+        "repository_commit": "d8114b3ca8c54cd81ef59ac34c19eda1c548ca17",
+        "repository_relative_path": "resources/upstream/adaface/README.d8114b3c.md",
+        "artifact_sha256": "4c9a6bcb3eeed1b4850002538ac9712c4b1c0e3383c3c2828984f97d618911b1",
+        "artifact_size_bytes": 14972,
+        "published_url": "https://drive.google.com/file/d/18jQkqB0avFqWa0Pas52g54xNshUOQJpQ/view?usp=sharing",
+        "checkpoint_label": "R100 WebFace4M",
+        "resolution_method": "DIRECT_FILE_ID_FROM_PINNED_UPSTREAM_README",
+        "author_link_id": "18jQkqB0avFqWa0Pas52g54xNshUOQJpQ",
+        "resolved_file_id": "18jQkqB0avFqWa0Pas52g54xNshUOQJpQ",
+        "resolved_file_view_url": "https://drive.google.com/file/d/18jQkqB0avFqWa0Pas52g54xNshUOQJpQ/view?usp=sharing",
+        "resolution_note": "The pinned author README directly names the Google Drive file used by the registered R100 WebFace4M checkpoint."
+      },
+      "source": {
+        "url": "https://drive.usercontent.google.com/download?id=18jQkqB0avFqWa0Pas52g54xNshUOQJpQ&export=download&confirm=t",
+        "host": "drive.usercontent.google.com",
+        "allowed_redirect_hosts": [],
+        "observed_at": "2026-08-27T15:17:07-05:00",
+        "observed_http_status": 200,
+        "observed_final_url": "https://drive.usercontent.google.com/download?id=18jQkqB0avFqWa0Pas52g54xNshUOQJpQ&export=download&confirm=t",
+        "observed_redirect_hosts": [],
+        "observed_content_type": "application/octet-stream",
+        "observed_content_disposition": "attachment; filename=\"adaface_ir101_webface4m.ckpt\"",
+        "observed_content_length": 683066959,
+        "observed_last_modified": "Sat, 05 Feb 2022 02:14:36 GMT"
+      },
+      "artifact": {
+        "filename": "adaface_ir101_webface4m.ckpt",
+        "sha256": "0a379dbaf7d79573d1ff63f317c0296f3adfb637b9c00b6234fdcc53a77a0f61",
+        "size_bytes": 683066959,
+        "managed_relative_path": "checkpoints/adaface-ir101-local-candidate/adaface_ir101_webface4m.ckpt"
+      }
+    },
+    {
+      "resource_id": "elasticface-arc-r100-local-candidate",
+      "admission_state": "ADMITTED_LOCAL_NONCOMMERCIAL",
+      "admission_reason": "The author-published checkpoint is covered by the repository's CC-BY-NC-SA-4.0 project license and the registered owner scope is local noncommercial research only.",
+      "third_party_rights_status": "VERIFIED_LICENSE",
+      "published_evidence": {
+        "repository_url": "https://github.com/fdbtrs/ElasticFace",
+        "repository_commit": "5496ec0643bfdcd5e6b53b885aa4e919e26ce442",
+        "repository_relative_path": "resources/upstream/elasticface/README.5496ec06.md",
+        "artifact_sha256": "fd62dd980cf03f47da32382f2a3604b814b274e6a5ab3f2f6b615da9e3751405",
+        "artifact_size_bytes": 3440,
+        "published_url": "https://drive.google.com/drive/folders/1q3ws_BQLmgXyiy2msvHummXq4pRqc1rx?usp=sharing",
+        "checkpoint_label": "ElasticFace-Arc 295672backbone.pth",
+        "resolution_method": "FILE_ID_FROM_AUTHOR_LINKED_GOOGLE_DRIVE_FOLDER_METADATA",
+        "author_link_id": "1q3ws_BQLmgXyiy2msvHummXq4pRqc1rx",
+        "resolved_file_id": "1n0o1SGhtr_X7Y3scI6VFIUa6KW8aAQtb",
+        "resolved_file_view_url": "https://drive.google.com/file/d/1n0o1SGhtr_X7Y3scI6VFIUa6KW8aAQtb/view?usp=drivesdk",
+        "resolution_note": "An HTTPS GET of the exact folder linked by the pinned author README exposed one row labelled 295672backbone.pth with data-id 1n0o1SGhtr_X7Y3scI6VFIUa6KW8aAQtb and size 261216371 bytes; the resolved direct endpoint independently returned the same filename and byte length."
+      },
+      "source": {
+        "url": "https://drive.usercontent.google.com/download?id=1n0o1SGhtr_X7Y3scI6VFIUa6KW8aAQtb&export=download&confirm=t",
+        "host": "drive.usercontent.google.com",
+        "allowed_redirect_hosts": [],
+        "observed_at": "2026-08-27T15:17:08-05:00",
+        "observed_http_status": 200,
+        "observed_final_url": "https://drive.usercontent.google.com/download?id=1n0o1SGhtr_X7Y3scI6VFIUa6KW8aAQtb&export=download&confirm=t",
+        "observed_redirect_hosts": [],
+        "observed_content_type": "application/octet-stream",
+        "observed_content_disposition": "attachment; filename=\"295672backbone.pth\"",
+        "observed_content_length": 261216371,
+        "observed_last_modified": "Tue, 23 Nov 2021 21:17:17 GMT"
+      },
+      "artifact": {
+        "filename": "295672backbone.pth",
+        "sha256": "8ea1772a9dc0e95b77c171a1713f667f353d86ad66f2e3d418e7973360d2fb28",
+        "size_bytes": 261216371,
+        "managed_relative_path": "checkpoints/elasticface-arc-r100-local-candidate/295672backbone.pth"
+      }
+    },
+    {
+      "resource_id": "transface-s-glint360k-local-candidate",
+      "admission_state": "ADMITTED_LOCAL_NONCOMMERCIAL",
+      "admission_reason": "The operator explicitly authorized local noncommercial research acquisition while the factual rights status remains no-license-found and redistribution remains prohibited.",
+      "third_party_rights_status": "NO_LICENSE_FOUND",
+      "published_evidence": {
+        "repository_url": "https://github.com/DanJun6737/TransFace",
+        "repository_commit": "fb6cd56d04c7ea525e328219f5d5066adac03ada",
+        "repository_relative_path": "resources/upstream/transface/README.fb6cd56d.md",
+        "artifact_sha256": "3fbda289775281dd19d7e03aec6320f0f8f6a24776971c7db85e8a170e23b83a",
+        "artifact_size_bytes": 6740,
+        "published_url": "https://drive.google.com/file/d/18Zh_zMlYttKVIGArmDYNEchIvUSH5FQ1/view?usp=share_link",
+        "checkpoint_label": "Glint360K TransFace-S",
+        "resolution_method": "DIRECT_FILE_ID_FROM_PINNED_UPSTREAM_README",
+        "author_link_id": "18Zh_zMlYttKVIGArmDYNEchIvUSH5FQ1",
+        "resolved_file_id": "18Zh_zMlYttKVIGArmDYNEchIvUSH5FQ1",
+        "resolved_file_view_url": "https://drive.google.com/file/d/18Zh_zMlYttKVIGArmDYNEchIvUSH5FQ1/view?usp=share_link",
+        "resolution_note": "The pinned author README directly names the Google Drive file used by the registered Glint360K TransFace-S checkpoint."
+      },
+      "source": {
+        "url": "https://drive.usercontent.google.com/download?id=18Zh_zMlYttKVIGArmDYNEchIvUSH5FQ1&export=download&confirm=t",
+        "host": "drive.usercontent.google.com",
+        "allowed_redirect_hosts": [],
+        "observed_at": "2026-08-27T15:17:09-05:00",
+        "observed_http_status": 200,
+        "observed_final_url": "https://drive.usercontent.google.com/download?id=18Zh_zMlYttKVIGArmDYNEchIvUSH5FQ1&export=download&confirm=t",
+        "observed_redirect_hosts": [],
+        "observed_content_type": "application/octet-stream",
+        "observed_content_disposition": "attachment; filename=\"glint360k_model_TransFace_S.pt\"",
+        "observed_content_length": 346705361,
+        "observed_last_modified": "Fri, 10 Mar 2023 09:24:27 GMT"
+      },
+      "artifact": {
+        "filename": "glint360k_model_TransFace_S.pt",
+        "sha256": "8a334ecc85fd0b547fb86836f5b926abdb4ec9b137ef65ed536d7b2d781905ce",
+        "size_bytes": 346705361,
+        "managed_relative_path": "checkpoints/transface-s-glint360k-local-candidate/glint360k_model_TransFace_S.pt"
+      }
+    },
+    {
+      "resource_id": "magface-iresnet100-ms1mv2-local-candidate",
+      "admission_state": "ADMITTED_LOCAL_NONCOMMERCIAL",
+      "admission_reason": "The operator explicitly authorized local noncommercial research acquisition while the factual rights status remains repository-license-only and redistribution remains prohibited.",
+      "third_party_rights_status": "REPOSITORY_LICENSE_ONLY",
+      "published_evidence": {
+        "repository_url": "https://github.com/IrvingMeng/MagFace",
+        "repository_commit": "99bae614ac2643b9694bf18e0c5645272ff6acfa",
+        "repository_relative_path": "resources/upstream/addon-download-evidence-2026-08-28.json",
+        "artifact_sha256": "865912419e25acb530870e50ae57516daa816d722c8ee7b00bc9f94f55c12db2",
+        "artifact_size_bytes": 2370,
+        "published_url": "https://drive.google.com/file/d/1Bd87admxOZvbIOAyTkGEntsEz3fyMt7H/view?usp=sharing",
+        "checkpoint_label": "MagFace iResNet100 MS1MV2",
+        "resolution_method": "DIRECT_FILE_ID_FROM_PINNED_UPSTREAM_README",
+        "author_link_id": "1Bd87admxOZvbIOAyTkGEntsEz3fyMt7H",
+        "resolved_file_id": "1Bd87admxOZvbIOAyTkGEntsEz3fyMt7H",
+        "resolved_file_view_url": "https://drive.google.com/file/d/1Bd87admxOZvbIOAyTkGEntsEz3fyMt7H/view?usp=sharing",
+        "resolution_note": "The pinned author README directly identifies this file as the iResNet100 MS1MV2 checkpoint, and the endpoint byte length matches the complete local file whose SHA-256 is registered."
+      },
+      "source": {
+        "url": "https://drive.usercontent.google.com/download?id=1Bd87admxOZvbIOAyTkGEntsEz3fyMt7H&export=download&confirm=t",
+        "host": "drive.usercontent.google.com",
+        "allowed_redirect_hosts": [],
+        "observed_at": "2026-08-28T02:16:25-05:00",
+        "observed_http_status": 200,
+        "observed_final_url": "https://drive.usercontent.google.com/download?id=1Bd87admxOZvbIOAyTkGEntsEz3fyMt7H&export=download&confirm=t",
+        "observed_redirect_hosts": [],
+        "observed_content_type": "application/octet-stream",
+        "observed_content_disposition": "attachment; filename=\"magface_epoch_00025.pth\"",
+        "observed_content_length": 283040192,
+        "observed_last_modified": "Mon, 15 Mar 2021 01:02:58 GMT"
+      },
+      "artifact": {
+        "filename": "magface_epoch_00025.pth",
+        "sha256": "cfeba792dada6f1f30d1e118aff077d493dd95dd76c77c30f57f90fd0164ad58",
+        "size_bytes": 283040192,
+        "managed_relative_path": "checkpoints/magface-iresnet100-ms1mv2-local-candidate/magface_epoch_00025.pth"
+      }
+    },
+    {
+      "resource_id": "topofr-r100-glint360k-local-candidate",
+      "admission_state": "ADMITTED_LOCAL_NONCOMMERCIAL",
+      "admission_reason": "The operator explicitly authorized local noncommercial research acquisition while the factual rights status remains no-license-found and redistribution remains prohibited.",
+      "third_party_rights_status": "NO_LICENSE_FOUND",
+      "published_evidence": {
+        "repository_url": "https://github.com/DanJun6737/TopoFR",
+        "repository_commit": "5960a33220968e6f9f74adcffb3f1a4ca31f9a0a",
+        "repository_relative_path": "resources/upstream/addon-download-evidence-2026-08-28.json",
+        "artifact_sha256": "865912419e25acb530870e50ae57516daa816d722c8ee7b00bc9f94f55c12db2",
+        "artifact_size_bytes": 2370,
+        "published_url": "https://drive.google.com/file/d/1vQBGXc_nXytEx8fpV9jykeLdxD45cE8B/view?usp=sharing",
+        "checkpoint_label": "TopoFR R100 Glint360K",
+        "resolution_method": "DIRECT_FILE_ID_FROM_AUTHOR_REPOSITORY",
+        "author_link_id": "1vQBGXc_nXytEx8fpV9jykeLdxD45cE8B",
+        "resolved_file_id": "1vQBGXc_nXytEx8fpV9jykeLdxD45cE8B",
+        "resolved_file_view_url": "https://drive.google.com/file/d/1vQBGXc_nXytEx8fpV9jykeLdxD45cE8B/view?usp=sharing",
+        "resolution_note": "The author repository publishes this file as the Glint360K R100 checkpoint, and the endpoint byte length matches the complete local file whose SHA-256 is registered."
+      },
+      "source": {
+        "url": "https://drive.usercontent.google.com/download?id=1vQBGXc_nXytEx8fpV9jykeLdxD45cE8B&export=download&confirm=t",
+        "host": "drive.usercontent.google.com",
+        "allowed_redirect_hosts": [],
+        "observed_at": "2026-08-28T02:16:25-05:00",
+        "observed_http_status": 200,
+        "observed_final_url": "https://drive.usercontent.google.com/download?id=1vQBGXc_nXytEx8fpV9jykeLdxD45cE8B&export=download&confirm=t",
+        "observed_redirect_hosts": [],
+        "observed_content_type": "application/octet-stream",
+        "observed_content_disposition": "attachment; filename=\"Glint360K_R100_TopoFR_9760.pt\"",
+        "observed_content_length": 998958213,
+        "observed_last_modified": "Mon, 22 May 2023 03:50:03 GMT"
+      },
+      "artifact": {
+        "filename": "Glint360K_R100_TopoFR_9760.pt",
+        "sha256": "f92e5e61b326495d32803156ab60aa58abf7e17f84e83d38b5ff6bf1691bdbfe",
+        "size_bytes": 998958213,
+        "managed_relative_path": "checkpoints/topofr-r100-glint360k-local-candidate/Glint360K_R100_TopoFR_9760.pt"
+      }
+    },
+    {
+      "resource_id": "transface-b-glint360k-local-candidate",
+      "admission_state": "ADMITTED_LOCAL_NONCOMMERCIAL",
+      "admission_reason": "The operator explicitly authorized local noncommercial research acquisition while the factual rights status remains no-license-found and redistribution remains prohibited.",
+      "third_party_rights_status": "NO_LICENSE_FOUND",
+      "published_evidence": {
+        "repository_url": "https://github.com/DanJun6737/TransFace",
+        "repository_commit": "fb6cd56d04c7ea525e328219f5d5066adac03ada",
+        "repository_relative_path": "resources/upstream/addon-download-evidence-2026-08-28.json",
+        "artifact_sha256": "865912419e25acb530870e50ae57516daa816d722c8ee7b00bc9f94f55c12db2",
+        "artifact_size_bytes": 2370,
+        "published_url": "https://drive.google.com/file/d/13IezvOo5GvtGVsRap2s5RVqtIl1y0ke5/view?usp=share_link",
+        "checkpoint_label": "Glint360K TransFace-B",
+        "resolution_method": "DIRECT_FILE_ID_FROM_PINNED_UPSTREAM_README",
+        "author_link_id": "13IezvOo5GvtGVsRap2s5RVqtIl1y0ke5",
+        "resolved_file_id": "13IezvOo5GvtGVsRap2s5RVqtIl1y0ke5",
+        "resolved_file_view_url": "https://drive.google.com/file/d/13IezvOo5GvtGVsRap2s5RVqtIl1y0ke5/view?usp=share_link",
+        "resolution_note": "The pinned author README directly identifies this file as the Glint360K TransFace-B checkpoint, and the endpoint byte length matches the complete local file whose SHA-256 is registered."
+      },
+      "source": {
+        "url": "https://drive.usercontent.google.com/download?id=13IezvOo5GvtGVsRap2s5RVqtIl1y0ke5&export=download&confirm=t",
+        "host": "drive.usercontent.google.com",
+        "allowed_redirect_hosts": [],
+        "observed_at": "2026-08-28T02:16:25-05:00",
+        "observed_http_status": 200,
+        "observed_final_url": "https://drive.usercontent.google.com/download?id=13IezvOo5GvtGVsRap2s5RVqtIl1y0ke5&export=download&confirm=t",
+        "observed_redirect_hosts": [],
+        "observed_content_type": "application/octet-stream",
+        "observed_content_disposition": "attachment; filename=\"glint360k_model_TransFace_B.pt\"",
+        "observed_content_length": 497994377,
+        "observed_last_modified": "Fri, 10 Mar 2023 09:28:49 GMT"
+      },
+      "artifact": {
+        "filename": "glint360k_model_TransFace_B.pt",
+        "sha256": "95e5db485b2755ecfd50c0ae7b7681d229d295bbd15e18c7ddc7a24f47298c78",
+        "size_bytes": 497994377,
+        "managed_relative_path": "checkpoints/transface-b-glint360k-local-candidate/glint360k_model_TransFace_B.pt"
+      }
+    }
+  ]
+}

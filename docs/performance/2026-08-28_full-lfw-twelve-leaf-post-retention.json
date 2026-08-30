@@ -1,0 +1,256 @@
+{
+  "acquisition": [
+    {
+      "checkpoint_receipt": "checkpoint-receipt:sha256:f231662f958e9a022d82928766372a4ba2a60629767fcb8ed0f4b78616add6aa",
+      "checkpoint_sha256": "0a379dbaf7d79573d1ff63f317c0296f3adfb637b9c00b6234fdcc53a77a0f61",
+      "matcher_id": "adaface-ir101-local-candidate",
+      "source_event": "system-event:sha256:1eb0fe6a46c24ebdcadd1bd48bb8ab744ada70bfbcebe7a395c62025fa39d6bd"
+    },
+    {
+      "checkpoint_receipt": "checkpoint-receipt:sha256:52acf2dd1292d235aa4dd1d19830345656e4de0fa8f647a17b180ab00c117868",
+      "checkpoint_sha256": "8ea1772a9dc0e95b77c171a1713f667f353d86ad66f2e3d418e7973360d2fb28",
+      "matcher_id": "elasticface-arc-r100-local-candidate",
+      "source_event": "system-event:sha256:1786049216c72bb4940f63b7c5ddeac8eddea9fa2eb0068b2fec5cda2be055d4"
+    },
+    {
+      "checkpoint_receipt": "checkpoint-receipt:sha256:9d8703042df34e19423c01b315a4178503457d0b1644b7c5408ec3c71d98b959",
+      "checkpoint_sha256": "cfeba792dada6f1f30d1e118aff077d493dd95dd76c77c30f57f90fd0164ad58",
+      "matcher_id": "magface-iresnet100-ms1mv2-local-candidate",
+      "source_event": "system-event:sha256:f91078fc41f0325fb6f67207c9af327862c112634cff320ed49b2bd4bcc5b2b9"
+    },
+    {
+      "checkpoint_receipt": "checkpoint-receipt:sha256:126c2405f52f05c337aea8a2800eb53deeeb46db367e361a90450e3b092ac57b",
+      "checkpoint_sha256": "f92e5e61b326495d32803156ab60aa58abf7e17f84e83d38b5ff6bf1691bdbfe",
+      "matcher_id": "topofr-r100-glint360k-local-candidate",
+      "source_event": "system-event:sha256:00edd63aef7ddce220d685e25eaa8e152827918f8144f53f4eae9124b7905dbe"
+    },
+    {
+      "checkpoint_receipt": "checkpoint-receipt:sha256:15ccece4f0cd3e363dde87a061ad8dd5d18366204a99199f28795369449d7e47",
+      "checkpoint_sha256": "95e5db485b2755ecfd50c0ae7b7681d229d295bbd15e18c7ddc7a24f47298c78",
+      "matcher_id": "transface-b-glint360k-local-candidate",
+      "source_event": "system-event:sha256:9e6d76d1a675761f4c9ef14a00e6863b172186fffb8cad07eed00712ea12a816"
+    },
+    {
+      "checkpoint_receipt": "checkpoint-receipt:sha256:a82ac658e052c77f25693d6a10bed34d6cb14b8a55e01cee9584d976baf7d6d6",
+      "checkpoint_sha256": "8a334ecc85fd0b547fb86836f5b926abdb4ec9b137ef65ed536d7b2d781905ce",
+      "matcher_id": "transface-s-glint360k-local-candidate",
+      "source_event": "system-event:sha256:5f0e6e9e27cc6912d771b87fb367b48ac8a3b4dabe69e774a6aa0aadbc8b1d11"
+    }
+  ],
+  "cpu_model": "Intel(R) Core(TM) i9-14900K",
+  "data_dir": "/tmp/qualsight-post-retention-OcPfmY",
+  "detector_workers": 2,
+  "ended_at": "2026-08-28T23:54:45.104625-05:00",
+  "gpu": "NVIDIA GeForce RTX 3090, 535.309.01, 24576 MiB",
+  "kind": "QUALSIGHT_REAL_MATRIX_BENCHMARK_V1",
+  "lfw_fixture_mtime_ns": 1786994403899855697,
+  "matcher_device": "auto",
+  "platform": "Linux-6.1.0-52-amd64-x86_64-with-glibc2.36",
+  "processor": "",
+  "python": "3.11.2",
+  "registry_mtime_ns": 1787901633194848927,
+  "repetitions": [
+    {
+      "leaf_timings": {
+        "QS-C22.AN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:45:50.251655-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.AS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:45:40.748356-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.BN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:47:04.541805-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.BS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:46:56.578930-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.EN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:46:09.218989-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.ES": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:46:00.002434-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.MN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:46:27.587097-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.MS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:46:18.701000-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.PN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:46:47.086929-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.PS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:46:37.813592-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.TN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:47:14.105238-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.TS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:47:09.699000-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        }
+      },
+      "leaves": 12,
+      "matrix_id": "matrix:sha256:b960e4dfbed4c4052fbc18541ee1876d67362fc775ba8d607eebacb334cd9148",
+      "pairs": 6000,
+      "process_peak_rss_bytes": 3918430208,
+      "repetition": 1,
+      "rss_after_bytes": 2822144000,
+      "rss_before_bytes": 775860224,
+      "run_ids": [
+        "run:sha256:d9ceac234091ddc91942843277dc3115124ec634a205d0fecca5f83bd048b013",
+        "run:sha256:c14a870a6fbdcf20d9b3f41e1fb7d56e12677187f370e70c53be56a28c389506",
+        "run:sha256:dc2480a017199418344d30c1303d907ee4b2b5cf49e218187e259d4cf0947ecf",
+        "run:sha256:d66a0b6432c2e8b66252485f3cbaba1364ff3311338b668e2c9d85c8dfe16fed",
+        "run:sha256:b9cfec8d93eef2b457d0f59740724af7f0a696c5dd0ba808a0a39a994f3a001c",
+        "run:sha256:108b7a6409e2dd6b4f6b0cc1ab9af1021c4e2234c69fa0c8af8283ed9f32cb88",
+        "run:sha256:f183b4301a4767574863aff174fa47d921f2a198c9ca7989c9b9488298d76ddf",
+        "run:sha256:bed70e2f7ab1d3007fd0a35b462466c0d77d2d123aa223e2fcb6a70c94153928",
+        "run:sha256:617243a9c40c5165db36bda978e5ad133767cd3252b2a50276d4399efec496f8",
+        "run:sha256:e3c974af39e223b51da78d36c3d16ca03c064a6d02a8bdf0b65c30f4f8aa61f2",
+        "run:sha256:e89941d649757270f272fb2adb2b6a87d289161f4ec32df4af5584d4244f7241",
+        "run:sha256:d94718cb9b8a83c9bdaae7be55a3ee6b422b58033d8c33d1d855cc07a924449e"
+      ],
+      "samples": 7701,
+      "wall_seconds": 449.636
+    },
+    {
+      "leaf_timings": {
+        "QS-C22.AN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:53:23.964818-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.AS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:53:14.446472-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.BN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:54:35.130929-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.BS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:54:27.041520-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.EN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:53:42.616332-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.ES": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:53:33.272679-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.MN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:54:00.578581-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.MS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:53:51.651283-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.PN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:54:19.071080-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.PS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:54:09.853746-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.TN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:54:44.069083-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.TS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-28T23:54:39.642814-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        }
+      },
+      "leaves": 12,
+      "matrix_id": "matrix:sha256:1ad9c711b6e60761e5b25abc3770aac8ebcd266bb016e23efe8c10f17a8ca737",
+      "pairs": 6000,
+      "process_peak_rss_bytes": 3918430208,
+      "repetition": 2,
+      "rss_after_bytes": 2852360192,
+      "rss_before_bytes": 2822144000,
+      "run_ids": [
+        "run:sha256:853daa456b91109ed3605cb8923eff3db93eff48f3fb75974a12937d59e12094",
+        "run:sha256:de13764716217628173a54b9360f721593b748c436c67e6c13d774359b92f1b5",
+        "run:sha256:7e82cb43f066d0ce1f8e823b6bd774a7caa8acd660fa6a9156159b362a177293",
+        "run:sha256:0bb39057e12961875b6728bd2f79636972540746ae6c05702e1ed57bf1fb7985",
+        "run:sha256:4960aa57080ace411061c26bc1269bbf71a7483596fa057227f109275330d598",
+        "run:sha256:acb63e8ff8d987a9fde745a5001834ecb35bcb56de0dc9974c16e508401e2573",
+        "run:sha256:c2a49df01f3726238ccc4a60e51aa4194d9f97666dd3e7ed486593bb86f95bb0",
+        "run:sha256:d9acd1d8529572fab5d925efbf2245ae4cd4d22f240548ee235b2821b05ab5a4",
+        "run:sha256:27f2bb84af85bc15bfa16bf1797f44a643efbf5421c0c4476711cd90da86133f",
+        "run:sha256:0f7f36d0e0cc0d72516438d77c095e2730db3cd244d2e9ddd25d8bdf534f614d",
+        "run:sha256:1c90a7acedb8c2ac4f1e4499fd31e21d22ee2dbd340bf529631594e0988b2197",
+        "run:sha256:dd5639c129c8e20404afd6ee87fdc692974e8a494321cf0257375db4d1b37025"
+      ],
+      "samples": 7701,
+      "wall_seconds": 449.846
+    }
+  ],
+  "repository_commit": "8abdf3eac6bdf91e5a347fe3e50bab172c83f052",
+  "repository_dirty": true,
+  "scientific_workers": 1,
+  "started_at": "2026-08-28T23:39:23.031178-05:00"
+}

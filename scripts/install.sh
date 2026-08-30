@@ -1,20 +1,27 @@
 #!/usr/bin/env bash
-# QualSight one-command installation from pinned resources (PRD §§46–48; QS-H72).
+# QualSight reference-workstation installation from pinned resources (PRD §§46–48; QS-H72).
 #
-# Network is used ONLY here (dependency wheels by uv.lock hashes, pnpm-lock.yaml
-# packages, the OFIQ v1.1.2 tag + model archives by pinned SHA-256, and the pinned
-# upstream matcher sources). After this script succeeds the product runs with the
-# network disabled — verify with `python3 scripts/offline_gate.py`.
+# Installation may use the network for dependency wheels bound by uv.lock,
+# packages bound by pnpm-lock.yaml, the OFIQ v1.1.2 tag/model archives, and
+# hash-pinned matcher architecture sources. Scientific jobs then run without
+# network access. Checkpoints and pair datasets are separate explicit System
+# actions and are never downloaded implicitly by this script.
 #
 # Preconditions on the controlled workstation (checked below): Linux x86_64,
 # Python 3.11, uv, Node 20 + pnpm 10, GCC 12 toolchain for the OFIQ build,
-# and the registered LFW / matcher checkpoint bytes at their registry paths
-# (owner-approved local research use; never bundled with QualSight).
+# and every deployment-local path recorded by resources/resource-registry.json.
+# This script is not a relocatable cold-start installer: the registry deliberately
+# binds controlled scientific inputs and runtimes to absolute paths and hashes.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-UV="${UV:-$HOME/.local/bin/uv}"
+UV="${UV:-$(command -v uv || true)}"
 export PATH="/usr/bin:$PATH"   # Node 20 lives in /usr/bin on the reference workstation; ~/.local/bin/node (v26) must not shadow it
+
+if [ -z "$UV" ]; then
+  echo "installation refused: uv is not available on PATH; set UV to its absolute executable path" >&2
+  exit 2
+fi
 
 step() { printf '\n== %s\n' "$*"; }
 
@@ -37,7 +44,7 @@ if ! "$UV" run --directory backend --frozen --offline python ../scripts/validate
 fi
 
 step "pinned upstream matcher sources (setup-time acquisition into the data directory)"
-"$UV" run --directory backend --frozen --offline python -m qualsight.cli setup
+env PYTHONPATH="$ROOT/backend/src:$ROOT" "$UV" run --directory backend --frozen --offline python -m qualsight.cli setup
 
 step "registry validation (every registered artifact hash)"
 "$UV" run --directory backend --frozen --offline python ../scripts/validate_resource_registry.py ../resources/resource-registry.json
@@ -47,5 +54,5 @@ python3 scripts/validate_metric_registry.py metrics/metric-registry.json
 python3 scripts/validate_atg_documents.py
 
 step "installed"
-echo "Start the product with: $UV run --directory backend --frozen --offline python -m qualsight.cli serve   (console + API on http://127.0.0.1:8480)"
+echo "Start the product with: env PYTHONPATH=$ROOT/backend/src:$ROOT $UV run --directory backend --frozen --offline python -m qualsight.cli serve   (console + API on http://127.0.0.1:8480)"
 echo "Verify offline operation with: python3 scripts/offline_gate.py"

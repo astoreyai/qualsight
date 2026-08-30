@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import inspect
 import json
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -24,15 +28,22 @@ class RealMatcherApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.data_dir = Path(tempfile.mkdtemp(prefix="qualsight-matcher-api-"))
-        settings = Settings(repository_root=ROOT, registry_path=ROOT / "resources" / "resource-registry.json", data_dir=cls.data_dir,
-                            runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID, input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, LFW_RESOURCE_ID))
-        cls.client = TestClient(create_app(settings))
+        cls.settings = Settings(repository_root=ROOT, registry_path=ROOT / "resources" / "resource-registry.json", data_dir=cls.data_dir,
+                                runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID, input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, LFW_RESOURCE_ID))
+        cls.client = TestClient(create_app(cls.settings), base_url="http://127.0.0.1")
         cls.client.__enter__()
         project = cls.client.post("/api/projects", json={"name": "matcher api gate", "description": "QS-C22 API.", "purpose_scope": RESEARCH_SCOPE}).json()
         cls.project_id = project["project_id"]
         cls.client.post(f"/api/projects/{cls.project_id}/open")
         cls.dataset_id = cls.client.post(f"/api/projects/{cls.project_id}/datasets/import-registered", json={"resource_id": LFW_RESOURCE_ID, "verify_hashes": False}).json()["dataset_id"]
         cls.protocol_id = cls.client.post(f"/api/projects/{cls.project_id}/datasets/{cls.dataset_id}/protocols/freeze-lfw-view2").json()["protocol_id"]
+        for matcher_id in (
+            "adaface-ir101-local-candidate",
+            "elasticface-arc-r100-local-candidate",
+            "transface-s-glint360k-local-candidate",
+        ):
+            pulled = cls.client.post(f"/api/matcher-assets/{matcher_id}/pull-sources")
+            assert pulled.status_code == 200, pulled.text
         started = cls.client.post(f"/api/projects/{cls.project_id}/protocols/{cls.protocol_id}/matrix", params={"fixture_pairs_only": "true"})
         assert started.status_code == 202, started.text
         cls.matrix_id = started.json()["matrix_id"]
@@ -49,11 +60,27 @@ class RealMatcherApiTests(unittest.TestCase):
         cls.client.__exit__(None, None, None)
         shutil.rmtree(cls.data_dir, ignore_errors=True)
 
-    def test_matrix_records_six_leaves_with_separate_identities(self) -> None:
+    @classmethod
+    def _run_store(cls):
+        route = next(
+            route
+            for route in cls.client.app.routes
+            if getattr(route, "path", None) == "/api/reports/{report_id}/file"
+        )
+        return inspect.getclosurevars(route.endpoint).nonlocals["store"]()
+
+    def test_matrix_records_twelve_leaves_with_separate_identities(self) -> None:
         self.assertEqual(self.status["progress"]["phase"], "completed", self.status)
         leaves = self.status["leaves"]
-        self.assertEqual(len(leaves), 6)
-        self.assertEqual({leaf["leaf_id"] for leaf in leaves}, {"QS-C22.AS", "QS-C22.AN", "QS-C22.ES", "QS-C22.EN", "QS-C22.TS", "QS-C22.TN"})
+        self.assertEqual(len(leaves), 12)
+        self.assertEqual(
+            {leaf["leaf_id"] for leaf in leaves},
+            {
+                "QS-C22.AS", "QS-C22.AN", "QS-C22.ES", "QS-C22.EN",
+                "QS-C22.MS", "QS-C22.MN", "QS-C22.PS", "QS-C22.PN",
+                "QS-C22.BS", "QS-C22.BN", "QS-C22.TS", "QS-C22.TN",
+            },
+        )
         self.assertEqual({leaf["condition_id"] for leaf in leaves}, {"SCRFD10G_ADAPTIVE_LARGEST_ARCFACE112_JPEG95_V1", "SCRFD10G_640_HIGHEST_CONFIDENCE_ARCFACE112_INMEMORY_V1"})
         for leaf in leaves:
             self.assertEqual(leaf["comparison_count"], 10)
@@ -65,7 +92,48 @@ class RealMatcherApiTests(unittest.TestCase):
             self.assertIsNone(run.json()["run"]["quality_engine"])
             self.assertEqual(run.json()["run"]["matcher"]["component_id"], leaf["matcher_id"])
         listed = self.client.get(f"/api/projects/{self.project_id}/matcher-leaves").json()
-        self.assertEqual(sum(1 for item in listed if item["provenance_marker"] == "QUALSIGHT_EXECUTED"), 6)
+        self.assertEqual(
+            sum(1 for item in listed if item["provenance_marker"] == "QUALSIGHT_EXECUTED" and item["matrix_id"] == self.matrix_id),
+            12,
+        )
+
+    def test_catalog_leaf_selection_executes_each_preprocessing_profile_as_its_own_real_run(self) -> None:
+        observed: dict[str, dict] = {}
+        for leaf_id in ("QS-C22.AS", "QS-C22.AN"):
+            started = self.client.post(
+                f"/api/projects/{self.project_id}/protocols/{self.protocol_id}/matrix",
+                params={"fixture_pairs_only": "true", "leaves": leaf_id},
+            )
+            self.assertEqual(started.status_code, 202, started.text)
+            deadline = time.monotonic() + 300
+            while time.monotonic() < deadline:
+                status = self.client.get(f"/api/matrices/{started.json()['matrix_id']}").json()
+                if status["progress"]["phase"] in {"completed", "failed"}:
+                    break
+                time.sleep(0.5)
+            self.assertEqual(status["progress"]["phase"], "completed", status)
+            self.assertEqual([leaf["leaf_id"] for leaf in status["leaves"]], [leaf_id])
+            self.assertEqual(status["leaves"][0]["comparison_count"], 10)
+            observed[leaf_id] = status["leaves"][0]
+
+        self.assertEqual(
+            {item["matcher_id"] for item in observed.values()},
+            {"adaface-ir101-local-candidate"},
+        )
+        self.assertEqual(
+            {item["condition_id"] for item in observed.values()},
+            {
+                "SCRFD10G_ADAPTIVE_LARGEST_ARCFACE112_JPEG95_V1",
+                "SCRFD10G_640_HIGHEST_CONFIDENCE_ARCFACE112_INMEMORY_V1",
+            },
+        )
+        self.assertEqual(len({item["run_id"] for item in observed.values()}), 2)
+        with TestClient(create_app(self.settings), base_url="http://127.0.0.1") as restarted:
+            for item in observed.values():
+                persisted = restarted.get(f"/api/matrices/{item['matrix_id']}")
+                self.assertEqual(persisted.status_code, 200, persisted.text)
+                self.assertEqual(persisted.json()["progress"]["phase"], "completed", persisted.json())
+                self.assertEqual(persisted.json()["progress"]["detail"], "1/1 leaves recorded")
 
     def test_metrics_comparisons_and_errors_resolve_to_real_pairs_and_samples(self) -> None:
         leaf = self.status["leaves"][0]
@@ -231,15 +299,15 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertIn(analysis_id, [item["analysis_id"] for item in listed])
 
     def test_cross_matcher_contrasts_hold_identities_fixed_and_resolve_disagreements_to_pairs(self) -> None:
-        """QS-E40–QS-E42 on the real fixture: matcher sets, nine contrasts, overlap counts verified, workbench pairs and annotations."""
+        """QS-E40–QS-E42 on the real fixture: all fixed-axis contrasts and pair-resolved evidence."""
 
         import subprocess
         import sys
 
         sets = self.client.get(f"/api/matrices/{self.matrix_id}/sets").json()
         self.assertTrue(sets["same_protocol"])
-        self.assertEqual(sets["matcher_contrasts_available"], 6)
-        self.assertEqual(sets["preprocessing_contrasts_available"], 3)
+        self.assertEqual(sets["matcher_contrasts_available"], 30)
+        self.assertEqual(sets["preprocessing_contrasts_available"], 6)
         self.assertEqual(set(sets["matcher_rights"].values()), {"APPROVED_LOCAL_RESEARCH_USE"})
         job = self._quality_job()
         body = {"matrix_id": self.matrix_id, "quality_job_id": job["job_id"], "bootstrap_replicates": 100, "seed": 3}
@@ -254,10 +322,10 @@ class RealMatcherApiTests(unittest.TestCase):
             time.sleep(0.5)
         self.assertEqual(status["state"], "COMPLETED", status)
         document = status["document"]
-        self.assertEqual(len(document["contrasts"]), 9)
+        self.assertEqual(len(document["contrasts"]), 36)
         kinds = [c["kind"] for c in document["contrasts"]]
-        self.assertEqual(kinds.count("MATCHER_CONTRAST_FIXED_CONDITION"), 6)
-        self.assertEqual(kinds.count("PREPROCESSING_CONTRAST_FIXED_MATCHER"), 3)
+        self.assertEqual(kinds.count("MATCHER_CONTRAST_FIXED_CONDITION"), 30)
+        self.assertEqual(kinds.count("PREPROCESSING_CONTRAST_FIXED_MATCHER"), 6)
         for contrast in document["contrasts"]:
             if contrast["kind"] == "MATCHER_CONTRAST_FIXED_CONDITION":
                 self.assertEqual(contrast["a"]["condition_id"], contrast["b"]["condition_id"])
@@ -299,9 +367,32 @@ class RealMatcherApiTests(unittest.TestCase):
             if artifact["uri"].endswith("crossmatcher.json"):
                 directory = Path(artifact["uri"]).parent
         self.assertIsNotNone(directory)
-        verified = subprocess.run([sys.executable, str(ROOT / "scripts" / "verify_cross_matcher.py"), str(directory), str(self.data_dir / "qualsight.sqlite3")], capture_output=True, text=True, check=False)
+        database_path = self.data_dir / "qualsight.sqlite3"
+        sidecar_paths = [Path(f"{database_path}-wal"), Path(f"{database_path}-shm")]
+        def sidecar_identities() -> dict[str, tuple[int, int] | None]:
+            return {
+                path.name: (path.stat().st_dev, path.stat().st_ino) if path.exists() else None
+                for path in sidecar_paths
+            }
+
+        sidecars_before = sidecar_identities()
+        snapshot_path = self.data_dir / "cross-matcher-verifier.snapshot.sqlite3"
+        snapshot = self._run_store().snapshot_database(snapshot_path)
+        self.assertEqual(Path(snapshot["path"]), snapshot_path)
+        self.assertEqual(snapshot["size_bytes"], snapshot_path.stat().st_size)
+        with self.assertRaises(FileExistsError):
+            self._run_store().snapshot_database(snapshot_path)
+        try:
+            verified = subprocess.run([sys.executable, str(ROOT / "scripts" / "verify_cross_matcher.py"), str(directory), str(snapshot_path)], capture_output=True, text=True, check=False)
+        finally:
+            snapshot_path.unlink(missing_ok=True)
         self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
         self.assertIn("CROSS_MATCHER_VERIFIED", verified.stdout)
+        self.assertEqual(
+            sidecar_identities(),
+            sidecars_before,
+            "the independent verifier replaced a live SQLite WAL/SHM sidecar",
+        )
         # Re-posting returns the recorded analysis.
         self.assertTrue(self.client.post(f"/api/projects/{self.project_id}/cross-matcher", json=body).json()["already_recorded"])
 
@@ -330,7 +421,7 @@ class RealMatcherApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 201, response.text)
             figures[kind] = response.json()
         det = figures["det_overlay"]
-        self.assertEqual(len(det["source_run_ids"]), 6)
+        self.assertEqual(len(det["source_run_ids"]), 12)
         for fmt in ("png", "svg", "pdf", "csv", "provenance"):
             file_response = self.client.get(det["files"][fmt])
             self.assertEqual(file_response.status_code, 200, fmt)
@@ -339,6 +430,27 @@ class RealMatcherApiTests(unittest.TestCase):
         provenance = self.client.get(det["files"]["provenance"]).json()
         self.assertEqual(provenance["metric_definitions"][0], ["biometric.verification.det", "1.0.0"])
         self.assertTrue(all(t["kind"] == "MATCHER_THRESHOLD" for t in provenance["thresholds"]))
+        figure_detail = self.client.get(f"/api/figures/{det['figure_id']}").json()
+        figure_provenance_path = Path(figure_detail["provenance"]["directory"]) / "figure.provenance.json"
+        original_figure_provenance = figure_provenance_path.read_bytes()
+        original_figure_provenance_sha256 = hashlib.sha256(original_figure_provenance).hexdigest()
+        self.assertEqual(det["provenance_sha256"], original_figure_provenance_sha256)
+        self.assertEqual(figure_detail["provenance_sha256"], original_figure_provenance_sha256)
+        self.assertEqual(
+            self.client.get(det["files"]["provenance"]).headers["X-QualSight-Sha256"],
+            original_figure_provenance_sha256,
+        )
+        reformatted_figure_provenance = (
+            json.dumps(json.loads(original_figure_provenance), sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode("utf-8")
+        self.assertNotEqual(reformatted_figure_provenance, original_figure_provenance)
+        self.assertEqual(json.loads(reformatted_figure_provenance), json.loads(original_figure_provenance))
+        try:
+            figure_provenance_path.write_bytes(reformatted_figure_provenance)
+            drifted_figure_provenance = self.client.get(det["files"]["provenance"])
+            self.assertEqual(drifted_figure_provenance.status_code, 409, drifted_figure_provenance.text)
+        finally:
+            figure_provenance_path.write_bytes(original_figure_provenance)
         again = self.client.post(f"/api/projects/{self.project_id}/figures", json={"kind": "det_overlay", "parameters": {"matrix_id": self.matrix_id}}).json()
         self.assertEqual(again["figure_id"], det["figure_id"])
         # Dashboard: saved layout reloads exactly with every panel's Run references.
@@ -364,6 +476,60 @@ class RealMatcherApiTests(unittest.TestCase):
         pdf = self.client.get(body["links"]["pdf"])
         self.assertEqual(pdf.status_code, 200)
         self.assertTrue(pdf.content.startswith(b"%PDF"))
+        report_path = Path(body["files"]["html"]["path"])
+        provenance_path = Path(body["directory"]) / "report.provenance.json"
+        original_report = report_path.read_bytes()
+        original_provenance = provenance_path.read_bytes()
+        report_route = next(
+            route
+            for route in self.client.app.routes
+            if getattr(route, "path", None) == "/api/reports/{report_id}/file"
+        )
+        prepared_response = report_route.endpoint(body["report_id"], "html")
+        replacement = report_path.with_name("report-race-replacement.html")
+        self.assertGreater(len(original_report), 1)
+        replacement.write_bytes(original_report[:-1])
+        os.replace(replacement, report_path)
+        messages: list[dict[str, object]] = []
+
+        receive_wait = asyncio.Event()
+
+        async def receive() -> dict[str, object]:
+            await receive_wait.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message: dict[str, object]) -> None:
+            messages.append(message)
+
+        try:
+            asyncio.run(
+                prepared_response(
+                    {"type": "http", "method": "GET", "path": "/", "headers": []},
+                    receive,
+                    send,
+                )
+            )
+            streamed = b"".join(
+                message.get("body", b"")
+                for message in messages
+                if message["type"] == "http.response.body"
+            )
+            self.assertEqual(hashlib.sha256(streamed).hexdigest(), body["files"]["html"]["sha256"])
+        finally:
+            report_path.write_bytes(original_report)
+        try:
+            report_path.write_bytes(original_report + Path(body["files"]["json"]["path"]).read_bytes())
+            tampered_provenance = json.loads(original_provenance)
+            tampered_provenance["files"]["html"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+            provenance_path.write_text(json.dumps(tampered_provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            self.assertEqual(self.client.get(body["links"]["html"]).status_code, 409)
+            self.assertEqual(self.client.get(f"/api/reports/{body['report_id']}/file", params={"format": "provenance"}).status_code, 409)
+            listed_report = next(item for item in self.client.get(f"/api/projects/{self.project_id}/reports").json() if item["report_id"] == body["report_id"])
+            self.assertEqual(listed_report["downloads"]["html"]["state"], "DRIFTED")
+            self.assertNotIn("html", listed_report["links"])
+        finally:
+            report_path.write_bytes(original_report)
+            provenance_path.write_bytes(original_provenance)
         permitted = self.client.post(f"/api/projects/{self.project_id}/reports", json={"spec": {**spec, "image_policy": "INCLUDE_PERMITTED"}}).json()
         self.assertGreaterEqual(permitted["images_embedded"] + permitted["images_withheld"], 0)
         self.assertEqual(permitted["provenance"]["image_policy"], "INCLUDE_PERMITTED")
@@ -404,6 +570,15 @@ class RealMatcherApiTests(unittest.TestCase):
                 target.writestr(item, data)
         blocked = self.client.post("/api/reproductions", json={"bundle_path": str(tampered)}).json()
         self.assertEqual(blocked["state"], "BLOCKED")
+        bundle_path = Path(record["path"])
+        original_bundle = bundle_path.read_bytes()
+        try:
+            bundle_path.write_bytes(tampered.read_bytes())
+            listed_bundle = next(item for item in self.client.get(f"/api/projects/{self.project_id}/bundles").json() if item["bundle_id"] == record["bundle_id"])
+            self.assertEqual(listed_bundle["download"]["state"], "DRIFTED")
+            self.assertNotIn("download", listed_bundle["links"])
+        finally:
+            bundle_path.write_bytes(original_bundle)
         listed = self.client.get("/api/reproductions", params={"original_run_id": run_id}).json()
         self.assertGreaterEqual(len(listed), 2)
 
@@ -417,23 +592,65 @@ class RealMatcherApiTests(unittest.TestCase):
             "import socket, json\n"
             "from qualsight.security.network_guard import NetworkGuardViolation, guard_status, install_network_guard\n"
             "install_network_guard()\n"
-            "refused = False\n"
+            "refused = refused_udp = False\n"
             "try:\n"
             "    socket.create_connection(('192.0.2.1', 9), timeout=1)\n"
             "except NetworkGuardViolation:\n"
             "    refused = True\n"
             "except OSError:\n"
             "    refused = False\n"
+            "udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
+            "try:\n"
+            "    udp.sendto(b'qualsight', ('192.0.2.1', 9))\n"
+            "except NetworkGuardViolation:\n"
+            "    refused_udp = True\n"
+            "finally:\n"
+            "    udp.close()\n"
             "server = socket.socket(); server.bind(('127.0.0.1', 0)); server.listen(1)\n"
             "client = socket.create_connection(server.getsockname(), timeout=2)\n"
             "client.close(); server.close()\n"
-            "print(json.dumps({'refused': refused, 'status': guard_status()}))\n"
+            "print(json.dumps({'refused': refused, 'refused_udp': refused_udp, 'status': guard_status()}))\n"
         )
         result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False, cwd=str(ROOT / "backend"), env={**__import__("os").environ, "PYTHONPATH": "src:.."})
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout.strip().splitlines()[-1])
         self.assertTrue(report["refused"], report)
-        self.assertEqual(len(report["status"]["refused_attempts"]), 1)
+        self.assertTrue(report["refused_udp"], report)
+        self.assertEqual(len(report["status"]["refused_attempts"]), 2)
+
+    def test_project_embedding_inventory_rehashes_recorded_artifacts(self) -> None:
+        inventory = self.client.get(f"/api/projects/{self.project_id}/embeddings")
+        self.assertEqual(inventory.status_code, 200, inventory.text)
+        items = inventory.json()
+        executed_leaves = [
+            item
+            for item in self.client.get(f"/api/projects/{self.project_id}/matcher-leaves").json()
+            if item["provenance_marker"] == "QUALSIGHT_EXECUTED"
+        ]
+        self.assertEqual(len(items), len(executed_leaves))
+        self.assertEqual({item["run_id"] for item in items}, {item["run_id"] for item in executed_leaves})
+        for item in items:
+            self.assertEqual(item["integrity"], "VERIFIED")
+            self.assertEqual(item["dimension"], 512)
+            self.assertGreater(item["rows"], 0)
+            self.assertEqual(item["registered_sha256"], item["observed_sha256"])
+            self.assertIn("/api/exports/embeddings", item["links"]["export_parquet"])
+        first = items[0]
+        run = self.client.get(first["links"]["run"]).json()["run"]
+        embedding_path = Path(next(artifact["uri"] for artifact in run["artifacts"] if artifact["uri"].endswith("embeddings.npy")))
+        real_sample = self.client.get(f"/api/datasets/{self.dataset_id}/samples", params={"limit": 1}).json()[0]
+        original = embedding_path.read_bytes()
+        try:
+            embedding_path.write_bytes(Path(real_sample["source_path"]).read_bytes())
+            drifted = self.client.get(f"/api/projects/{self.project_id}/embeddings")
+            self.assertEqual(drifted.status_code, 200, drifted.text)
+            changed = next(item for item in drifted.json() if item["run_id"] == first["run_id"])
+            self.assertEqual(changed["integrity"], "DRIFTED")
+            self.assertIsNotNone(changed["integrity_reason"])
+            self.assertIsNone(changed["rows"])
+            self.assertIsNone(changed["dimension"])
+        finally:
+            embedding_path.write_bytes(original)
 
     def test_zz_audit_attribution_and_verified_purge(self) -> None:
         """QS-H70/QS-H71: every meaningful action carries the configured user and a timestamp; purge removes and re-verifies derived artifacts and is itself audited."""
@@ -453,9 +670,14 @@ class RealMatcherApiTests(unittest.TestCase):
         for expected_subject in ("Figure", "Report", "Bundle", "Dashboard", "Reproduction", "MatcherMatrix", "QualityBatchJob"):
             self.assertIn(expected_subject, subjects, sorted(subjects))
         # Local data controls audit over this test's data directory finds no secrets and the sanctioned network posture.
-        audit = subprocess.run([sys.executable, str(ROOT / "scripts" / "audit_local_data_controls.py"), "--data-dir", str(self.data_dir)], capture_output=True, text=True, check=False)
+        audit_snapshot = self.data_dir / "local-data-audit.snapshot.sqlite3"
+        self._run_store().snapshot_database(audit_snapshot)
+        try:
+            audit = subprocess.run([sys.executable, str(ROOT / "scripts" / "audit_local_data_controls.py"), "--data-dir", str(self.data_dir), "--database-snapshot", str(audit_snapshot)], capture_output=True, text=True, check=False)
+        finally:
+            audit_snapshot.unlink(missing_ok=True)
         self.assertEqual(audit.returncode, 0, audit.stdout[-800:] + audit.stderr[-400:])
-        # Purge: scope is listed, confirmation is required, files are deleted and re-verified, records remain as tombstones, and the action is audited.
+        # Purge: scope is listed, confirmation is required, managed files and scientific metadata are removed and re-verified, and the audit tombstone remains.
         scope = self.client.get(f"/api/projects/{self.project_id}/purge-scope").json()
         self.assertGreater(len(scope["targets"]["files"]) + len(scope["targets"]["directories"]), 5)
         self.assertIn("not scrubbed", scope["scope"])
@@ -467,8 +689,11 @@ class RealMatcherApiTests(unittest.TestCase):
         record = purged.json()
         self.assertTrue(record["verified"], record)
         self.assertEqual(record["remaining_after_purge"], [])
+        self.assertTrue(record["metadata"]["verified"], record["metadata"])
+        self.assertFalse(any(record["metadata"]["remaining"].values()), record["metadata"])
         self.assertFalse(any(Path(path).exists() for path in before))
-        self.assertIsNotNone(self.client.get(f"/api/runs/{self.status['leaves'][0]['run_id']}").json()["run"])  # tombstone metadata remains
+        self.assertEqual(self.client.get(f"/api/runs/{self.status['leaves'][0]['run_id']}").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/projects/{self.project_id}/datasets").json(), [])
         purges = self.client.get(f"/api/projects/{self.project_id}/purges").json()
         self.assertEqual(purges[-1]["purge_id"], record["purge_id"])
         after = self.client.get(f"/api/projects/{self.project_id}/audit").json()
@@ -672,6 +897,14 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertTrue(str(environment.get("image_id", "")).startswith("sha256:"))
         self.assertEqual(environment.get("network"), "none")
         self.assertTrue(environment.get("rootfs_manifest_sha256"))
+        self.assertEqual(
+            environment.get("resource_limits"),
+            {"memory": "8g", "cpus": 4.0, "pids": 256, "tmpfs": "256m"},
+        )
+        launcher = environment.get("launcher_commands", [])[0]
+        self.assertIn("--memory", launcher)
+        self.assertIn("--cpus", launcher)
+        self.assertIn("--pids-limit", launcher)
         # Same measures as the host adapter over the same samples.
         host = {r["sample_id"]: r for r in pq.read_table(host_job["parquet_path"]).to_pylist()}
         container = {r["sample_id"]: r for r in pq.read_table(job["parquet_path"]).to_pylist()}

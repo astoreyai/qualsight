@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0",
+  "policy_id": "qualsight-controlled-workstation-beta-release-v1",
+  "source_archive_excluded_paths": [
+    "AGENTS.md",
+    "ATG_LOOP.md",
+    "ATG_PLAN.md",
+    "IMPLEMENTATION_PLAN.md",
+    "PROMPT.md",
+    "atg",
+    "backend/tests/fixtures",
+    "docs/performance"
+  ],
+  "source_archive_forbidden_suffixes": [
+    ".bmp",
+    ".ckpt",
+    ".db",
+    ".dll",
+    ".dylib",
+    ".exe",
+    ".gif",
+    ".jpeg",
+    ".jpg",
+    ".jp2",
+    ".npy",
+    ".npz",
+    ".onnx",
+    ".parquet",
+    ".pkl",
+    ".png",
+    ".pt",
+    ".pth",
+    ".safetensors",
+    ".so",
+    ".sqlite",
+    ".sqlite3",
+    ".tif",
+    ".tiff",
+    ".webp"
+  ],
+  "source_archive_forbidden_names": [
+    ".env",
+    ".netrc",
+    "credentials",
+    "credentials.json",
+    "id_ed25519",
+    "id_rsa"
+  ],
+  "source_archive_forbidden_name_prefixes": [
+    ".env."
+  ],
+  "source_archive_forbidden_path_terms": [
+    "screenshot"
+  ],
+  "source_archive_secret_scan": true,
+  "excluded_content_classes": [
+    "Internal agent instructions, execution plans, append-only ATG records, and runtime observations that can contain operator identity, deployment-local paths, subject identifiers, quality measures, or comparison scores.",
+    "Recorded real-result fixtures that contain derived biometric measurements or local actor attribution.",
+    "Runtime performance records that contain deployment-local storage paths and machine-specific observations."
+  ],
+  "included_metadata_boundary": "Application source code, public protocol identifiers, registered artifact hashes, distributable aggregate assurance documents, release controls, and registry paths for the controlled deployment remain included; internal session records, source images, checkpoints, embeddings, operational databases, runtime observations, machine-specific performance records, and recorded result fixtures are excluded. The source archive is a controlled-host package, not a portable or generally redistributable bundle."
+}

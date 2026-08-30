@@ -11,7 +11,9 @@ similarity (higher is more similar).
 Frozen transforms (ATG_PLAN):
 * ADAFACE_IR101_BGR_NEG1_POS1_L2_V1 — BGR CHW float32 scaled to [-1, 1];
 * ELASTICFACE_ARC_R100_RGB_NEG1_POS1_L2_V1 — BGR→RGB CHW float32 in [-1, 1];
-* TRANSFACE_S_P9_RGB_NEG1_POS1_L2_V1 — BGR→RGB CHW float32 in [-1, 1].
+* MAGFACE_IR100_BGR_ZERO_ONE_L2_V1 — BGR CHW float32 in [0, 1];
+* TOPOFR_R100_RGB_NEG1_POS1_L2_V1 — BGR→RGB CHW float32 in [-1, 1];
+* TRANSFACE_{S,B}_P9_RGB_NEG1_POS1_L2_V1 — BGR→RGB CHW float32 in [-1, 1].
 """
 
 from __future__ import annotations
@@ -26,28 +28,41 @@ import numpy as np
 import torch
 
 from ..execution.registry_binding import ResourceRegistry
+from .acquisition import MANIFEST_NAME as CHECKPOINT_MANIFEST_NAME, CheckpointStore
 from .upstream import UpstreamSources
 
 
 class MatcherId(StrEnum):
     ADAFACE_IR101 = "adaface-ir101-local-candidate"
     ELASTICFACE_ARC_R100 = "elasticface-arc-r100-local-candidate"
+    MAGFACE_IRESNET100 = "magface-iresnet100-ms1mv2-local-candidate"
+    TOPOFR_R100 = "topofr-r100-glint360k-local-candidate"
+    TRANSFACE_B = "transface-b-glint360k-local-candidate"
     TRANSFACE_S = "transface-s-glint360k-local-candidate"
 
 
 TRANSFORM_IDS: dict[MatcherId, str] = {
     MatcherId.ADAFACE_IR101: "ADAFACE_IR101_BGR_NEG1_POS1_L2_V1",
     MatcherId.ELASTICFACE_ARC_R100: "ELASTICFACE_ARC_R100_RGB_NEG1_POS1_L2_V1",
+    MatcherId.MAGFACE_IRESNET100: "MAGFACE_IR100_BGR_ZERO_ONE_L2_V1",
+    MatcherId.TOPOFR_R100: "TOPOFR_R100_RGB_NEG1_POS1_L2_V1",
+    MatcherId.TRANSFACE_B: "TRANSFACE_B_P9_RGB_NEG1_POS1_L2_V1",
     MatcherId.TRANSFACE_S: "TRANSFACE_S_P9_RGB_NEG1_POS1_L2_V1",
 }
 COLOR_ORDER: dict[MatcherId, str] = {
     MatcherId.ADAFACE_IR101: "BGR",
     MatcherId.ELASTICFACE_ARC_R100: "RGB",
+    MatcherId.MAGFACE_IRESNET100: "BGR",
+    MatcherId.TOPOFR_R100: "RGB",
+    MatcherId.TRANSFACE_B: "RGB",
     MatcherId.TRANSFACE_S: "RGB",
 }
 UPSTREAM_KEYS: dict[MatcherId, tuple[str, ...]] = {
     MatcherId.ADAFACE_IR101: ("adaface_net",),
     MatcherId.ELASTICFACE_ARC_R100: ("insightface_arcface_torch_iresnet",),
+    MatcherId.MAGFACE_IRESNET100: ("insightface_arcface_torch_iresnet",),
+    MatcherId.TOPOFR_R100: ("insightface_arcface_torch_iresnet",),
+    MatcherId.TRANSFACE_B: ("transface_vit", "transface_backbones_init"),
     MatcherId.TRANSFACE_S: ("transface_vit", "transface_backbones_init"),
 }
 
@@ -78,18 +93,39 @@ def sha256_file(path: Path) -> str:
 
 
 class FrozenMatcher:
-    def __init__(self, matcher_id: MatcherId, registry: ResourceRegistry, upstream: UpstreamSources, device: str | None = None) -> None:
+    def __init__(
+        self,
+        matcher_id: MatcherId,
+        registry: ResourceRegistry,
+        upstream: UpstreamSources,
+        device: str | None = None,
+        checkpoint_store: CheckpointStore | None = None,
+    ) -> None:
         self.matcher_id = matcher_id
         resource = registry.resource(matcher_id.value)
         if resource.state not in {"APPROVED_LOCAL_RESEARCH_USE", "VERIFIED_LIMITED_USE"}:
             raise MatcherRuntimeError(f"{matcher_id.value} is {resource.state}; refusing to load")
-        models = [item for item in resource.artifacts if item.role == "MODEL"]
-        if len(models) != 1 or models[0].identity.path is None:
-            raise MatcherRuntimeError(f"{matcher_id.value} must register exactly one MODEL artifact")
-        checkpoint = Path(models[0].identity.path)
+        checkpoints = checkpoint_store or CheckpointStore(
+            registry,
+            upstream.manifest_path.with_name(CHECKPOINT_MANIFEST_NAME),
+            upstream.root.parent,
+        )
+        try:
+            identity, checkpoint, _ = checkpoints.resolve(matcher_id.value)
+        except Exception as error:
+            raise MatcherRuntimeError(
+                f"{matcher_id.value}: checkpoint resolution failed: {error}"
+            ) from error
+        if checkpoint.is_symlink():
+            raise MatcherRuntimeError(
+                f"{matcher_id.value}: checkpoint path may not be a symlink: {checkpoint}"
+            )
         digest = sha256_file(checkpoint)
-        if digest != models[0].identity.sha256:
-            raise MatcherRuntimeError(f"{matcher_id.value}: checkpoint bytes {digest} differ from the registered {models[0].identity.sha256}")
+        if digest != identity.sha256 or checkpoint.stat().st_size != identity.size_bytes:
+            raise MatcherRuntimeError(
+                f"{matcher_id.value}: checkpoint bytes {digest} differ from the registered "
+                f"{identity.sha256}/{identity.size_bytes} bytes"
+            )
         self.device = device or select_device()
         source_digests: list[str] = []
         for key in UPSTREAM_KEYS[matcher_id]:
@@ -102,16 +138,53 @@ class FrozenMatcher:
             if not isinstance(state, dict) or "state_dict" not in state:
                 raise MatcherRuntimeError("AdaFace checkpoint does not carry a state_dict")
             state_dict = {key[len("model.") :]: value for key, value in state["state_dict"].items() if key.startswith("model.")}
-        elif matcher_id is MatcherId.ELASTICFACE_ARC_R100:
+        elif matcher_id in {
+            MatcherId.ELASTICFACE_ARC_R100,
+            MatcherId.MAGFACE_IRESNET100,
+            MatcherId.TOPOFR_R100,
+        }:
             iresnet = upstream.load_module("insightface_arcface_torch_iresnet")
             model = iresnet.iresnet100(num_features=512)
-            state_dict = state
+            if not isinstance(state, dict):
+                raise MatcherRuntimeError(f"{matcher_id.value}: checkpoint is not a state mapping")
+            if matcher_id is MatcherId.ELASTICFACE_ARC_R100:
+                state_dict = state
+            elif matcher_id is MatcherId.MAGFACE_IRESNET100:
+                raw_state = state.get("state_dict")
+                if not isinstance(raw_state, dict):
+                    raise MatcherRuntimeError("MagFace checkpoint does not carry a state_dict")
+                model_keys = set(model.state_dict())
+                state_dict = {}
+                for key, value in raw_state.items():
+                    prefix = "features.module."
+                    if not key.startswith(prefix):
+                        continue
+                    stripped = key[len(prefix) :]
+                    if stripped in model_keys:
+                        state_dict[stripped] = value
+                if set(state_dict) != model_keys:
+                    missing = sorted(model_keys - set(state_dict))
+                    raise MatcherRuntimeError(
+                        f"MagFace inference backbone is incomplete: missing={missing[:10]}"
+                    )
+            else:
+                state_dict = {
+                    key.removeprefix("module.").removeprefix("backbone."): value
+                    for key, value in state.items()
+                    if key.removeprefix("module.").removeprefix("backbone.") != "weight"
+                    and "head." not in key
+                    and "margin" not in key
+                }
         else:
             vit = upstream.load_module("transface_vit")
-            # Constructor arguments from TransFace backbones/__init__.py @ fb6cd56d, name vit_s_dp005_mask_0.
+            # Constructor arguments from TransFace backbones/__init__.py @ fb6cd56d.
+            is_large = matcher_id is MatcherId.TRANSFACE_B
             model = vit.VisionTransformer(
-                img_size=112, patch_size=9, num_classes=512, embed_dim=512, depth=12,
-                num_heads=8, drop_path_rate=0.05, norm_layer="ln", mask_ratio=0.0,
+                img_size=112, patch_size=9, num_classes=512, embed_dim=512,
+                depth=24 if is_large else 12, num_heads=8,
+                drop_path_rate=0.05, norm_layer="ln",
+                mask_ratio=0.05 if is_large else 0.0,
+                using_checkpoint=is_large,
             )
             state_dict = state
         result = model.load_state_dict(state_dict, strict=True)
@@ -140,7 +213,10 @@ class FrozenMatcher:
         if COLOR_ORDER[self.matcher_id] == "RGB":
             array = array[:, :, :, ::-1]
         array = np.ascontiguousarray(array).astype(np.float32)
-        array = (array / 255.0 - 0.5) / 0.5  # [-1, 1]
+        if self.matcher_id is MatcherId.MAGFACE_IRESNET100:
+            array = array / 255.0
+        else:
+            array = (array / 255.0 - 0.5) / 0.5  # [-1, 1]
         tensor = torch.from_numpy(array).permute(0, 3, 1, 2).contiguous()
         return tensor.to(self.device)
 
@@ -165,7 +241,7 @@ class FrozenMatcher:
         return (embeddings / norms).astype(np.float32)
 
 
-MIN_FREE_CUDA_BYTES = 1_500_000_000  # the three matchers need well under 1.5 GiB; below that the shared GPU is treated as unavailable
+MIN_FREE_CUDA_BYTES = 1_500_000_000  # these matchers need well under 1.5 GiB; below that the shared GPU is treated as unavailable
 
 
 def select_device() -> str:

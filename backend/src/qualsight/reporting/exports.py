@@ -12,7 +12,7 @@ import csv
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator
 
 import numpy as np
 import pyarrow as pa
@@ -43,31 +43,50 @@ def _classification_of_run(store: Any, run_id: str) -> str:
     return "RESTRICTED" if "RESTRICTED" in classes else (classes.pop() if len(classes) == 1 else "SENSITIVE_BIOMETRIC_DERIVED")
 
 
-def _rows_quality_results(store: Any, job_id: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _parquet_row_source(
+    path: Path,
+    additions: dict[str, Any],
+) -> tuple[Callable[[], Iterator[dict[str, Any]]], int]:
+    parquet = pq.ParquetFile(path)
+    row_count = parquet.metadata.num_rows
+
+    def rows() -> Iterator[dict[str, Any]]:
+        for batch in parquet.iter_batches(batch_size=512):
+            for row in batch.to_pylist():
+                row.update(additions)
+                yield row
+
+    return rows, row_count
+
+
+def _rows_quality_results(store: Any, job_id: str) -> tuple[Callable[[], Iterator[dict[str, Any]]], int, dict[str, Any]]:
     job = store.job(job_id)
     if job is None or not job.get("parquet_path"):
         raise ExportError("quality job is not recorded")
-    rows = pq.read_table(job["parquet_path"]).to_pylist()
-    for row in rows:
-        row["job_id"] = job_id
-        row["run_id"] = job["run_id"]
-    return rows, {"job_id": job_id, "run_id": job["run_id"], "parquet_sha256": job["parquet_sha256"], "engine_version": job["engine_version"]}
+    rows, count = _parquet_row_source(
+        Path(job["parquet_path"]),
+        {"job_id": job_id, "run_id": job["run_id"]},
+    )
+    return rows, count, {"job_id": job_id, "run_id": job["run_id"], "parquet_sha256": job["parquet_sha256"], "engine_version": job["engine_version"], "read_strategy": "PARQUET_BATCH_STREAM_V1"}
 
 
-def _rows_comparisons(store: Any, run_id: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _rows_comparisons(store: Any, run_id: str) -> tuple[Callable[[], Iterator[dict[str, Any]]], int, dict[str, Any]]:
     row = store.matcher_leaf(run_id)
     if row is None:
         raise ExportError("matcher run is not recorded")
-    rows = pq.read_table(row["comparisons_parquet"]).to_pylist()
-    for item in rows:
-        item["run_id"] = run_id
-        item["matcher_id"] = row["matcher_id"]
-        item["condition_id"] = row["condition_id"]
-        item["protocol_id"] = row["protocol_id"]
-    return rows, {"run_id": run_id, "leaf_id": row["leaf_id"], "comparisons_sha256": row["comparisons_sha256"], "matcher_id": row["matcher_id"], "condition_id": row["condition_id"]}
+    rows, count = _parquet_row_source(
+        Path(row["comparisons_parquet"]),
+        {
+            "run_id": run_id,
+            "matcher_id": row["matcher_id"],
+            "condition_id": row["condition_id"],
+            "protocol_id": row["protocol_id"],
+        },
+    )
+    return rows, count, {"run_id": run_id, "leaf_id": row["leaf_id"], "comparisons_sha256": row["comparisons_sha256"], "matcher_id": row["matcher_id"], "condition_id": row["condition_id"], "read_strategy": "PARQUET_BATCH_STREAM_V1"}
 
 
-def _rows_embeddings(store: Any, run_id: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _rows_embeddings(store: Any, run_id: str) -> tuple[Callable[[], Iterator[dict[str, Any]]], int, dict[str, Any]]:
     row = store.matcher_leaf(run_id)
     if row is None:
         raise ExportError("matcher run is not recorded")
@@ -77,7 +96,7 @@ def _rows_embeddings(store: Any, run_id: str) -> tuple[list[dict[str, Any]], dic
         raise ExportError("run has no embeddings artifact")
     if sha256_file(Path(embeddings_artifact.uri)) != embeddings_artifact.sha256:
         raise ExportError("embeddings artifact bytes drifted from the recorded hash")
-    vectors = np.load(embeddings_artifact.uri)
+    vectors = np.load(embeddings_artifact.uri, mmap_mode="r")
     comparisons = pq.read_table(row["comparisons_parquet"], columns=["fold", "source_order", "left_sample_id", "right_sample_id", "failure", "failure_side"]).to_pylist()
     comparisons.sort(key=lambda r: (r["fold"], r["source_order"]))
     ordered: list[str] = []
@@ -92,8 +111,16 @@ def _rows_embeddings(store: Any, run_id: str) -> tuple[list[dict[str, Any]], dic
     successful = [sample_id for sample_id in ordered if sample_id not in failed]
     if len(successful) != vectors.shape[0]:
         raise ExportError(f"embedding rows ({vectors.shape[0]}) do not reconcile to the successful sample count ({len(successful)}) reconstructed from the comparison records")
-    rows = [{"run_id": run_id, "row_index": index, "sample_id": sample_id, "embedding": [float(v) for v in vectors[index]]} for index, sample_id in enumerate(successful)]
-    return rows, {"run_id": run_id, "leaf_id": row["leaf_id"], "embeddings_sha256": embeddings_artifact.sha256, "dimension": int(vectors.shape[1]) if vectors.ndim == 2 else None, "row_order": "successful samples in first-appearance protocol order (matrix.py success_index)"}
+    def rows() -> Iterator[dict[str, Any]]:
+        for index, sample_id in enumerate(successful):
+            yield {
+                "run_id": run_id,
+                "row_index": index,
+                "sample_id": sample_id,
+                "embedding": [float(value) for value in vectors[index]],
+            }
+
+    return rows, len(successful), {"run_id": run_id, "leaf_id": row["leaf_id"], "embeddings_sha256": embeddings_artifact.sha256, "dimension": int(vectors.shape[1]) if vectors.ndim == 2 else None, "row_order": "successful samples in first-appearance protocol order (matrix.py success_index)", "read_strategy": "NUMPY_READ_ONLY_MEMMAP_STREAM_V1"}
 
 
 def _rows_metric_tables(store: Any, run_id: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -148,14 +175,19 @@ def export_table(store: Any, *, category: str, ref: str, fmt: str, root: Path) -
         raise ExportError(f"unknown export category {category}")
     if fmt not in FORMATS:
         raise ExportError(f"unknown export format {fmt}")
+    row_factory: Callable[[], Iterator[dict[str, Any]]] | None = None
+    row_count: int | None = None
     if category == "quality_results":
-        rows, source = _rows_quality_results(store, ref)
+        row_factory, row_count, source = _rows_quality_results(store, ref)
+        rows = []
         classification = "SENSITIVE_BIOMETRIC_DERIVED"
     elif category in ("matcher_scores", "comparison_records"):
-        rows, source = _rows_comparisons(store, ref)
+        row_factory, row_count, source = _rows_comparisons(store, ref)
+        rows = []
         classification = _classification_of_run(store, ref)
     elif category == "embeddings":
-        rows, source = _rows_embeddings(store, ref)
+        row_factory, row_count, source = _rows_embeddings(store, ref)
+        rows = []
         classification = "SENSITIVE_BIOMETRIC_DERIVED"
     elif category == "metric_tables":
         rows, source = _rows_metric_tables(store, ref)
@@ -172,25 +204,64 @@ def export_table(store: Any, *, category: str, ref: str, fmt: str, root: Path) -
     directory = root / export_id.replace(":", "_")
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{category}.{fmt}"
+    def iter_rows() -> Iterator[dict[str, Any]]:
+        return row_factory() if row_factory is not None else iter(rows)
+
     if fmt == "csv":
         columns: list[str] = []
-        for item in rows:
-            for key in item:
-                if key not in columns:
-                    columns.append(key)
+        streamed_rows: Iterator[dict[str, Any]] | None = None
+        if row_factory is not None:
+            streamed_rows = iter_rows()
+            first = next(streamed_rows, None)
+            columns = list(first) if first is not None else []
+        else:
+            for item in rows:
+                for key in item:
+                    if key not in columns:
+                        columns.append(key)
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=columns)
             writer.writeheader()
-            for item in rows:
+            if row_factory is not None and first is not None:
+                writer.writerow({key: (json.dumps(value) if isinstance(value, (list, dict)) else value) for key, value in first.items()})
+            for item in streamed_rows if streamed_rows is not None else iter_rows():
                 writer.writerow({key: (json.dumps(value) if isinstance(value, (list, dict)) else value) for key, value in item.items()})
     elif fmt == "json":
-        path.write_text(json.dumps({"category": category, "source": source, "rows": rows}, indent=1, sort_keys=True, allow_nan=False, default=str) + "\n", encoding="utf-8")
+        with path.open("w", encoding="utf-8") as handle:
+            handle.write("{\n \"category\": ")
+            handle.write(json.dumps(category, allow_nan=False))
+            handle.write(",\n \"rows\": [")
+            for index, item in enumerate(iter_rows()):
+                handle.write("," if index else "")
+                handle.write("\n  ")
+                handle.write(json.dumps(item, sort_keys=True, allow_nan=False, default=str))
+            handle.write("\n ],\n \"source\": ")
+            handle.write(json.dumps(source, sort_keys=True, allow_nan=False, default=str))
+            handle.write("\n}\n")
     else:
-        if rows:
-            pq.write_table(pa.Table.from_pylist(rows), path, compression="zstd")
-        else:
+        writer: pq.ParquetWriter | None = None
+        batch: list[dict[str, Any]] = []
+        try:
+            for item in iter_rows():
+                batch.append(item)
+                if len(batch) == 512:
+                    table = pa.Table.from_pylist(batch)
+                    if writer is None:
+                        writer = pq.ParquetWriter(path, table.schema, compression="zstd")
+                    writer.write_table(table)
+                    batch.clear()
+            if batch:
+                table = pa.Table.from_pylist(batch)
+                if writer is None:
+                    writer = pq.ParquetWriter(path, table.schema, compression="zstd")
+                writer.write_table(table)
+        finally:
+            if writer is not None:
+                writer.close()
+        if writer is None:
             pq.write_table(pa.table({"run_id": pa.array([], pa.string())}), path)
-    record = {"export_id": export_id, "version": EXPORT_VERSION, "category": category, "ref": ref, "format": fmt, "rows": len(rows), "classification": classification, "source": source,
+    exported_rows = row_count if row_count is not None else len(rows)
+    record = {"export_id": export_id, "version": EXPORT_VERSION, "category": category, "ref": ref, "format": fmt, "rows": exported_rows, "classification": classification, "source": source,
               "path": str(path), "sha256": sha256_file(path), "size_bytes": path.stat().st_size, "created_at": _now(), "note": "rows carry run_id / analysis identifiers that trace to the immutable source Run; image bytes are never exported"}
     (directory / f"{category}.{fmt}.provenance.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return record

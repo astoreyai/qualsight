@@ -13,8 +13,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
+import tempfile
 import threading
 
 from typing import Any
@@ -23,8 +25,21 @@ from ..domain.entities import Artifact, AuditEvent, AuditEventType, Dataset, Exp
 from ..domain.primitives import CanonicalJson, ComponentBinding, ComponentState
 from ..domain.run import CompletedRun
 from ..engines.ofiq.adapter import SingleSampleRunBundle
+from ..security.owner_file_lock import serialized_owner_file_mutation
+
+SCHEMA_MIGRATIONS = (
+    (1, "BASE_APPEND_ONLY_RUN_STORE"),
+    (2, "REPORT_AND_MATCHER_LEAF_COMPATIBILITY_COLUMNS"),
+    (3, "DURABLE_OPERATIONS_AND_PURGE_JOURNAL"),
+    (4, "PAIR_PROTOCOLS_WITH_OPTIONAL_FOLD_AUTHORITY"),
+)
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    applied_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS projects (
     project_id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
@@ -75,6 +90,16 @@ CREATE TABLE IF NOT EXISTS audit_events (
     evidence_sha256 TEXT NOT NULL,
     record_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS system_events (
+    system_event_id TEXT PRIMARY KEY,
+    actor_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    evidence_sha256 TEXT NOT NULL,
+    record_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS system_events_by_time ON system_events(occurred_at);
 CREATE INDEX IF NOT EXISTS runs_by_sample ON runs(sample_id, start_time);
 CREATE TABLE IF NOT EXISTS project_versions (
     project_id TEXT NOT NULL REFERENCES projects(project_id),
@@ -127,7 +152,7 @@ CREATE TABLE IF NOT EXISTS protocols (
 CREATE TABLE IF NOT EXISTS protocol_pairs (
     protocol_id TEXT NOT NULL REFERENCES protocols(protocol_id),
     pair_id TEXT NOT NULL,
-    fold INTEGER NOT NULL,
+    fold INTEGER,
     source_order INTEGER NOT NULL,
     label TEXT NOT NULL,
     left_sample_id TEXT NOT NULL,
@@ -152,6 +177,7 @@ CREATE TABLE IF NOT EXISTS matcher_leaves (
     comparison_count INTEGER NOT NULL,
     scored_count INTEGER NOT NULL,
     failed_count INTEGER NOT NULL,
+    expected_leaf_count INTEGER NOT NULL,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS matcher_leaves_by_matrix ON matcher_leaves(matrix_id, leaf_id);
@@ -233,6 +259,8 @@ CREATE TABLE IF NOT EXISTS reports (
     provenance_json TEXT NOT NULL,
     html_sha256 TEXT NOT NULL,
     pdf_sha256 TEXT NOT NULL,
+    json_sha256 TEXT,
+    provenance_sha256 TEXT,
     created_by TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
@@ -325,6 +353,19 @@ CREATE TABLE IF NOT EXISTS purges (
     verified INTEGER NOT NULL,
     record_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS purge_journal (
+    purge_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('INTENT_RECORDED', 'FILES_IN_PROGRESS', 'FILES_VERIFIED', 'METADATA_VERIFIED', 'FAILED', 'COMPLETED')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    targets_json TEXT NOT NULL,
+    progress_json TEXT NOT NULL,
+    error TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS purge_journal_one_unresolved_per_project
+ON purge_journal(project_id) WHERE state != 'COMPLETED';
 CREATE TABLE IF NOT EXISTS reproductions (
     reproduction_id TEXT PRIMARY KEY,
     project_id TEXT,
@@ -335,6 +376,19 @@ CREATE TABLE IF NOT EXISTS reproductions (
     report_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS operations (
+    operation_id TEXT PRIMARY KEY,
+    operation_kind TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(project_id),
+    state TEXT NOT NULL CHECK (state IN ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'INTERRUPTED')),
+    accepted_at TEXT NOT NULL,
+    started_at TEXT,
+    ended_at TEXT,
+    request_json TEXT NOT NULL,
+    output_path TEXT,
+    error TEXT
+);
+CREATE INDEX IF NOT EXISTS operations_by_project ON operations(project_id, accepted_at);
 CREATE TABLE IF NOT EXISTS jobs (
     job_id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL REFERENCES projects(project_id),
@@ -368,6 +422,12 @@ CREATE TABLE IF NOT EXISTS owner_supplied_inputs (
     source_kind TEXT NOT NULL,
     admitted_at TEXT NOT NULL,
     record_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS owner_supplied_project_refs (
+    path TEXT NOT NULL REFERENCES owner_supplied_inputs(path) ON DELETE CASCADE,
+    project_id TEXT NOT NULL,
+    record_json TEXT NOT NULL,
+    PRIMARY KEY (path, project_id)
 );
 CREATE TABLE IF NOT EXISTS import_mappings (
     mapping_name TEXT PRIMARY KEY,
@@ -414,6 +474,75 @@ class RunStore:
         self._connection.execute("PRAGMA foreign_keys=ON")
         self._connection.execute("PRAGMA busy_timeout=30000")
         self._connection.executescript(SCHEMA)
+        recorded_versions = {
+            int(row[0]): str(row[1])
+            for row in self._connection.execute(
+                "SELECT version, name FROM schema_migrations ORDER BY version"
+            ).fetchall()
+        }
+        supported_versions = {version: name for version, name in SCHEMA_MIGRATIONS}
+        unknown = set(recorded_versions) - set(supported_versions)
+        mismatched = {
+            version
+            for version, name in recorded_versions.items()
+            if supported_versions.get(version) != name
+        }
+        if unknown or mismatched:
+            raise RuntimeError(
+                f"database schema migration history is unsupported: unknown={sorted(unknown)}, mismatched={sorted(mismatched)}"
+            )
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            self._connection.execute(
+                "INSERT OR IGNORE INTO owner_supplied_project_refs (path, project_id, record_json) "
+                "SELECT path, project_id, record_json FROM owner_supplied_inputs"
+            )
+            report_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(reports)").fetchall()}
+            if "json_sha256" not in report_columns:
+                self._connection.execute("ALTER TABLE reports ADD COLUMN json_sha256 TEXT")
+            if "provenance_sha256" not in report_columns:
+                self._connection.execute("ALTER TABLE reports ADD COLUMN provenance_sha256 TEXT")
+            matcher_leaf_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(matcher_leaves)").fetchall()}
+            if "expected_leaf_count" not in matcher_leaf_columns:
+                self._connection.execute("ALTER TABLE matcher_leaves ADD COLUMN expected_leaf_count INTEGER NOT NULL DEFAULT 6")
+                self._connection.execute(
+                    "UPDATE matcher_leaves SET expected_leaf_count = 1 "
+                    "WHERE leaf_id = 'QS-C21.EXTERNAL' OR condition_id = 'EXTERNALLY_COMPUTED'"
+                )
+            protocol_pair_columns = {
+                str(row[1]): int(row[3])
+                for row in self._connection.execute("PRAGMA table_info(protocol_pairs)").fetchall()
+            }
+            if protocol_pair_columns.get("fold") == 1:
+                self._connection.execute(
+                    "CREATE TABLE protocol_pairs_v4 ("
+                    "protocol_id TEXT NOT NULL REFERENCES protocols(protocol_id), "
+                    "pair_id TEXT NOT NULL, fold INTEGER, source_order INTEGER NOT NULL, "
+                    "label TEXT NOT NULL, left_sample_id TEXT NOT NULL, right_sample_id TEXT NOT NULL, "
+                    "record_json TEXT NOT NULL, PRIMARY KEY (protocol_id, pair_id))"
+                )
+                self._connection.execute(
+                    "INSERT INTO protocol_pairs_v4 "
+                    "(protocol_id, pair_id, fold, source_order, label, left_sample_id, right_sample_id, record_json) "
+                    "SELECT protocol_id, pair_id, fold, source_order, label, left_sample_id, right_sample_id, record_json "
+                    "FROM protocol_pairs"
+                )
+                self._connection.execute("DROP TABLE protocol_pairs")
+                self._connection.execute("ALTER TABLE protocol_pairs_v4 RENAME TO protocol_pairs")
+                self._connection.execute(
+                    "CREATE INDEX protocol_pairs_by_fold ON protocol_pairs(protocol_id, fold, source_order)"
+                )
+            applied_at = datetime.now(timezone.utc).astimezone().isoformat()
+            for version, name in SCHEMA_MIGRATIONS:
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
+                    (version, name, applied_at),
+                )
+            self._connection.execute(f"PRAGMA user_version={SCHEMA_MIGRATIONS[-1][0]}")
+            self._connection.execute("COMMIT")
+        except BaseException:
+            self._connection.execute("ROLLBACK")
+            raise
         self._readers = threading.local()
 
     def _read(self) -> sqlite3.Connection:
@@ -429,7 +558,267 @@ class RunStore:
         # Reader connections are per-thread and close with their threads.
         self._connection.close()
 
+    def snapshot_database(self, destination: Path) -> dict[str, object]:
+        """Write one consistent, private, no-clobber snapshot for out-of-process inspection."""
+
+        destination = destination.absolute()
+        if not destination.name.endswith(".snapshot.sqlite3"):
+            raise ValueError("database snapshot destination must end with .snapshot.sqlite3")
+        if destination.exists() or destination.is_symlink():
+            raise FileExistsError(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, partial_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.", suffix=".partial", dir=destination.parent
+        )
+        os.close(descriptor)
+        partial = Path(partial_name)
+        snapshot: sqlite3.Connection | None = None
+        try:
+            snapshot = sqlite3.connect(str(partial), isolation_level=None)
+            with self._lock:
+                self._connection.backup(snapshot)
+            integrity = snapshot.execute("PRAGMA integrity_check").fetchall()
+            if integrity != [("ok",)]:
+                raise sqlite3.DatabaseError(f"snapshot integrity check failed: {integrity!r}")
+            snapshot.close()
+            snapshot = None
+            os.chmod(partial, 0o600)
+            os.link(partial, destination)
+        finally:
+            if snapshot is not None:
+                snapshot.close()
+            partial.unlink(missing_ok=True)
+        return {
+            "path": str(destination),
+            "size_bytes": destination.stat().st_size,
+            "sha256": hashlib.sha256(destination.read_bytes()).hexdigest(),
+        }
+
+    def operational_status(self) -> dict[str, Any]:
+        """Return facts required by the API readiness gate from a real database read."""
+
+        connection = self._read()
+        query_result = connection.execute("SELECT 1").fetchone()
+        if query_result is None or int(query_result[0]) != 1:
+            raise sqlite3.DatabaseError("SQLite readiness query returned an invalid result")
+        operation_states = {
+            str(row[0]): int(row[1])
+            for row in connection.execute(
+                "SELECT state, COUNT(*) FROM operations GROUP BY state ORDER BY state"
+            ).fetchall()
+        }
+        unresolved_purges = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM purge_journal WHERE state NOT IN ('COMPLETED', 'FAILED')"
+            ).fetchone()[0]
+        )
+        return {
+            "query": "ok",
+            "schema_version": int(connection.execute("PRAGMA user_version").fetchone()[0]),
+            "operation_states": operation_states,
+            "unresolved_purges": unresolved_purges,
+        }
+
+    @staticmethod
+    def _row(cursor: sqlite3.Cursor, row: tuple[Any, ...] | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        return {description[0]: value for description, value in zip(cursor.description, row)}
+
     # -- writes ----------------------------------------------------------------
+
+    def admit_operation(
+        self,
+        *,
+        operation_id: str,
+        operation_kind: str,
+        project_id: str,
+        request: dict[str, Any],
+        output_path: Path | None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Durably admit one immutable operation identity before enqueueing work."""
+
+        if not operation_id or not operation_kind or not project_id:
+            raise ValueError("operation id, kind, and project id are required")
+        request_json = json.dumps(
+            request,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        output_value = str(output_path) if output_path is not None else None
+        accepted_at = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            cursor = self._connection.execute(
+                "SELECT * FROM operations WHERE operation_id = ?",
+                (operation_id,),
+            )
+            existing = self._row(cursor, cursor.fetchone())
+            if existing is not None:
+                immutable = {
+                    "operation_kind": operation_kind,
+                    "project_id": project_id,
+                    "request_json": request_json,
+                    "output_path": output_value,
+                }
+                changed = [key for key, value in immutable.items() if existing[key] != value]
+                if changed:
+                    raise ImmutableRecordConflict(
+                        f"operation {operation_id} immutable identity differs in {', '.join(changed)}"
+                    )
+                return existing, False
+            self._connection.execute(
+                "INSERT INTO operations (operation_id, operation_kind, project_id, state, accepted_at, request_json, output_path) "
+                "VALUES (?, ?, ?, 'QUEUED', ?, ?, ?)",
+                (operation_id, operation_kind, project_id, accepted_at, request_json, output_value),
+            )
+            cursor = self._connection.execute(
+                "SELECT * FROM operations WHERE operation_id = ?",
+                (operation_id,),
+            )
+            admitted = self._row(cursor, cursor.fetchone())
+            assert admitted is not None
+            return admitted, True
+
+    def start_operation(self, operation_id: str) -> dict[str, Any]:
+        started_at = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            cursor = self._connection.execute(
+                "UPDATE operations SET state = 'RUNNING', started_at = ? "
+                "WHERE operation_id = ? AND state = 'QUEUED'",
+                (started_at, operation_id),
+            )
+            if cursor.rowcount != 1:
+                current = self._connection.execute(
+                    "SELECT state FROM operations WHERE operation_id = ?",
+                    (operation_id,),
+                ).fetchone()
+                if current is None:
+                    raise KeyError(f"operation is not recorded: {operation_id}")
+                raise ImmutableRecordConflict(
+                    f"operation {operation_id} cannot start from state {current[0]}"
+                )
+            cursor = self._connection.execute(
+                "SELECT * FROM operations WHERE operation_id = ?",
+                (operation_id,),
+            )
+            started = self._row(cursor, cursor.fetchone())
+            assert started is not None
+            return started
+
+    def finish_operation(self, operation_id: str, *, state: str, error: str | None = None) -> dict[str, Any]:
+        if state not in {"COMPLETED", "FAILED", "CANCELLED", "INTERRUPTED"}:
+            raise ValueError(f"invalid terminal operation state: {state}")
+        if state == "COMPLETED" and error is not None:
+            raise ValueError("a completed operation cannot carry an error")
+        if state in {"FAILED", "INTERRUPTED"} and not error:
+            raise ValueError(f"{state} operation requires a factual error")
+        ended_at = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            cursor = self._connection.execute(
+                "UPDATE operations SET state = ?, ended_at = ?, error = ? "
+                "WHERE operation_id = ? AND state IN ('QUEUED', 'RUNNING')",
+                (state, ended_at, error, operation_id),
+            )
+            if cursor.rowcount != 1:
+                current = self._connection.execute(
+                    "SELECT state FROM operations WHERE operation_id = ?",
+                    (operation_id,),
+                ).fetchone()
+                if current is None:
+                    raise KeyError(f"operation is not recorded: {operation_id}")
+                raise ImmutableRecordConflict(
+                    f"operation {operation_id} cannot finish from state {current[0]}"
+                )
+            cursor = self._connection.execute(
+                "SELECT * FROM operations WHERE operation_id = ?",
+                (operation_id,),
+            )
+            finished = self._row(cursor, cursor.fetchone())
+            assert finished is not None
+            return finished
+
+    def reconcile_interrupted_operations(self) -> list[dict[str, Any]]:
+        """Mark work abandoned by the previous process without attempting scientific replay."""
+
+        ended_at = datetime.now(timezone.utc).isoformat()
+        interrupted_error = "process ended before a terminal state was recorded; execution was not resumed automatically"
+        with self._lock:
+            cursor = self._connection.execute(
+                "SELECT * FROM operations WHERE state IN ('QUEUED', 'RUNNING') ORDER BY accepted_at, operation_id"
+            )
+            pending = [self._row(cursor, row) for row in cursor.fetchall()]
+            if not pending:
+                return []
+            for operation in pending:
+                assert operation is not None
+                operation_id = operation["operation_id"]
+                operation_kind = operation["operation_kind"]
+                terminal_state: str | None = None
+                terminal_error: str | None = None
+                if operation_kind == "QUALITY_BATCH":
+                    recorded = self._connection.execute(
+                        "SELECT state FROM jobs WHERE job_id = ?",
+                        (operation_id,),
+                    ).fetchone()
+                    if recorded is not None and recorded[0] in {"COMPLETED", "FAILED", "CANCELLED"}:
+                        terminal_state = recorded[0]
+                        if terminal_state == "FAILED":
+                            terminal_error = "quality batch persisted a FAILED job before process termination"
+                elif operation_kind == "MATCHER_MATRIX":
+                    expected = int(json.loads(operation["request_json"])["expected_leaf_count"])
+                    count = self._connection.execute(
+                        "SELECT COUNT(*) FROM matcher_leaves WHERE matrix_id = ?",
+                        (operation_id,),
+                    ).fetchone()[0]
+                    if int(count) == expected:
+                        terminal_state = "COMPLETED"
+                else:
+                    result_table_and_key = {
+                        "UTILITY_ANALYSIS": ("utility_analyses", "analysis_id"),
+                        "CROSS_MATCHER_ANALYSIS": ("cross_matcher_analyses", "analysis_id"),
+                        "DEGRADATION_ANALYSIS": ("degradation_analyses", "analysis_id"),
+                        "IDENTIFICATION_SEARCH": ("identification_searches", "search_id"),
+                    }.get(operation_kind)
+                    if result_table_and_key is not None:
+                        table, key = result_table_and_key
+                        recorded = self._connection.execute(
+                            f"SELECT 1 FROM {table} WHERE {key} = ?",
+                            (operation_id,),
+                        ).fetchone()
+                        if recorded is not None:
+                            terminal_state = "COMPLETED"
+                if terminal_state is None:
+                    terminal_state = "INTERRUPTED"
+                    terminal_error = interrupted_error
+                self._connection.execute(
+                    "UPDATE operations SET state = ?, ended_at = ?, error = ? WHERE operation_id = ? AND state IN ('QUEUED', 'RUNNING')",
+                    (terminal_state, ended_at, terminal_error, operation_id),
+                )
+            identifiers = [row["operation_id"] for row in pending if row is not None]
+            placeholders = ",".join("?" for _ in identifiers)
+            cursor = self._connection.execute(
+                f"SELECT * FROM operations WHERE operation_id IN ({placeholders}) ORDER BY accepted_at, operation_id",
+                identifiers,
+            )
+            reconciled = [self._row(cursor, row) for row in cursor.fetchall()]
+            return [row for row in reconciled if row is not None]
+
+    def operation(self, operation_id: str) -> dict[str, Any] | None:
+        cursor = self._read().execute(
+            "SELECT * FROM operations WHERE operation_id = ?",
+            (operation_id,),
+        )
+        return self._row(cursor, cursor.fetchone())
+
+    def operations_for_project(self, project_id: str) -> list[dict[str, Any]]:
+        cursor = self._read().execute(
+            "SELECT * FROM operations WHERE project_id = ? ORDER BY accepted_at DESC, operation_id",
+            (project_id,),
+        )
+        operations = [self._row(cursor, row) for row in cursor.fetchall()]
+        return [row for row in operations if row is not None]
 
     def _insert_once(
         self,
@@ -641,6 +1030,125 @@ class RunStore:
                 raise
             self._connection.execute("COMMIT")
 
+    def record_system_event(self, record: dict[str, Any]) -> str:
+        record_json = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        evidence = _evidence(record_json)
+        with self._lock:
+            self._insert_once(
+                "system_events",
+                "system_event_id",
+                record["system_event_id"],
+                byte_exact=True,
+                columns={
+                    "system_event_id": record["system_event_id"],
+                    "actor_id": record["actor_id"],
+                    "event_type": record["event_type"],
+                    "subject_id": record["subject_id"],
+                    "occurred_at": record["occurred_at"],
+                    "evidence_sha256": evidence,
+                    "record_json": record_json,
+                },
+            )
+            self._connection.commit()
+        return evidence
+
+    def system_events(self, limit: int = 100) -> list[dict[str, Any]]:
+        rows = self._read().execute(
+            "SELECT record_json, evidence_sha256 FROM system_events ORDER BY occurred_at DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+        records: list[dict[str, Any]] = []
+        for record_json, evidence in rows:
+            if _evidence(record_json) != evidence:
+                raise ImmutableRecordConflict("stored system event does not match its evidence digest")
+            record = json.loads(record_json)
+            record["evidence_sha256"] = evidence
+            records.append(record)
+        return records
+
+    def purge_project_records(self, project_id: str) -> dict[str, Any]:
+        """Remove application-managed project data while retaining the project/audit tombstone."""
+
+        with self._lock:
+            connection = self._connection
+            dataset_ids = [row[0] for row in connection.execute("SELECT dataset_id FROM datasets WHERE project_id = ?", (project_id,)).fetchall()]
+            run_ids = [row[0] for row in connection.execute("SELECT run_id FROM runs WHERE project_id = ?", (project_id,)).fetchall()]
+            job_ids = [row[0] for row in connection.execute("SELECT job_id FROM jobs WHERE project_id = ?", (project_id,)).fetchall()]
+            removed: dict[str, int] = {}
+
+            def delete(name: str, statement: str, parameters: tuple[Any, ...] = ()) -> None:
+                before = connection.total_changes
+                connection.execute(statement, parameters)
+                removed[name] = connection.total_changes - before
+
+            connection.execute("BEGIN")
+            try:
+                delete("reproductions", "DELETE FROM reproductions WHERE project_id = ?", (project_id,))
+                delete("bundles", "DELETE FROM bundles WHERE project_id = ?", (project_id,))
+                delete("degradation_analyses", "DELETE FROM degradation_analyses WHERE project_id = ?", (project_id,))
+                delete("derived_samples", "DELETE FROM derived_samples WHERE derived_set_id IN (SELECT derived_set_id FROM derived_sets WHERE project_id = ?)", (project_id,))
+                delete("derived_sets", "DELETE FROM derived_sets WHERE project_id = ?", (project_id,))
+                delete("identification_searches", "DELETE FROM identification_searches WHERE project_id = ?", (project_id,))
+                delete("identification_entries", "DELETE FROM identification_entries WHERE protocol_id IN (SELECT protocol_id FROM identification_protocols WHERE project_id = ?)", (project_id,))
+                delete("identification_protocols", "DELETE FROM identification_protocols WHERE project_id = ?", (project_id,))
+                for table in ("reports", "dashboards", "figures", "annotations", "cross_matcher_analyses", "utility_analyses", "matcher_leaves"):
+                    delete(table, f"DELETE FROM {table} WHERE project_id = ?", (project_id,))
+                delete("protocol_pairs", "DELETE FROM protocol_pairs WHERE protocol_id IN (SELECT protocol_id FROM protocols WHERE project_id = ?)", (project_id,))
+                delete("protocols", "DELETE FROM protocols WHERE project_id = ?", (project_id,))
+                delete("quality_results", "DELETE FROM quality_results WHERE job_id IN (SELECT job_id FROM jobs WHERE project_id = ?)", (project_id,))
+                delete("jobs", "DELETE FROM jobs WHERE project_id = ?", (project_id,))
+                delete("operations", "DELETE FROM operations WHERE project_id = ?", (project_id,))
+                delete("artifacts", "DELETE FROM artifacts WHERE run_id IN (SELECT run_id FROM runs WHERE project_id = ?)", (project_id,))
+                delete("runs", "DELETE FROM runs WHERE project_id = ?", (project_id,))
+                delete("experiments", "DELETE FROM experiments WHERE project_id = ?", (project_id,))
+                delete("dataset_statistics", "DELETE FROM dataset_statistics WHERE dataset_id IN (SELECT dataset_id FROM datasets WHERE project_id = ?)", (project_id,))
+                delete("samples", "DELETE FROM samples WHERE dataset_id IN (SELECT dataset_id FROM datasets WHERE project_id = ?)", (project_id,))
+                delete("datasets", "DELETE FROM datasets WHERE project_id = ?", (project_id,))
+                delete("owner_supplied_project_refs", "DELETE FROM owner_supplied_project_refs WHERE project_id = ?", (project_id,))
+                delete(
+                    "owner_supplied_inputs",
+                    "DELETE FROM owner_supplied_inputs WHERE NOT EXISTS "
+                    "(SELECT 1 FROM owner_supplied_project_refs AS refs WHERE refs.path = owner_supplied_inputs.path)",
+                )
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
+            connection.execute("COMMIT")
+
+            remaining = {
+                "datasets": connection.execute("SELECT COUNT(*) FROM datasets WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "experiments": connection.execute("SELECT COUNT(*) FROM experiments WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "runs": connection.execute("SELECT COUNT(*) FROM runs WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "jobs": connection.execute("SELECT COUNT(*) FROM jobs WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "operations": connection.execute("SELECT COUNT(*) FROM operations WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "protocols": connection.execute("SELECT COUNT(*) FROM protocols WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "matcher_leaves": connection.execute("SELECT COUNT(*) FROM matcher_leaves WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "utility_analyses": connection.execute("SELECT COUNT(*) FROM utility_analyses WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "cross_matcher_analyses": connection.execute("SELECT COUNT(*) FROM cross_matcher_analyses WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "annotations": connection.execute("SELECT COUNT(*) FROM annotations WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "figures": connection.execute("SELECT COUNT(*) FROM figures WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "dashboards": connection.execute("SELECT COUNT(*) FROM dashboards WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "reports": connection.execute("SELECT COUNT(*) FROM reports WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "identification_protocols": connection.execute("SELECT COUNT(*) FROM identification_protocols WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "identification_searches": connection.execute("SELECT COUNT(*) FROM identification_searches WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "derived_sets": connection.execute("SELECT COUNT(*) FROM derived_sets WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "degradation_analyses": connection.execute("SELECT COUNT(*) FROM degradation_analyses WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "owner_supplied_inputs": connection.execute("SELECT COUNT(*) FROM owner_supplied_project_refs WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "bundles": connection.execute("SELECT COUNT(*) FROM bundles WHERE project_id = ?", (project_id,)).fetchone()[0],
+                "reproductions": connection.execute("SELECT COUNT(*) FROM reproductions WHERE project_id = ?", (project_id,)).fetchone()[0],
+            }
+            if dataset_ids:
+                markers = ",".join("?" for _ in dataset_ids)
+                remaining["samples"] = connection.execute(f"SELECT COUNT(*) FROM samples WHERE dataset_id IN ({markers})", dataset_ids).fetchone()[0]
+                remaining["quality_results_by_dataset"] = connection.execute(f"SELECT COUNT(*) FROM quality_results WHERE dataset_id IN ({markers})", dataset_ids).fetchone()[0]
+            if run_ids:
+                markers = ",".join("?" for _ in run_ids)
+                remaining["artifacts"] = connection.execute(f"SELECT COUNT(*) FROM artifacts WHERE run_id IN ({markers})", run_ids).fetchone()[0]
+            if job_ids:
+                markers = ",".join("?" for _ in job_ids)
+                remaining["quality_results_by_job"] = connection.execute(f"SELECT COUNT(*) FROM quality_results WHERE job_id IN ({markers})", job_ids).fetchone()[0]
+            return {"removed": removed, "remaining": remaining, "verified": not any(remaining.values())}
+
     def record_dataset_import(
         self,
         dataset: Dataset,
@@ -709,6 +1217,177 @@ class RunStore:
                         "record_json": audit_json,
                     },
                 )
+            except BaseException:
+                self._connection.execute("ROLLBACK")
+                raise
+            self._connection.execute("COMMIT")
+
+    def record_verification_dataset_import(
+        self,
+        *,
+        dataset: Dataset,
+        samples: list[Sample],
+        statistics_json: str,
+        statistics_sha256: str,
+        dataset_audit_event: AuditEvent,
+        protocol: Any,
+        pairs: list[Any],
+        protocol_audit_event: AuditEvent,
+    ) -> None:
+        """Atomically admit an acquired pair dataset, samples, protocol, pairs, and evidence."""
+
+        dataset_json = dataset.model_dump_json()
+        protocol_json = protocol.model_dump_json()
+        if not samples or not pairs:
+            raise ValueError("verification dataset imports require real samples and protocol pairs")
+        if protocol.project_id != dataset.project_id or protocol.dataset_id != dataset.dataset_id:
+            raise ValueError("verification protocol ownership differs from its dataset")
+        if dataset.sample_count.value != len(samples) or protocol.pair_count != len(pairs):
+            raise ValueError("verification dataset or protocol counts differ from the admitted records")
+        if len({sample.sample_id for sample in samples}) != len(samples):
+            raise ValueError("verification dataset sample IDs are not unique")
+        if len({sample.source_path for sample in samples}) != len(samples):
+            raise ValueError("verification dataset sample paths are not unique")
+        if any(sample.dataset_id != dataset.dataset_id for sample in samples):
+            raise ValueError("verification dataset contains a sample owned by another dataset")
+        sample_by_id = {sample.sample_id: sample for sample in samples}
+        if len({pair.pair_id for pair in pairs}) != len(pairs):
+            raise ValueError("verification protocol pair IDs are not unique")
+        if sorted(pair.source_order for pair in pairs) != list(range(1, len(pairs) + 1)):
+            raise ValueError("verification protocol source order is not contiguous")
+        if any(pair.protocol_id != protocol.protocol_id for pair in pairs):
+            raise ValueError("verification protocol contains a pair owned by another protocol")
+        for pair in pairs:
+            left = sample_by_id.get(pair.left_sample_id)
+            right = sample_by_id.get(pair.right_sample_id)
+            if left is None or right is None:
+                raise ValueError("verification protocol references a sample outside the admitted dataset")
+            if pair.left_sha256 != left.sha256 or pair.right_sha256 != right.sha256:
+                raise ValueError("verification protocol pair hashes differ from admitted samples")
+        unique_pair_samples = {pair.left_sample_id for pair in pairs} | {
+            pair.right_sample_id for pair in pairs
+        }
+        if protocol.unique_sample_count != len(unique_pair_samples):
+            raise ValueError("verification protocol unique-sample count differs")
+        fold_presence = {pair.fold is None for pair in pairs}
+        if len(fold_presence) != 1 or ((True in fold_presence) != (protocol.fold_count is None)):
+            raise ValueError("verification protocol fold authority differs from its pair records")
+        if protocol.fold_count is not None:
+            recorded_folds = {pair.fold for pair in pairs}
+            if recorded_folds != set(range(1, protocol.fold_count + 1)):
+                raise ValueError("verification protocol fold set is not contiguous")
+        if statistics_sha256 != _evidence(statistics_json):
+            raise ValueError("verification dataset statistics hash differs")
+        if (
+            dataset_audit_event.project_id != dataset.project_id
+            or dataset_audit_event.subject_id != dataset.dataset_id
+            or dataset_audit_event.current_evidence_sha256 != _evidence(dataset_json)
+            or protocol_audit_event.project_id != dataset.project_id
+            or protocol_audit_event.subject_id != protocol.protocol_id
+            or protocol_audit_event.current_evidence_sha256 != _evidence(protocol_json)
+        ):
+            raise ValueError("verification dataset audit evidence or ownership differs")
+
+        with self._lock:
+            self._connection.execute("BEGIN")
+            try:
+                self._insert_once(
+                    "datasets",
+                    "dataset_id",
+                    dataset.dataset_id,
+                    byte_exact=True,
+                    columns={
+                        "dataset_id": dataset.dataset_id,
+                        "project_id": dataset.project_id,
+                        "evidence_sha256": _evidence(dataset_json),
+                        "record_json": dataset_json,
+                    },
+                )
+                for sample in samples:
+                    sample_json = sample.model_dump_json()
+                    self._insert_once(
+                        "samples",
+                        "sample_id",
+                        sample.sample_id,
+                        byte_exact=True,
+                        columns={
+                            "sample_id": sample.sample_id,
+                            "dataset_id": sample.dataset_id,
+                            "source_path": sample.source_path,
+                            "sha256": sample.sha256,
+                            "evidence_sha256": _evidence(sample_json),
+                            "record_json": sample_json,
+                        },
+                    )
+                self._insert_once(
+                    "dataset_statistics",
+                    "dataset_id",
+                    dataset.dataset_id,
+                    byte_exact=True,
+                    columns={
+                        "dataset_id": dataset.dataset_id,
+                        "computed_at": dataset_audit_event.occurred_at.isoformat(),
+                        "evidence_sha256": statistics_sha256,
+                        "record_json": statistics_json,
+                    },
+                )
+                self._insert_once(
+                    "protocols",
+                    "protocol_id",
+                    protocol.protocol_id,
+                    byte_exact=True,
+                    columns={
+                        "protocol_id": protocol.protocol_id,
+                        "project_id": protocol.project_id,
+                        "dataset_id": protocol.dataset_id,
+                        "evidence_sha256": _evidence(protocol_json),
+                        "record_json": protocol_json,
+                    },
+                )
+                for pair in pairs:
+                    pair_json = pair.model_dump_json()
+                    existing_pair = self._connection.execute(
+                        "SELECT record_json FROM protocol_pairs WHERE protocol_id = ? AND pair_id = ?",
+                        (pair.protocol_id, pair.pair_id),
+                    ).fetchone()
+                    if existing_pair is not None:
+                        if existing_pair[0] != pair_json:
+                            raise ImmutableRecordConflict(
+                                f"protocol_pairs.{pair.protocol_id}/{pair.pair_id} is already recorded with different bytes"
+                            )
+                        continue
+                    self._connection.execute(
+                        "INSERT INTO protocol_pairs "
+                        "(protocol_id, pair_id, fold, source_order, label, left_sample_id, right_sample_id, record_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            pair.protocol_id,
+                            pair.pair_id,
+                            pair.fold,
+                            pair.source_order,
+                            pair.label.value,
+                            pair.left_sample_id,
+                            pair.right_sample_id,
+                            pair_json,
+                        ),
+                    )
+                for audit_event in (dataset_audit_event, protocol_audit_event):
+                    audit_json = audit_event.model_dump_json()
+                    self._insert_once(
+                        "audit_events",
+                        "audit_event_id",
+                        audit_event.audit_event_id,
+                        byte_exact=True,
+                        columns={
+                            "audit_event_id": audit_event.audit_event_id,
+                            "project_id": audit_event.project_id,
+                            "subject_type": audit_event.subject_type,
+                            "subject_id": audit_event.subject_id,
+                            "occurred_at": audit_event.occurred_at.isoformat(),
+                            "evidence_sha256": _evidence(audit_json),
+                            "record_json": audit_json,
+                        },
+                    )
             except BaseException:
                 self._connection.execute("ROLLBACK")
                 raise
@@ -895,11 +1574,11 @@ class RunStore:
                         "artifact_id": artifact.artifact_id, "run_id": artifact.run_id, "kind": artifact.kind.value, "uri": artifact.uri,
                         "sha256": artifact.sha256, "evidence_sha256": _evidence(artifact_json), "record_json": artifact_json})
                 self._connection.execute(
-                    "INSERT INTO matcher_leaves (run_id, matrix_id, leaf_id, project_id, dataset_id, protocol_id, matcher_id, condition_id, comparisons_parquet, comparisons_sha256, metrics_json, metrics_sha256, comparison_count, scored_count, failed_count, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO matcher_leaves (run_id, matrix_id, leaf_id, project_id, dataset_id, protocol_id, matcher_id, condition_id, comparisons_parquet, comparisons_sha256, metrics_json, metrics_sha256, comparison_count, scored_count, failed_count, expected_leaf_count, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (run.run_id, job.matrix_id, leaf.leaf_id, run.project_id, job.dataset.dataset_id, job.protocol.protocol_id, leaf.matcher_id.value, leaf.condition_id.value,
                      str(leaf.comparisons_parquet), hashlib.sha256(leaf.comparisons_parquet.read_bytes()).hexdigest(), metrics_text, _evidence(metrics_text),
-                     leaf.comparison_count, leaf.scored_count, leaf.failed_count, run.end_time.isoformat()),
+                     leaf.comparison_count, leaf.scored_count, leaf.failed_count, int(getattr(job, "expected_leaf_count", 1)), run.end_time.isoformat()),
                 )
                 event = AuditEvent(
                     audit_event_id=f"audit-event:sha256:{_evidence(run.run_id + run_sha)}", project_id=run.project_id, actor_id=run.user_id,
@@ -1050,13 +1729,18 @@ class RunStore:
 
     def record_figure(self, record: dict[str, Any]) -> None:
         provenance_text = json.dumps({k: v for k, v in record.items() if k != "provenance_sha256"}, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        provenance_path = Path(record["directory"]) / "figure.provenance.json"
+        provenance_sha256 = hashlib.sha256(provenance_path.read_bytes()).hexdigest()
+        renderer_sha256 = record.get("provenance_sha256")
+        if renderer_sha256 is not None and renderer_sha256 != provenance_sha256:
+            raise ValueError("figure provenance bytes differ from the renderer's recorded SHA-256")
         with self._lock:
             existing = self._connection.execute("SELECT figure_id FROM figures WHERE figure_id = ?", (record["figure_id"],)).fetchone()
             if existing is not None:
                 return
             self._connection.execute(
                 "INSERT INTO figures (figure_id, project_id, kind, title, directory, source_run_ids_json, provenance_json, provenance_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (record["figure_id"], record["project_id"], record["kind"], record["title"], record["directory"], json.dumps(record["source_run_ids"]), provenance_text, _evidence(provenance_text), record["created_at"]),
+                (record["figure_id"], record["project_id"], record["kind"], record["title"], record["directory"], json.dumps(record["source_run_ids"]), provenance_text, provenance_sha256, record["created_at"]),
             )
             self._connection.commit()
 
@@ -1092,10 +1776,12 @@ class RunStore:
         return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
     def record_report(self, record: dict[str, Any]) -> None:
+        provenance_path = Path(record["directory"]) / "report.provenance.json"
+        provenance_sha256 = hashlib.sha256(provenance_path.read_bytes()).hexdigest()
         with self._lock:
             self._connection.execute(
-                "INSERT INTO reports (report_id, project_id, title, directory, spec_json, provenance_json, html_sha256, pdf_sha256, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (record["report_id"], record["project_id"], record["title"], record["directory"], json.dumps(record["spec"], sort_keys=True), json.dumps(record["provenance"], sort_keys=True), record["files"]["html"]["sha256"], record["files"]["pdf"]["sha256"], record["created_by"], record["created_at"]),
+                "INSERT INTO reports (report_id, project_id, title, directory, spec_json, provenance_json, html_sha256, pdf_sha256, json_sha256, provenance_sha256, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (record["report_id"], record["project_id"], record["title"], record["directory"], json.dumps(record["spec"], sort_keys=True), json.dumps(record["provenance"], sort_keys=True), record["files"]["html"]["sha256"], record["files"]["pdf"]["sha256"], record["files"]["json"]["sha256"], provenance_sha256, record["created_by"], record["created_at"]),
             )
             self._connection.commit()
 
@@ -1218,27 +1904,37 @@ class RunStore:
         return {"derived_sample_id": row[0], "derived_set_id": row[1], "parent_sample_id": row[2], "sha256": row[3], "chain": json.loads(row[4])} if row else None
 
     def record_owner_supplied(self, record: dict[str, Any]) -> None:
-        """Admit an owner-supplied local input (decision 30); idempotent for identical bytes at the same path."""
+        """Admit immutable bytes and retain every project that references their managed path."""
 
-        with self._lock:
-            row = self._connection.execute(
-                "SELECT sha256 FROM owner_supplied_inputs WHERE path = ?", (record["path"],)
-            ).fetchone()
-            if row is not None:
-                if row[0] != record["sha256"]:
-                    raise ImmutableRecordConflict(
-                        f"owner-supplied path {record['path']} was already admitted with different bytes"
+        # Lock order: owner-file boundary, then the RunStore writer lock.
+        with serialized_owner_file_mutation():
+            with self._lock:
+                row = self._connection.execute(
+                    "SELECT sha256 FROM owner_supplied_inputs WHERE path = ?", (record["path"],)
+                ).fetchone()
+                if row is not None:
+                    if row[0] != record["sha256"]:
+                        raise ImmutableRecordConflict(
+                            f"owner-supplied path {record['path']} was already admitted with different bytes"
+                        )
+                else:
+                    self._connection.execute(
+                        "INSERT INTO owner_supplied_inputs (path, sha256, project_id, actor_id, original_name, size_bytes, storage, source_kind, admitted_at, record_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            record["path"], record["sha256"], record["project_id"], record["actor_id"],
+                            record["original_name"], record["size_bytes"], record["storage"],
+                            record["source_kind"], record["admitted_at"],
+                            json.dumps(record, sort_keys=True, separators=(",", ":")),
+                        ),
                     )
-                return
-            self._connection.execute(
-                "INSERT INTO owner_supplied_inputs (path, sha256, project_id, actor_id, original_name, size_bytes, storage, source_kind, admitted_at, record_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    record["path"], record["sha256"], record["project_id"], record["actor_id"],
-                    record["original_name"], record["size_bytes"], record["storage"],
-                    record["source_kind"], record["admitted_at"],
-                    json.dumps(record, sort_keys=True, separators=(",", ":")),
-                ),
-            )
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO owner_supplied_project_refs (path, project_id, record_json) VALUES (?, ?, ?)",
+                    (
+                        record["path"],
+                        record["project_id"],
+                        json.dumps(record, sort_keys=True, separators=(",", ":")),
+                    ),
+                )
 
     def owner_supplied_by_path(self, path: str) -> dict[str, Any] | None:
         row = self._read().execute(
@@ -1248,9 +1944,19 @@ class RunStore:
 
     def owner_supplied_for_project(self, project_id: str) -> list[dict[str, Any]]:
         cursor = self._read().execute(
-            "SELECT record_json FROM owner_supplied_inputs WHERE project_id = ? ORDER BY admitted_at", (project_id,)
+            "SELECT refs.record_json FROM owner_supplied_project_refs AS refs "
+            "JOIN owner_supplied_inputs AS inputs ON inputs.path = refs.path "
+            "WHERE refs.project_id = ? ORDER BY inputs.admitted_at",
+            (project_id,),
         )
         return [json.loads(row[0]) for row in cursor.fetchall()]
+
+    def owner_supplied_has_other_project_reference(self, path: str, project_id: str) -> bool:
+        row = self._read().execute(
+            "SELECT 1 FROM owner_supplied_project_refs WHERE path = ? AND project_id <> ? LIMIT 1",
+            (path, project_id),
+        ).fetchone()
+        return row is not None
 
     def record_import_mapping(self, mapping_name: str, mapping: dict[str, str], actor_id: str, created_at: str) -> None:
         with self._lock:
@@ -1305,11 +2011,118 @@ class RunStore:
         cursor = self._read().execute("SELECT * FROM degradation_analyses WHERE project_id = ? ORDER BY created_at", (project_id,))
         return [{d[0]: v for d, v in zip(cursor.description, row)} for row in cursor.fetchall()]
 
-    def record_purge(self, record: dict[str, Any]) -> None:
+    def admit_purge(
+        self,
+        *,
+        purge_id: str,
+        project_id: str,
+        actor_id: str,
+        targets: dict[str, list[str]],
+    ) -> tuple[dict[str, Any], bool]:
+        targets_json = json.dumps(targets, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        now = datetime.now(timezone.utc).isoformat()
+        progress_json = json.dumps(
+            {"deleted": [], "already_absent": [], "failed": []},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         with self._lock:
-            self._connection.execute("INSERT INTO purges (purge_id, project_id, actor_id, created_at, verified, record_json) VALUES (?, ?, ?, ?, ?, ?)",
-                                     (record["purge_id"], record["project_id"], record["actor_id"], record["created_at"], 1 if record["verified"] else 0, json.dumps(record, sort_keys=True, default=str)))
-            self._connection.commit()
+            cursor = self._connection.execute(
+                "SELECT * FROM purge_journal WHERE project_id = ? AND state != 'COMPLETED' ORDER BY created_at LIMIT 1",
+                (project_id,),
+            )
+            existing = self._row(cursor, cursor.fetchone())
+            if existing is not None:
+                return existing, False
+            self._connection.execute(
+                "INSERT INTO purge_journal (purge_id, project_id, actor_id, state, created_at, updated_at, targets_json, progress_json) "
+                "VALUES (?, ?, ?, 'INTENT_RECORDED', ?, ?, ?, ?)",
+                (purge_id, project_id, actor_id, now, now, targets_json, progress_json),
+            )
+            cursor = self._connection.execute(
+                "SELECT * FROM purge_journal WHERE purge_id = ?",
+                (purge_id,),
+            )
+            admitted = self._row(cursor, cursor.fetchone())
+            assert admitted is not None
+            return admitted, True
+
+    def update_purge_journal(
+        self,
+        purge_id: str,
+        *,
+        state: str,
+        progress: dict[str, Any],
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        if state not in {"FILES_IN_PROGRESS", "FILES_VERIFIED", "METADATA_VERIFIED", "FAILED"}:
+            raise ValueError(f"invalid nonterminal purge journal state: {state}")
+        progress_json = json.dumps(progress, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        updated_at = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            cursor = self._connection.execute(
+                "UPDATE purge_journal SET state = ?, updated_at = ?, progress_json = ?, error = ? "
+                "WHERE purge_id = ? AND state != 'COMPLETED'",
+                (state, updated_at, progress_json, error, purge_id),
+            )
+            if cursor.rowcount != 1:
+                raise ImmutableRecordConflict(f"purge journal is not unresolved: {purge_id}")
+            cursor = self._connection.execute(
+                "SELECT * FROM purge_journal WHERE purge_id = ?",
+                (purge_id,),
+            )
+            updated = self._row(cursor, cursor.fetchone())
+            assert updated is not None
+            return updated
+
+    def active_purge_journal(self, project_id: str) -> dict[str, Any] | None:
+        cursor = self._read().execute(
+            "SELECT * FROM purge_journal WHERE project_id = ? AND state != 'COMPLETED' ORDER BY created_at LIMIT 1",
+            (project_id,),
+        )
+        return self._row(cursor, cursor.fetchone())
+
+    def incomplete_purge_journals(self) -> list[dict[str, Any]]:
+        cursor = self._read().execute(
+            "SELECT * FROM purge_journal WHERE state != 'COMPLETED' ORDER BY created_at, purge_id"
+        )
+        rows = [self._row(cursor, row) for row in cursor.fetchall()]
+        return [row for row in rows if row is not None]
+
+    def record_purge_and_complete(self, record: dict[str, Any], progress: dict[str, Any]) -> None:
+        record_json = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+        progress_json = json.dumps(progress, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        updated_at = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._connection.execute("BEGIN")
+            try:
+                existing = self._connection.execute(
+                    "SELECT record_json FROM purges WHERE purge_id = ?",
+                    (record["purge_id"],),
+                ).fetchone()
+                if existing is None:
+                    self._connection.execute(
+                        "INSERT INTO purges (purge_id, project_id, actor_id, created_at, verified, record_json) VALUES (?, ?, ?, ?, ?, ?)",
+                        (record["purge_id"], record["project_id"], record["actor_id"], record["created_at"], 1 if record["verified"] else 0, record_json),
+                    )
+                elif existing[0] != record_json:
+                    raise ImmutableRecordConflict(f"purge attestation differs for {record['purge_id']}")
+                cursor = self._connection.execute(
+                    "UPDATE purge_journal SET state = 'COMPLETED', updated_at = ?, progress_json = ?, error = NULL "
+                    "WHERE purge_id = ? AND state != 'COMPLETED'",
+                    (updated_at, progress_json, record["purge_id"]),
+                )
+                if cursor.rowcount != 1:
+                    current = self._connection.execute(
+                        "SELECT state FROM purge_journal WHERE purge_id = ?",
+                        (record["purge_id"],),
+                    ).fetchone()
+                    if current is None or current[0] != "COMPLETED":
+                        raise ImmutableRecordConflict(f"purge journal cannot complete: {record['purge_id']}")
+            except BaseException:
+                self._connection.execute("ROLLBACK")
+                raise
+            self._connection.execute("COMMIT")
 
     def purges(self, *, project_id: str | None = None) -> list[dict[str, Any]]:
         where = " WHERE project_id = ?" if project_id is not None else ""
@@ -1658,13 +2471,19 @@ class RunStore:
             raise ImmutableRecordConflict(f"stored Run {run_id} does not match its evidence digest")
         return CompletedRun.model_validate_json(record_json), evidence_sha256
 
-    def run_summaries(self, limit: int = 200) -> list[RunSummary]:
-        rows = self._read().execute(
+    def run_summaries(self, limit: int = 200, *, project_id: str | None = None) -> list[RunSummary]:
+        query = (
             "SELECT run_id, project_id, experiment_id, sample_id, status, engine_resource_id, "
             "engine_version, start_time, end_time, evidence_sha256 FROM runs "
-            "ORDER BY start_time DESC LIMIT ?",
-            (int(limit),),
-        ).fetchall()
+        )
+        parameters: tuple[Any, ...]
+        if project_id is None:
+            query += "ORDER BY start_time DESC LIMIT ?"
+            parameters = (int(limit),)
+        else:
+            query += "WHERE project_id = ? ORDER BY start_time DESC LIMIT ?"
+            parameters = (project_id, int(limit))
+        rows = self._read().execute(query, parameters).fetchall()
         return [RunSummary(*row) for row in rows]
 
     def project(self, project_id: str) -> Project | None:

@@ -1,0 +1,360 @@
+{
+  "api_log_tail": "",
+  "api_url": "http://127.0.0.1:8480",
+  "browser": "chromium 145.0.7632.6",
+  "console_url": "http://127.0.0.1:5181",
+  "exit_code": 1,
+  "health": {
+    "actor_id": "local-user:aaron",
+    "application_version": "0.1.0b1",
+    "database_path": "/tmp/qualsight-observe-rmv24xiy/qualsight.sqlite3",
+    "engine": {
+      "approved_scopes": [
+        "REPRODUCE_OFIQ_CONFORMANCE_TESTS",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ],
+      "consumers": [
+        "QS-A06",
+        "QS-A07",
+        "QS-A08",
+        "QS-A10",
+        "QS-B12"
+      ],
+      "data_classification": "RESTRICTED",
+      "kind": "ENGINE_RUNTIME",
+      "name": "OFIQ 1.1.2 installed runtime (isolated no-sudo build from the official tag)",
+      "research_use_status": "OWNER_APPROVED_LOCAL_NONCOMMERCIAL_RESEARCH_MIT_ENGINE_WITH_BUNDLED_MODEL_LICENSES",
+      "resource_id": "ofiq-v1-1-2-linux-runtime",
+      "state": "APPROVED_LOCAL_RESEARCH_USE",
+      "third_party_rights_status": "VERIFIED_LICENSE",
+      "version": "1.1.2"
+    },
+    "network_guard": {
+      "authorized_setup_connections": 0,
+      "installed": true,
+      "refused_attempts": []
+    },
+    "registry_id": "qualsight-local-resources",
+    "registry_sha256": "ce34349c8c9474eae236bcfd771b4195fc95ca7cdea088df982080696dec5f05",
+    "status": "ok"
+  },
+  "kind": "QUALSIGHT_CONSOLE_RUNTIME_OBSERVATION",
+  "observed_at": "2026-08-29T00:08:13-0500",
+  "schema_version": "1.0.0",
+  "steps": [
+    {
+      "addon_ids_match_api": true,
+      "first_keyboard_focus": {
+        "href": "#main-content",
+        "text": "Skip to main content"
+      },
+      "fresh_store_empty_recovery": "#/projects",
+      "fresh_store_empty_state": "QUALITY \u2192 UTILITY \u00b7 ERC, RISK-COVERAGE, POLICY ANALYSIS\nSelect a project to analyze matcher utility.\nUtility analysis requires recorded matcher Runs and a completed quality batch in the same project.\n",
+      "manifest": "/manifest.webmanifest",
+      "primary_nav_links": 9,
+      "primary_nav_unique_views": 9,
+      "routes": [
+        {
+          "current_links": [
+            {
+              "label": "Add-ons & system",
+              "view": "system"
+            }
+          ],
+          "view": "system",
+          "visible_views": [
+            "system"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Quality utility",
+              "view": "utility"
+            }
+          ],
+          "view": "utility",
+          "visible_views": [
+            "utility"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Cross-matcher",
+              "view": "cross"
+            }
+          ],
+          "view": "cross",
+          "visible_views": [
+            "cross"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Reports & reproduction",
+              "view": "reports"
+            }
+          ],
+          "view": "reports",
+          "visible_views": [
+            "reports"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Identification & robustness",
+              "view": "advanced"
+            }
+          ],
+          "view": "advanced",
+          "visible_views": [
+            "advanced"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Verification",
+              "view": "matchers"
+            }
+          ],
+          "view": "matchers",
+          "visible_views": [
+            "matchers"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Datasets & batches",
+              "view": "data"
+            }
+          ],
+          "view": "data",
+          "visible_views": [
+            "data"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Sample quality",
+              "view": "assess"
+            }
+          ],
+          "view": "assess",
+          "visible_views": [
+            "assess"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Projects",
+              "view": "projects"
+            }
+          ],
+          "view": "projects",
+          "visible_views": [
+            "projects"
+          ]
+        }
+      ],
+      "step": "load",
+      "system_panel_connection_policy": "No API connections are admitted in this beta.\nNo real API provider, credential reference contract, approved egress origin, or authorization to transmit biometric images or embeddings is registered. Registered external score files remain inert imports marked EXTERNALLY_COMPUTED.\nAdmission requirements",
+      "system_panel_dataset_addons": 4,
+      "system_panel_matcher_assets": 6,
+      "system_panel_preprocessing_addons": 3,
+      "system_panel_resources": 13,
+      "system_panel_transform_addons": 7,
+      "system_tabs": [
+        "Add-ons",
+        "Connections",
+        "Project embeddings",
+        "Audit & resources"
+      ],
+      "title": "QualSight"
+    },
+    {
+      "step": "engine-badge",
+      "text": "ENGINE\nOFIQ 1.1.2 installed runtime (isolated no-sudo build from the official tag) \u00b7 v1.1.2 \u00b7 APPROVED_LOCAL_RESEARCH_USE\nREGISTRY\nqualsight-local-resources \u00b7 ce34349c8c94\u2026"
+    },
+    {
+      "all_lifecycle_buttons_disabled_during_load": true,
+      "assets": 6,
+      "checkpoint_event_message": "ElasticFace-Arc R100 MS1MV2 local checkpoint: matcher checkpoint acquisition completed \u00b7 evidence d22ce1d1fc2e\u2026",
+      "elasticface_managed_checkpoint": true,
+      "lifecycle_buttons_during_load": [
+        {
+          "disabled": true,
+          "label": "Install managed checkpoint"
+        },
+        {
+          "disabled": true,
+          "label": "Loading\u2026"
+        },
+        {
+          "disabled": true,
+          "label": "Unload"
+        },
+        {
+          "disabled": true,
+          "label": "Load matcher"
+        },
+        {
+          "disabled": true,
+          "label": "Unload"
+        },
+        {
+          "disabled": true,
+          "label": "Install managed checkpoint"
+        },
+        {
+          "disabled": true,
+          "label": "Load matcher"
+        },
+        {
+          "disabled": true,
+          "label": "Unload"
+        },
+        {
+          "disabled": true,
+          "label": "Install managed checkpoint"
+        },
+        {
+          "disabled": true,
+          "label": "Load matcher"
+        },
+        {
+          "disabled": true,
+          "label": "Unload"
+        },
+        {
+          "disabled": true,
+          "label": "Install managed checkpoint"
+        },
+        {
+          "disabled": true,
+          "label": "Load matcher"
+        },
+        {
+          "disabled": true,
+          "label": "Unload"
+        },
+        {
+          "disabled": true,
+          "label": "Install managed checkpoint"
+        },
+        {
+          "disabled": true,
+          "label": "Load matcher"
+        },
+        {
+          "disabled": true,
+          "label": "Unload"
+        }
+      ],
+      "loaded_runtime": "cuda \u00b7 65,150,912 parameters",
+      "real_load_observed": true,
+      "sources_verified": true,
+      "step": "matcher-lifecycle",
+      "unload_observed": true,
+      "unloaded_runtime": "not resident"
+    },
+    {
+      "natural_size_ok": true,
+      "step": "image-rendered"
+    },
+    {
+      "boxes": 1,
+      "labelled_as_matcher_pipeline": true,
+      "landmark_points": 5,
+      "step": "detection-overlay"
+    },
+    {
+      "faces": 1,
+      "labelled_as_ofiq_internal": true,
+      "landmark_points": 98,
+      "step": "ofiq-landmarks"
+    },
+    {
+      "context": "PROJECT\nConsole lifecycle observation \u2014 2026-08-29-console-cycle40-observation\nNEW \u00b7 v1\nDATASET\nNo dataset selected\nRECORDED EVIDENCE\n0 runs\n9ca6e1dc0849\u2026\nSelect or import a dataset",
+      "message": "Created Console lifecycle observation \u2014 2026-08-29-console-cycle40-observation (v1, NEW)\nDismiss",
+      "step": "project-created"
+    },
+    {
+      "banner": "ENGINE MEASUREMENTpolicy: none applied\nofiq-v1-1-2-linux-runtime \u00b7 v1.1.2 \u00b7 init 2423 ms \u00b7 assess 307 ms",
+      "measure_rows": 28,
+      "provenance_text": "PROVENANCE\nRun\nf78d1a4f767bd595df83\u2026\nEvidence\n108ccda4409dbbbf8a47\u2026\nImage\n3c3655e6ac9f16bc6909\u2026\nScope\nREPRODUCE_OFIQ_CONFORMANCE_TESTS\nLinks\nproject\nexperiment\nsample\naudit",
+      "run_link": "/api/runs/run:sha256:f78d1a4f767bd595df83dd21d675c171036efe7664c236fa6797d663926e3175",
+      "step": "assessment",
+      "unified_quality_score_row": [
+        "UnifiedQualityScore",
+        "26.390884",
+        "79",
+        "measured"
+      ]
+    },
+    {
+      "rows": 1,
+      "step": "run-list"
+    },
+    {
+      "file": "evaluator_photo.jpg",
+      "run_link_present": true,
+      "source_kind_shown": true,
+      "step": "owner-supplied-upload",
+      "unified_quality_score": "41"
+    },
+    {
+      "api_run_count": 2,
+      "context": "PROJECT\nConsole lifecycle observation \u2014 2026-08-29-console-cycle40-observation\nNEW \u00b7 v1\nDATASET\nNo dataset selected\nRECORDED EVIDENCE\n2 runs\n9ca6e1dc0849\u2026\nSelect or import a dataset",
+      "run_table_rows": 2,
+      "step": "owner-upload-global-refresh"
+    },
+    {
+      "project_id": "project:sha256:33d23f1245ee5195da7d72e08b8bd0987708e6abc13eeab0312a75b1e5478174",
+      "run_count": 1,
+      "step": "second-project-real-run"
+    },
+    {
+      "restored_project_id": "project:sha256:28874437a4aa61085d641f894f666d331d5f3391e542e4eff7f9c059f75e3ab8",
+      "restored_run_count": 2,
+      "scope_violations": [],
+      "step": "project-run-switch-isolation",
+      "switched_to_project_id": "project:sha256:33d23f1245ee5195da7d72e08b8bd0987708e6abc13eeab0312a75b1e5478174",
+      "switched_to_run_count": 1
+    },
+    {
+      "messages": [
+        "save: Console lifecycle observation \u2014 2026-08-29-console-cycle40-observation is now v2 SAVED\nDismiss",
+        "close: Console lifecycle observation \u2014 2026-08-29-console-cycle40-observation is now v3 SAVED\nDismiss",
+        "open: Console lifecycle observation \u2014 2026-08-29-console-cycle40-observation is now v4 OPEN\nDismiss",
+        "archive: Console lifecycle observation \u2014 2026-08-29-console-cycle40-observation is now v5 ARCHIVED\nDismiss"
+      ],
+      "step": "project-transitions"
+    },
+    {
+      "step": "project-facts",
+      "text": "Lifecycle\nARCHIVED \u00b7 v5\nRuns\n2\nEngine\nofiq-v1-1-2-linux-runtime v1.1.2\nEvidence\ndd0a18130fc20c0c\u2026"
+    },
+    {
+      "context": "PROJECT\nConsole lifecycle observation \u2014 2026-08-29-console-cycle40-observation\nOPEN \u00b7 v6\nDATASET\nLocal LFW funneled image collection\n13,233 samples \u00b7 5,749 subjects\nRECORDED EVIDENCE\n2 runs\na0215fe955aa\u2026",
+      "facts": "Name\nLocal LFW funneled image collection\nSamples\n13,233 \u00b7 5,749 subjects\nRights\nNO_EXPLICIT_LICENSE_PUBLIC_RESEARCH_DATASET\nScope\nQUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1\nManifest\nf0d8e9c49ea048d6\u2026\nPairs\n3,000 mated \u00b7 3,000 non-mated\nCompleteness\nmissing 0 \u00b7 unreadable 0 \u00b7 hash mismatches 0 \u00b7 dup hashes 0",
+      "step": "dataset-imported"
+    },
+    {
+      "progress": "COMPLETED \u00b7 16/16 \u00b7 failures 0 \u00b7 not assessed 0\n\nrun a4845ff10c04cdb6\u2026",
+      "step": "batch"
+    },
+    {
+      "api_run_count": 3,
+      "context": "PROJECT\nConsole lifecycle observation \u2014 2026-08-29-console-cycle40-observation\nOPEN \u00b7 v6\nDATASET\nLocal LFW funneled image collection\n13,233 samples \u00b7 5,749 subjects\nRECORDED EVIDENCE\n3 runs\na0215fe955aa\u2026",
+      "run_table_rows": 3,
+      "step": "batch-terminal-global-refresh"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0.0",
+  "recorded_at": "2026-08-28T02:16:25-05:00",
+  "method": "Pinned author repository review plus live HTTPS response-header and complete local-byte identity verification",
+  "artifacts": [
+    {
+      "label": "MagFace iResNet100 MS1MV2",
+      "repository": "https://github.com/IrvingMeng/MagFace",
+      "commit": "99bae614ac2643b9694bf18e0c5645272ff6acfa",
+      "published_file_id": "1Bd87admxOZvbIOAyTkGEntsEz3fyMt7H",
+      "published_filename": "magface_epoch_00025.pth",
+      "size_bytes": 283040192,
+      "sha256": "cfeba792dada6f1f30d1e118aff077d493dd95dd76c77c30f57f90fd0164ad58",
+      "last_modified": "Mon, 15 Mar 2021 01:02:58 GMT"
+    },
+    {
+      "label": "TopoFR R100 Glint360K",
+      "repository": "https://github.com/DanJun6737/TopoFR",
+      "commit": "5960a33220968e6f9f74adcffb3f1a4ca31f9a0a",
+      "published_file_id": "1vQBGXc_nXytEx8fpV9jykeLdxD45cE8B",
+      "published_filename": "Glint360K_R100_TopoFR_9760.pt",
+      "size_bytes": 998958213,
+      "sha256": "f92e5e61b326495d32803156ab60aa58abf7e17f84e83d38b5ff6bf1691bdbfe",
+      "last_modified": "Mon, 22 May 2023 03:50:03 GMT"
+    },
+    {
+      "label": "TransFace-B Glint360K",
+      "repository": "https://github.com/DanJun6737/TransFace",
+      "commit": "fb6cd56d04c7ea525e328219f5d5066adac03ada",
+      "published_file_id": "13IezvOo5GvtGVsRap2s5RVqtIl1y0ke5",
+      "published_filename": "glint360k_model_TransFace_B.pt",
+      "size_bytes": 497994377,
+      "sha256": "95e5db485b2755ecfd50c0ae7b7681d229d295bbd15e18c7ddc7a24f47298c78",
+      "last_modified": "Fri, 10 Mar 2023 09:28:49 GMT"
+    },
+    {
+      "label": "MagFace LFW CFP AgeDB verification archive",
+      "repository": "https://github.com/IrvingMeng/MagFace",
+      "commit": "99bae614ac2643b9694bf18e0c5645272ff6acfa",
+      "published_file_id": "1HBGwyTFnl4Bt4hl5BpLE3t__J84R72TX",
+      "published_filename": "lfw_cfp_agedb.tar",
+      "size_bytes": 249538560,
+      "sha256": "d16039c1aa5b801b3a121c1748e3b49ccefe3e5b72f3f918d8a0cd09bb597b96",
+      "last_modified": "Mon, 24 Jan 2022 06:35:54 GMT"
+    }
+  ],
+  "rights_boundary": "Publisher links establish artifact identity and availability, not redistribution permission. QualSight stores these bytes only in operator-controlled private local storage and preserves each resource's factual third-party-rights status."
+}

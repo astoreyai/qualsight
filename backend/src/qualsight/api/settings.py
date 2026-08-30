@@ -22,7 +22,30 @@ class Settings:
     runtime_resource_id: str
     input_resource_ids: tuple[str, ...]
     actor_id: str = ""  # configured single user (QUALSIGHT_ACTOR); empty → local-user:<login>
-    network_guard: bool = False  # QUALSIGHT_NETWORK_GUARD=1 refuses every non-loopback socket connection at runtime
+    # Direct construction remains opt-in so isolated tests do not mutate their
+    # host process's sockets. Environment-driven production startup is guarded
+    # by default and requires an explicit false value to permit network access.
+    network_guard: bool = False
+    scientific_workers: int = 4
+    scientific_pending: int = 4
+    detector_workers: int = 2
+    native_execution_timeout_seconds: float = 7200.0
+    native_output_limit_bytes: int = 16 * 1024 * 1024
+    shutdown_drain_seconds: float = 30.0
+
+    def __post_init__(self) -> None:
+        if self.scientific_workers < 1:
+            raise ValueError("scientific_workers must be at least one")
+        if self.scientific_pending < 0:
+            raise ValueError("scientific_pending cannot be negative")
+        if self.detector_workers < 1 or self.detector_workers > 4:
+            raise ValueError("detector_workers must be between one and four")
+        if self.native_execution_timeout_seconds <= 0:
+            raise ValueError("native_execution_timeout_seconds must be positive")
+        if self.native_output_limit_bytes < 1:
+            raise ValueError("native_output_limit_bytes must be positive")
+        if self.shutdown_drain_seconds < 0:
+            raise ValueError("shutdown_drain_seconds cannot be negative")
 
     @classmethod
     def from_environment(cls, repository_root: Path | None = None) -> Settings:
@@ -36,6 +59,23 @@ class Settings:
         runtime = os.environ.get("QUALSIGHT_RUNTIME_RESOURCE_ID") or OFIQ_V112_RUNTIME_RESOURCE_ID
         inputs_raw = os.environ.get("QUALSIGHT_INPUT_RESOURCE_IDS")
         inputs = tuple(item for item in inputs_raw.split(",") if item) if inputs_raw else DEFAULT_INPUT_RESOURCE_IDS
+        network_value = os.environ.get("QUALSIGHT_NETWORK_GUARD")
+        network_guard = network_value is None or network_value.lower() not in {"0", "false", "no", "off"}
+        try:
+            scientific_workers = int(os.environ.get("QUALSIGHT_SCIENTIFIC_WORKERS", "4"))
+            scientific_pending = int(os.environ.get("QUALSIGHT_SCIENTIFIC_PENDING", "4"))
+            detector_workers = int(os.environ.get("QUALSIGHT_DETECTOR_WORKERS", "2"))
+            native_execution_timeout_seconds = float(
+                os.environ.get("QUALSIGHT_NATIVE_EXECUTION_TIMEOUT_SECONDS", "7200")
+            )
+            native_output_limit_bytes = int(
+                os.environ.get("QUALSIGHT_NATIVE_OUTPUT_LIMIT_BYTES", str(16 * 1024 * 1024))
+            )
+            shutdown_drain_seconds = float(
+                os.environ.get("QUALSIGHT_SHUTDOWN_DRAIN_SECONDS", "30")
+            )
+        except ValueError as error:
+            raise ValueError("scientific and native execution limits are invalid") from error
         return cls(
             repository_root=root,
             registry_path=registry.resolve(strict=True),
@@ -43,7 +83,13 @@ class Settings:
             runtime_resource_id=runtime,
             input_resource_ids=inputs,
             actor_id=os.environ.get("QUALSIGHT_ACTOR", ""),
-            network_guard=os.environ.get("QUALSIGHT_NETWORK_GUARD", "") in {"1", "true", "TRUE", "yes"},
+            network_guard=network_guard,
+            scientific_workers=scientific_workers,
+            scientific_pending=scientific_pending,
+            detector_workers=detector_workers,
+            native_execution_timeout_seconds=native_execution_timeout_seconds,
+            native_output_limit_bytes=native_output_limit_bytes,
+            shutdown_drain_seconds=shutdown_drain_seconds,
         )
 
     @property

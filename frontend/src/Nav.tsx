@@ -1,18 +1,19 @@
 /** PRD §44 primary navigation, mapped onto the console's routed views (QS-Y89) — one panel visible at a time. */
 
 const GROUPS: Array<{ group: string; items: Array<{ label: string; view: string }> }> = [
-  { group: "QualSight", items: [{ label: "Projects", view: "projects" }] },
-  { group: "Data", items: [{ label: "Datasets · Imports", view: "data" }, { label: "Samples", view: "assess" }] },
-  { group: "Quality", items: [{ label: "Sample analysis", view: "assess" }, { label: "Quality explorer", view: "data" }] },
-  { group: "Biometrics", items: [{ label: "Matchers · Verification", view: "matchers" }, { label: "Identification", view: "advanced" }] },
-  { group: "Experiments", items: [{ label: "Runs", view: "projects" }, { label: "Protocols", view: "matchers" }] },
-  { group: "Analysis", items: [{ label: "Quality utility", view: "utility" }, { label: "Cross-matcher · Failure analysis", view: "cross" }, { label: "Robustness", view: "advanced" }] },
-  { group: "Explore · Output", items: [{ label: "Figures · Dashboards", view: "reports" }, { label: "Reports · Exports · Reproduction", view: "reports" }] },
-  { group: "System", items: [{ label: "Engines · Resources", view: "system" }] },
+  { group: "Workspace", items: [{ label: "Projects", view: "projects" }] },
+  { group: "Prepare", items: [{ label: "Datasets & batches", view: "data" }, { label: "Sample quality", view: "assess" }] },
+  { group: "Evaluate", items: [{ label: "Verification", view: "matchers" }, { label: "Identification & robustness", view: "advanced" }] },
+  { group: "Analyze", items: [{ label: "Quality utility", view: "utility" }, { label: "Cross-matcher", view: "cross" }] },
+  { group: "Publish", items: [{ label: "Reports & reproduction", view: "reports" }] },
+  { group: "Manage", items: [{ label: "Add-ons & system", view: "system" }] },
 ];
 
-export function Nav() {
-  const current = window.location.hash.replace(/^#\//, "") || "projects";
+interface NavProps {
+  current: string;
+}
+
+export function Nav({ current }: NavProps) {
   return (
     <nav className="primary-nav" aria-label="Primary" data-testid="primary-nav">
       {GROUPS.map((group) => (
@@ -22,7 +23,8 @@ export function Nav() {
             <a
               key={item.label}
               href={`#/${item.view}`}
-              className={current === item.view ? "nav-link active" : "nav-link"}
+              className={item.view === current ? "nav-link active" : "nav-link"}
+              aria-current={item.view === current ? "page" : undefined}
               data-testid="nav-link"
               data-view={item.view}
             >

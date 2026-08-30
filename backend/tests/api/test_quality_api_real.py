@@ -42,7 +42,7 @@ class RealQualityApiTests(unittest.TestCase):
             runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID,
             input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, "lfw-funneled-local-candidate"),
         )
-        cls.client = TestClient(create_app(cls.settings))
+        cls.client = TestClient(create_app(cls.settings), base_url="http://127.0.0.1")
         cls.client.__enter__()
 
     @classmethod
@@ -126,7 +126,7 @@ class RealQualityApiTests(unittest.TestCase):
             self.assertEqual(linked.status_code, 200, (key, linked.text))
         audit = self.client.get(body["provenance"]["audit_events"]).json()
         self.assertEqual(audit[0]["subject_id"], run_id)
-        summaries = self.client.get("/api/runs").json()
+        summaries = self.client.get("/api/runs", params={"project_id": run.project_id}).json()
         self.assertIn(run_id, {item["run_id"] for item in summaries})
 
         # No source image was copied into the data directory.

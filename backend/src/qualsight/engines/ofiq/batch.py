@@ -239,7 +239,6 @@ class OFIQBatchJob:
             "job", project.project_id, dataset.dataset_id, selection_sha, engine.runtime.resource_id, self.created_at.isoformat()
         )
         self.job_dir = job_root / self.job_id.replace(":", "_")
-        self.job_dir.mkdir(parents=True, exist_ok=False)
         self._lock = threading.Lock()
         self._cancel_requested = False
         self.state = "QUEUED"
@@ -407,6 +406,7 @@ class OFIQBatchJob:
         return cancelled
 
     def run(self) -> BatchProgress:
+        self.job_dir.mkdir(parents=True, exist_ok=False)
         with self._lock:
             self.state = "RUNNING"
             self.started_at = _now()

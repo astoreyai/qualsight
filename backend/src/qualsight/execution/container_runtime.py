@@ -34,6 +34,10 @@ from .contracts import ContractValidationError, LifecycleEvent, LifecycleState, 
 
 CONTAINER_ADAPTER_VERSION = "1.0.0"
 IMAGE_REPOSITORY = "qualsight/ofiq-runtime"
+DEFAULT_CONTAINER_MEMORY = "8g"
+DEFAULT_CONTAINER_CPUS = 4.0
+DEFAULT_CONTAINER_PIDS = 256
+DEFAULT_CONTAINER_TMPFS = "256m"
 
 
 class ContainerRuntimeError(RuntimeError):
@@ -157,11 +161,32 @@ def build_runtime_image(*, runtime_resource: Any, work_dir: Path) -> ContainerIm
 class ContainerCLIAdapter:
     """Wrap a registered CLI adapter: identical request contract, container launch."""
 
-    def __init__(self, *, inner: RegisteredCLIAdapter, image: ContainerImage, read_only_mounts: tuple[Path, ...], gpu: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        inner: RegisteredCLIAdapter,
+        image: ContainerImage,
+        read_only_mounts: tuple[Path, ...],
+        gpu: bool = False,
+        memory_limit: str = DEFAULT_CONTAINER_MEMORY,
+        cpu_limit: float = DEFAULT_CONTAINER_CPUS,
+        pids_limit: int = DEFAULT_CONTAINER_PIDS,
+        tmpfs_limit: str = DEFAULT_CONTAINER_TMPFS,
+    ) -> None:
+        if not memory_limit or not tmpfs_limit:
+            raise ContractValidationError("container memory and tmpfs limits must be configured")
+        if not isinstance(cpu_limit, (int, float)) or isinstance(cpu_limit, bool) or cpu_limit <= 0:
+            raise ContractValidationError("container CPU limit must be positive")
+        if not isinstance(pids_limit, int) or isinstance(pids_limit, bool) or pids_limit < 1:
+            raise ContractValidationError("container PID limit must be a positive integer")
         self.inner = inner
         self.image = image
         self.read_only_mounts = tuple(Path(p).resolve() for p in read_only_mounts)
         self.gpu = gpu
+        self.memory_limit = memory_limit
+        self.cpu_limit = float(cpu_limit)
+        self.pids_limit = pids_limit
+        self.tmpfs_limit = tmpfs_limit
         self.launches: list[tuple[str, ...]] = []
 
     def create_request(self, **kwargs: Any) -> Any:
@@ -173,6 +198,7 @@ class ContainerCLIAdapter:
     def environment_record(self) -> dict[str, Any]:
         return {"kind": "CONTAINER", "adapter_version": CONTAINER_ADAPTER_VERSION, "image_id": self.image.image_id, "image_tag": self.image.tag, "rootfs_manifest_sha256": self.image.rootfs_manifest_sha256, "rootfs_files": self.image.rootfs_files,
                 "runtime_resource_id": self.image.runtime_resource_id, "host_libraries": list(self.image.host_libraries), "docker_server_version": self.image.docker_version, "network": "none", "read_only_rootfs": True, "capabilities": "none", "no_new_privileges": True, "gpu": self.gpu,
+                "resource_limits": {"memory": self.memory_limit, "cpus": self.cpu_limit, "pids": self.pids_limit, "tmpfs": self.tmpfs_limit},
                 "mounts": [f"{p}:ro" for p in self.read_only_mounts] + ["<job directory>:rw"], "launcher_commands": [list(cmd) for cmd in self.launches]}
 
     def start(self, prepared: PreparedExecution) -> RunningExecution:
@@ -188,7 +214,15 @@ class ContainerCLIAdapter:
         image_check = subprocess.run(["docker", "image", "inspect", "--format", "{{.Id}}", self.image.tag], capture_output=True, text=True, check=False)
         if image_check.returncode != 0 or image_check.stdout.strip() != self.image.image_id:
             raise ContractValidationError("container image is missing or its id drifted from the recorded image id")
-        command: list[str] = ["docker", "run", "--rm", "--network", "none", "--read-only", "--tmpfs", "/tmp", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", f"{os.getuid()}:{os.getgid()}"]
+        command: list[str] = [
+            "docker", "run", "--rm", "--network", "none", "--read-only",
+            "--tmpfs", f"/tmp:rw,noexec,nosuid,nodev,size={self.tmpfs_limit}",
+            "--memory", self.memory_limit,
+            "--cpus", f"{self.cpu_limit:g}",
+            "--pids-limit", str(self.pids_limit),
+            "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--user", f"{os.getuid()}:{os.getgid()}",
+        ]
         if self.gpu:
             command += ["--gpus", "all"]
         for mount in self.read_only_mounts:
@@ -199,7 +233,14 @@ class ContainerCLIAdapter:
         # The execution record's command names the registered executable that ran inside the container
         # (the contract's invariant); the docker launcher argv is recorded in the environment record.
         executable_path = prepared.request.executable.path
-        return RunningExecution(prepared=prepared, process=process, command=(executable_path, *arguments), running_event=running_event)
+        return RunningExecution(
+            prepared=prepared,
+            process=process,
+            command=(executable_path, *arguments),
+            running_event=running_event,
+            execution_timeout_seconds=self.inner.execution_timeout_seconds,
+            output_limit_bytes=self.inner.output_limit_bytes,
+        )
 
 
 def container_environment_json(adapter: ContainerCLIAdapter) -> str:

@@ -227,7 +227,7 @@ class ExternalScoreImporter:
             scores=np.array([r["score"] if r["score"] is not None else np.nan for r in rows], dtype=np.float64),
             mated=np.array([r["label"] == ComparisonLabel.MATED.value for r in rows]),
             failed=np.array([r["failure"] is not None for r in rows]),
-            folds=np.array([r["fold"] for r in rows], dtype=np.int64),
+            folds=np.array([r["fold"] for r in rows], dtype=object),
         ))
         metrics_path = leaf_dir / "verification_metrics.json"
         metrics_path.write_text(json.dumps(metrics, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")

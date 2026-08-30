@@ -1,12 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type JobOut, type MatcherLeaf, type PairQualityPolicy, type UtilityAnalysisOut, type UtilityPairRow, type UtilitySummary } from "./api";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { api, type AddonCatalogOut, type JobOut, type MatcherLeaf, type PairQualityPolicy, type UtilityAnalysisOut, type UtilityPairRow, type UtilitySummary } from "./api";
 import { PairEvidence } from "./PairEvidence";
+import { numericParameterError } from "./parameterContract";
 
-const MATCHER_SHORT: Record<string, string> = {
-  "adaface-ir101-local-candidate": "AdaFace IR-101",
-  "elasticface-arc-r100-local-candidate": "ElasticFace-Arc R100",
-  "transface-s-glint360k-local-candidate": "TransFace-S",
-};
 const COLORS = ["#7dd3fc", "#f9a8d4", "#86efac", "#fcd34d", "#c4b5fd", "#fca5a5"];
 
 function shortHash(value: string, keep = 12): string {
@@ -20,26 +16,31 @@ function pct(value: number | null | undefined, digits = 2): string {
 function num(value: number | null | undefined, digits = 4): string {
   return value === null || value === undefined ? "—" : value.toFixed(digits);
 }
-function conditionShort(conditionId: string): string {
-  return conditionId.includes("INMEMORY") ? "native" : "shared";
+
+function finiteNumber(value: string): number | null {
+  if (value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 interface UtilityProps {
   projectId: string | null;
   onMessage: (message: string) => void;
+  onWorkflowTerminal?: () => void;
 }
 
 interface CurvePoint { rejected_fraction: number; retained: number; error_rate: number | null; quality_cutoff: number | null }
 
 /** Quality-utility workbench: ERC/AU-ERC/risk-coverage, uncertainty, error models, and threshold-policy analysis (QS-D30..D33). */
-export function Utility({ projectId, onMessage }: UtilityProps) {
+export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityProps) {
   const [policies, setPolicies] = useState<PairQualityPolicy[]>([]);
   const [leaves, setLeaves] = useState<MatcherLeaf[]>([]);
   const [jobs, setJobs] = useState<JobOut[]>([]);
   const [analyses, setAnalyses] = useState<UtilitySummary[]>([]);
   const [selectedLeaf, setSelectedLeaf] = useState<string>("");
   const [selectedJob, setSelectedJob] = useState<string>("");
-  const [policy, setPolicy] = useState<string>("pair.quality.min");
+  const [policy, setPolicy] = useState<string>("");
+  const [policyError, setPolicyError] = useState<string | null>(null);
   const [measure, setMeasure] = useState<string>("UnifiedQualityScore");
   const [targetFmr, setTargetFmr] = useState<string>("0.001");
   const [qualityThreshold, setQualityThreshold] = useState<string>("");
@@ -51,54 +52,148 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
   const [evidencePairId, setEvidencePairId] = useState<string | null>(null);
   const [pairFilter, setPairFilter] = useState<"rejected" | "prevented" | "removed">("rejected");
   const [busy, setBusy] = useState(false);
+  const [matcherNames, setMatcherNames] = useState<Record<string, string>>({});
+  const [profileNames, setProfileNames] = useState<Record<string, string>>({});
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [analysisContracts, setAnalysisContracts] = useState<AddonCatalogOut["analysis_parameters"] | null>(null);
+  const [feedError, setFeedError] = useState<string | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [curveError, setCurveError] = useState<string | null>(null);
+  const projectEpoch = useRef(0);
+  const refreshSequence = useRef(0);
+  const policySequence = useRef(0);
+  const catalogSequence = useRef(0);
+  const handledTerminalAnalyses = useRef(new Set<string>());
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback(async () => {
+    const epoch = projectEpoch.current;
+    const sequence = ++refreshSequence.current;
     if (!projectId) {
       setLeaves([]); setJobs([]); setAnalyses([]);
+      setFeedError(null);
       return;
     }
-    api.matcherLeaves(projectId).then((items) => {
-      setLeaves(items);
-      setSelectedLeaf((current) => current || (items[0]?.run_id ?? ""));
-    }).catch(() => setLeaves([]));
-    api.projectJobs(projectId).then((items) => {
-      const completed = items.filter((job) => job.state === "COMPLETED" && job.run_id);
+    setFeedError(null);
+    const results = await Promise.allSettled([
+      api.matcherLeaves(projectId),
+      api.projectJobs(projectId),
+      api.utilityAnalyses(projectId),
+    ]);
+    if (projectEpoch.current !== epoch || refreshSequence.current !== sequence) return;
+    const [leafResult, jobResult, analysisResult] = results;
+    const errors: string[] = [];
+    if (leafResult.status === "fulfilled") {
+      setLeaves(leafResult.value);
+      setSelectedLeaf((current) =>
+        current && leafResult.value.some((leaf) => leaf.run_id === current) ? current : (leafResult.value[0]?.run_id ?? ""),
+      );
+    } else {
+      setLeaves([]);
+      setSelectedLeaf("");
+      errors.push(`Matcher Run feed unavailable: ${leafResult.reason instanceof Error ? leafResult.reason.message : String(leafResult.reason)}`);
+    }
+    if (jobResult.status === "fulfilled") {
+      const completed = jobResult.value.filter((job) => job.state === "COMPLETED" && job.run_id);
       setJobs(completed);
-    }).catch(() => setJobs([]));
-    api.utilityAnalyses(projectId).then(setAnalyses).catch(() => setAnalyses([]));
+      setSelectedJob((current) =>
+        current && completed.some((job) => job.job_id === current) ? current : (completed[0]?.job_id ?? ""),
+      );
+    } else {
+      setJobs([]);
+      setSelectedJob("");
+      errors.push(`Quality-job feed unavailable: ${jobResult.reason instanceof Error ? jobResult.reason.message : String(jobResult.reason)}`);
+    }
+    if (analysisResult.status === "fulfilled") {
+      setAnalyses(analysisResult.value);
+    } else {
+      setAnalyses([]);
+      errors.push(`Utility-analysis feed unavailable: ${analysisResult.reason instanceof Error ? analysisResult.reason.message : String(analysisResult.reason)}`);
+    }
+    setFeedError(errors.length ? errors.join(" · ") : null);
+  }, [projectId]);
+
+  const loadPolicies = useCallback(async () => {
+    const sequence = ++policySequence.current;
+    try {
+      const body = await api.pairQualityPolicies();
+      if (policySequence.current !== sequence) return;
+      setPolicies(body.policies);
+      setPolicy((current) => body.policies.some((item) => item.id === current) ? current : (body.policies[0]?.id ?? ""));
+      setPolicyError(null);
+    } catch (error) {
+      if (policySequence.current !== sequence) return;
+      setPolicies([]);
+      setPolicy("");
+      setPolicyError(`Pair-policy catalog unavailable; utility execution is disabled. ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, []);
+
+  const loadCatalog = useCallback(async () => {
+    const sequence = ++catalogSequence.current;
+    try {
+      const catalog = await api.addons();
+      if (catalogSequence.current !== sequence) return;
+      setMatcherNames(Object.fromEntries(catalog.matchers.map((item) => [item.matcher_id, item.name])));
+      setProfileNames(Object.fromEntries(catalog.preprocessing.map((item) => [item.addon_id, item.display_name])));
+      setAnalysisContracts(catalog.analysis_parameters);
+      setCatalogError(null);
+    } catch (error) {
+      if (catalogSequence.current !== sequence) return;
+      setCatalogError(error instanceof Error ? error.message : String(error));
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPolicies();
+    void loadCatalog();
+  }, [loadCatalog, loadPolicies]);
+
+  useLayoutEffect(() => {
+    projectEpoch.current += 1;
+    refreshSequence.current += 1;
+    setLeaves([]); setJobs([]); setAnalyses([]);
+    setSelectedLeaf(""); setSelectedJob("");
+    setRunning(null); setBusy(false);
+    setDetail(null); setPairs(null); setCurves({});
+    setEvidencePairId(null);
+    setFeedError(null); setPollError(null); setCurveError(null);
   }, [projectId]);
 
   useEffect(() => {
-    api.pairQualityPolicies().then((body) => setPolicies(body.policies)).catch(() => setPolicies([]));
-  }, []);
-  useEffect(() => {
-    refresh();
-    setDetail(null);
-    setPairs(null);
-    setCurves({});
+    void refresh();
     // Matcher Runs and quality jobs are produced by the other panels; keep the pick lists current.
-    const handle = window.setInterval(refresh, 4000);
+    const handle = window.setInterval(() => void refresh(), 4000);
     return () => window.clearInterval(handle);
   }, [refresh]);
 
   // Poll a running analysis.
   useEffect(() => {
     if (!running) return;
+    const epoch = projectEpoch.current;
+    const analysisId = running;
     const handle = window.setInterval(() => {
-      api.utilityAnalysis(running).then((status) => {
-        if (status.state === "COMPLETED") {
+      api.utilityAnalysis(analysisId).then((status) => {
+        if (projectEpoch.current !== epoch) return;
+        setPollError(null);
+        if (status.state === "COMPLETED" || status.state === "FAILED" || status.state === "INTERRUPTED") {
+          if (handledTerminalAnalyses.current.has(analysisId)) return;
+          handledTerminalAnalyses.current.add(analysisId);
           setRunning(null);
-          setDetail(status);
-          onMessage(`Utility analysis ${shortHash(status.analysis_id)} recorded as Run ${shortHash(status.summary?.run_id ?? "")}`);
-          refresh();
-        } else if (status.state === "FAILED") {
-          setRunning(null);
-          onMessage(`Utility analysis failed: ${status.error ?? "unknown error"}`);
+          if (status.state === "COMPLETED") {
+            setDetail(status);
+            onMessage(`Utility analysis ${shortHash(status.analysis_id)} recorded as Run ${shortHash(status.summary?.run_id ?? "")}`);
+          } else {
+            onMessage(`Utility analysis ${status.state === "INTERRUPTED" ? "was interrupted" : "failed"}: ${status.error ?? "unknown error"}`);
+          }
+          onWorkflowTerminal?.();
+          void refresh();
         }
-      }).catch(() => undefined);
+      }).catch((error) => {
+        if (projectEpoch.current === epoch) setPollError(`Utility status is temporarily unavailable; completion is not assumed. ${error instanceof Error ? error.message : String(error)}`);
+      });
     }, 1500);
     return () => window.clearInterval(handle);
-  }, [running, refresh, onMessage]);
+  }, [running, refresh, onMessage, onWorkflowTerminal]);
 
   // ERC overlay curves for every recorded analysis of the project (FNMR-ERC, mated units).
   useEffect(() => {
@@ -106,8 +201,16 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
     Promise.all(
       analyses.map((item) => api.utilityAnalysis(item.analysis_id).then((body) => [item.analysis_id, { fnmr: (body.utility?.utility?.erc?.curves?.FNMR?.points ?? []) as CurvePoint[], label: `${item.leaf_id} · ${item.quality_measure} · ${item.pair_quality_policy.replace("pair.quality.", "")}` }] as const)),
     ).then((entries) => {
-      if (!cancelled) setCurves(Object.fromEntries(entries));
-    }).catch(() => undefined);
+      if (!cancelled) {
+        setCurves(Object.fromEntries(entries));
+        setCurveError(null);
+      }
+    }).catch((error) => {
+      if (!cancelled) {
+        setCurves({});
+        setCurveError(`Comparative ERC curves are unavailable; no empty-result claim is made. ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
     return () => { cancelled = true; };
   }, [analyses]);
 
@@ -127,8 +230,33 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
     );
   }, [eligibleJobs]);
 
+  const targetFmrValue = finiteNumber(targetFmr);
+  const qualityThresholdValue = qualityThreshold.trim() === "" ? null : finiteNumber(qualityThreshold);
+  const bootstrapReplicates = finiteNumber(replicates);
+  const targetFmrError = numericParameterError(targetFmr, analysisContracts?.target_fmr ?? null, "Target FMR");
+  const qualityThresholdError = numericParameterError(qualityThreshold, analysisContracts?.quality_threshold ?? null, "Quality threshold");
+  const replicatesError = numericParameterError(replicates, analysisContracts?.bootstrap_replicates ?? null, "Bootstrap replicates");
+  const runDisabledReason = busy
+    ? "An operation is already in progress."
+    : running !== null
+      ? "Wait for the running utility analysis to finish."
+      : !selectedLeaf
+        ? "Select a recorded matcher Run."
+        : !selectedJob
+          ? "Select a completed quality job for the same dataset."
+          : !measure.trim()
+            ? "Enter the scalar quality measure recorded by the quality job."
+            : !policies.some((item) => item.id === policy)
+              ? "Select an admitted pair-quality policy."
+              : targetFmrError ?? qualityThresholdError ?? replicatesError;
+
   const start = useCallback(async () => {
-    if (!projectId || !selectedLeaf || !selectedJob) return;
+    if (
+      !projectId || !selectedLeaf || !selectedJob || !measure.trim() || !policies.some((item) => item.id === policy)
+      || targetFmrError || qualityThresholdError || replicatesError
+      || targetFmrValue === null || bootstrapReplicates === null
+    ) return;
+    const epoch = projectEpoch.current;
     setBusy(true);
     try {
       const started = await api.startUtilityAnalysis(projectId, {
@@ -136,41 +264,50 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
         quality_job_id: selectedJob,
         quality_measure: measure,
         pair_quality_policy: policy,
-        target_fmr: Number(targetFmr),
-        quality_threshold: qualityThreshold ? Number(qualityThreshold) : null,
-        bootstrap_replicates: Number(replicates),
+        target_fmr: targetFmrValue,
+        quality_threshold: qualityThresholdValue,
+        bootstrap_replicates: bootstrapReplicates,
       });
+      if (projectEpoch.current !== epoch) return;
       if (started.already_recorded) {
         onMessage(`Analysis ${shortHash(started.analysis_id)} was already recorded; showing it`);
-        setDetail(await api.utilityAnalysis(started.analysis_id));
+        const nextDetail = await api.utilityAnalysis(started.analysis_id);
+        if (projectEpoch.current !== epoch) return;
+        setDetail(nextDetail);
       } else {
         setRunning(started.analysis_id);
         onMessage(`Utility analysis ${shortHash(started.analysis_id)} running`);
       }
     } catch (error) {
-      onMessage(error instanceof Error ? error.message : String(error));
+      if (projectEpoch.current === epoch) onMessage(error instanceof Error ? error.message : String(error));
     } finally {
-      setBusy(false);
+      if (projectEpoch.current === epoch) setBusy(false);
     }
-  }, [projectId, selectedLeaf, selectedJob, measure, policy, targetFmr, qualityThreshold, replicates, onMessage]);
+  }, [projectId, selectedLeaf, selectedJob, measure, policy, policies, targetFmrError, qualityThresholdError, replicatesError, targetFmrValue, qualityThresholdValue, bootstrapReplicates, onMessage]);
 
   const open = useCallback(async (analysisId: string) => {
+    const epoch = projectEpoch.current;
     try {
-      setDetail(await api.utilityAnalysis(analysisId));
+      const nextDetail = await api.utilityAnalysis(analysisId);
+      if (projectEpoch.current !== epoch) return;
+      setDetail(nextDetail);
       setPairs(null);
     } catch (error) {
-      onMessage(error instanceof Error ? error.message : String(error));
+      if (projectEpoch.current === epoch) onMessage(error instanceof Error ? error.message : String(error));
     }
   }, [onMessage]);
 
   const loadPairs = useCallback(async (filter: "rejected" | "prevented" | "removed") => {
     if (!detail?.summary) return;
+    const epoch = projectEpoch.current;
     setPairFilter(filter);
     const query = filter === "rejected" ? "retained=false&limit=60" : filter === "prevented" ? "retained=false&decision_error=true&limit=60" : "retained=false&decision_error=false&limit=60";
     try {
-      setPairs(await api.utilityPairs(detail.analysis_id, query));
+      const nextPairs = await api.utilityPairs(detail.analysis_id, query);
+      if (projectEpoch.current !== epoch) return;
+      setPairs(nextPairs);
     } catch (error) {
-      onMessage(error instanceof Error ? error.message : String(error));
+      if (projectEpoch.current === epoch) onMessage(error instanceof Error ? error.message : String(error));
     }
   }, [detail, onMessage]);
 
@@ -182,7 +319,16 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
     return (
       <section className="panel utility" aria-labelledby="utility-heading" data-testid="utility">
         <h2 id="utility-heading">Quality → utility · ERC, risk-coverage, policy analysis</h2>
-        <p className="empty">Select a project with recorded matcher Runs and a completed quality batch.</p>
+        {catalogError && <p className="error" role="alert">Add-on catalog unavailable; recorded Run identifiers are shown unchanged. {catalogError} <button type="button" className="secondary" onClick={() => void loadCatalog()}>Retry add-on catalog</button></p>}
+        {policyError && <p className="error" role="alert">{policyError} <button type="button" className="secondary" onClick={() => void loadPolicies()}>Retry pair-policy catalog</button></p>}
+        {feedError && <p className="error" role="alert">{feedError}</p>}
+        {pollError && <p className="error" role="alert">{pollError}</p>}
+        {curveError && <p className="error" role="alert">{curveError}</p>}
+        <div className="empty-state">
+          <strong>Select a project to analyze matcher utility.</strong>
+          <span>Utility analysis requires recorded matcher Runs and a completed quality batch in the same project.</span>
+          <a className="button secondary" href="#/projects">Open projects</a>
+        </div>
       </section>
     );
   }
@@ -190,12 +336,17 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
   return (
     <section className="panel utility" aria-labelledby="utility-heading" data-testid="utility">
       <h2 id="utility-heading">Quality → utility · ERC, risk-coverage, policy analysis</h2>
+      {catalogError && <p className="error" role="alert">Add-on catalog unavailable; recorded Run identifiers are shown unchanged. {catalogError} <button type="button" className="secondary" onClick={() => void loadCatalog()}>Retry add-on catalog</button></p>}
+      {policyError && <p className="error" role="alert">{policyError} <button type="button" className="secondary" onClick={() => void loadPolicies()}>Retry pair-policy catalog</button></p>}
+      {feedError && <p className="error" role="alert">{feedError} <button type="button" className="secondary" onClick={() => void refresh()}>Retry project feeds</button></p>}
+      {pollError && <p className="error" role="alert">{pollError}</p>}
+      {curveError && <p className="error" role="alert">{curveError}</p>}
       <div className="controls-row utility-controls">
         <label>
           Matcher Run
           <select value={selectedLeaf} onChange={(event) => setSelectedLeaf(event.target.value)} data-testid="utility-leaf">
             {leaves.map((leaf) => (
-              <option key={leaf.run_id} value={leaf.run_id}>{leaf.leaf_id} · {MATCHER_SHORT[leaf.matcher_id] ?? leaf.matcher_id} · {conditionShort(leaf.condition_id)}</option>
+              <option key={leaf.run_id} value={leaf.run_id}>{leaf.leaf_id} · {matcherNames[leaf.matcher_id] ?? leaf.matcher_id} · {profileNames[leaf.condition_id] ?? leaf.condition_id}</option>
             ))}
           </select>
         </label>
@@ -213,35 +364,43 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
         </label>
         <label>
           Pair policy
-          <select value={policy} onChange={(event) => setPolicy(event.target.value)} data-testid="utility-policy">
+          <select value={policy} onChange={(event) => setPolicy(event.target.value)} disabled={policies.length === 0} data-testid="utility-policy">
             {policies.map((item) => (
-              <option key={item.id} value={item.id} title={item.definition}>{item.id.replace("pair.quality.", "")} v{item.version}</option>
+              <option key={item.id} value={item.id} title={item.definition}>{item.id} · v{item.version}</option>
             ))}
           </select>
         </label>
         <label>
-          Target FMR
-          <input value={targetFmr} onChange={(event) => setTargetFmr(event.target.value)} data-testid="utility-fmr" />
+          Target FMR (probability)
+          <input type="number" min={analysisContracts?.target_fmr.minimum} max={analysisContracts?.target_fmr.maximum} step="any" required value={targetFmr} onChange={(event) => setTargetFmr(event.target.value)} aria-invalid={targetFmrError ? "true" : undefined} aria-describedby={`utility-fmr-help${targetFmrError ? " utility-fmr-error" : ""}`} data-testid="utility-fmr" />
+          <span id="utility-fmr-help" className="hint">Required; {analysisContracts?.target_fmr.guidance ?? "load the admitted scientific contract"}.</span>
+          {targetFmrError && <span id="utility-fmr-error" className="error" role="alert">{targetFmrError}</span>}
         </label>
         <label>
-          Quality ≥
-          <input value={qualityThreshold} placeholder="auto (20 % cut)" onChange={(event) => setQualityThreshold(event.target.value)} data-testid="utility-q" />
+          Quality threshold (score)
+          <input type="number" step="any" value={qualityThreshold} placeholder="auto (20 % cut)" onChange={(event) => setQualityThreshold(event.target.value)} aria-invalid={qualityThresholdError ? "true" : undefined} aria-describedby={`utility-q-help${qualityThresholdError ? " utility-q-error" : ""}`} data-testid="utility-q" />
+          <span id="utility-q-help" className="hint">{analysisContracts?.quality_threshold.guidance ?? "Load the admitted scientific contract"}; blank uses {analysisContracts?.quality_threshold.blank_behavior ?? "the recorded automatic policy"}.</span>
+          {qualityThresholdError && <span id="utility-q-error" className="error" role="alert">{qualityThresholdError}</span>}
         </label>
         <label>
-          Bootstrap
-          <input value={replicates} onChange={(event) => setReplicates(event.target.value)} data-testid="utility-replicates" />
+          Bootstrap replicates (count)
+          <input type="number" min={analysisContracts?.bootstrap_replicates.minimum} max={analysisContracts?.bootstrap_replicates.maximum} step="1" required value={replicates} onChange={(event) => setReplicates(event.target.value)} aria-invalid={replicatesError ? "true" : undefined} aria-describedby={`utility-replicates-help${replicatesError ? " utility-replicates-error" : ""}`} data-testid="utility-replicates" />
+          <span id="utility-replicates-help" className="hint">{analysisContracts?.bootstrap_replicates.guidance ?? "Load the admitted scientific contract"}.</span>
+          {replicatesError && <span id="utility-replicates-error" className="error" role="alert">{replicatesError}</span>}
         </label>
-        <button type="button" className="primary" disabled={busy || running !== null || !selectedLeaf || !selectedJob} onClick={() => void start()} data-testid="utility-run">
+        <button type="button" className="primary" disabled={runDisabledReason !== null} aria-describedby="utility-run-help" title={runDisabledReason ?? "Run utility analysis with the recorded inputs and validated parameters."} onClick={() => void start()} data-testid="utility-run">
           {running ? "Running…" : "Run utility analysis"}
         </button>
+        <span id="utility-run-help" className={runDisabledReason ? "error" : "hint"}>{runDisabledReason ?? "Ready to run with the selected matcher Run and quality job."}</span>
       </div>
 
       <div className="utility-grid">
         <div>
           <table className="compact utility-table" data-testid="utility-table">
+            <caption>Recorded utility analyses</caption>
             <thead>
               <tr>
-                <th>Analysis</th><th>Matcher · crop</th><th>Measure · policy</th><th>T (matcher)</th><th>Q (policy)</th><th>AU-ERC</th><th>pAU-ERC 0–20 %</th><th>FNMR before → after</th><th>Retained</th><th>Errors prevented</th>
+                <th scope="col">Analysis</th><th scope="col">Matcher · crop</th><th scope="col">Measure · policy</th><th scope="col">T (matcher)</th><th scope="col">Q (policy)</th><th scope="col">AU-ERC</th><th scope="col">pAU-ERC 0–20 %</th><th scope="col">FNMR before → after</th><th scope="col">Retained</th><th scope="col">Errors prevented</th>
               </tr>
             </thead>
             <tbody>
@@ -250,8 +409,8 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
               )}
               {analyses.map((item, index) => (
                 <tr key={item.analysis_id} className={detail?.analysis_id === item.analysis_id ? "selected" : undefined}>
-                  <td><button type="button" className="cell" onClick={() => void open(item.analysis_id)} data-testid={`analysis-${item.leaf_id}`}><span className="swatch" style={{ background: COLORS[index % COLORS.length] }} /><span className="mono">{shortHash(item.analysis_id, 10)}</span></button></td>
-                  <td>{item.leaf_id} · {conditionShort(item.condition_id)}</td>
+                  <th scope="row"><button type="button" className="cell" onClick={() => void open(item.analysis_id)} data-testid={`analysis-${item.leaf_id}`}><span className="swatch" style={{ background: COLORS[index % COLORS.length] }} /><span className="mono">{shortHash(item.analysis_id, 10)}</span></button></th>
+                  <td>{item.leaf_id} · {profileNames[item.condition_id] ?? item.condition_id}</td>
                   <td>{item.quality_measure} · {item.pair_quality_policy.replace("pair.quality.", "")}</td>
                   <td className="mono">{num(item.matcher_threshold)}</td>
                   <td className="mono">{item.quality_threshold}</td>
@@ -311,19 +470,20 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
                 <dt>MATCHER THRESHOLD</dt><dd className="mono">{num(policyBlock.thresholds.matcher.value, 6)} · {policyBlock.thresholds.matcher.provenance?.source}{policyBlock.thresholds.matcher.provenance?.target_fmr !== undefined ? ` (FMR ≤ ${policyBlock.thresholds.matcher.provenance.target_fmr})` : ""}</dd>
                 <dt>QUALITY POLICY THRESHOLD</dt><dd className="mono">{policyBlock.thresholds.quality_policy.value} on {policyBlock.thresholds.quality_policy.quality_measure} · {policyBlock.thresholds.quality_policy.provenance?.source}</dd>
                 <dt>Re-estimated during policy</dt><dd>{String(policyBlock.thresholds.matcher.reestimated_during_policy)}</dd>
-                <dt>Uncertainty</dt><dd>{utility.uncertainty.method} · {utility.uncertainty.replicates} replicates · seed {utility.uncertainty.seed} · unit {utility.uncertainty.sampling_unit}</dd>
+                <dt>Uncertainty</dt><dd>{utility.uncertainty.status === "NOT_ASSESSED_IDENTITY_UNAVAILABLE" ? `${utility.uncertainty.status} · ${utility.uncertainty.reason}` : `${utility.uncertainty.method} · ${utility.uncertainty.replicates} replicates · seed ${utility.uncertainty.seed} · unit ${utility.uncertainty.sampling_unit}`}</dd>
               </dl>
             </div>
             <div>
               <h4>Areas under the ERC (registry v1.1.0)</h4>
               <table className="compact">
-                <thead><tr><th>Curve</th><th>Metric</th><th>Domain</th><th>Value</th><th>95 % CI (cluster bootstrap)</th><th>Units</th></tr></thead>
+                <caption>Areas under the error-versus-reject curves</caption>
+                <thead><tr><th scope="col">Curve</th><th scope="col">Metric</th><th scope="col">Domain</th><th scope="col">Value</th><th scope="col">95 % CI (cluster bootstrap)</th><th scope="col">Units</th></tr></thead>
                 <tbody>
                   {(["FNMR", "FMR"] as const).flatMap((kind) => (["au_erc", "partial_au_erc"] as const).map((name) => {
                     const block = utility.areas[kind][name];
                     return (
                       <tr key={`${kind}-${name}`}>
-                        <td>{kind}-ERC</td><td className="mono">{block.definition[0]}@{block.definition[1]}</td><td className="mono">[{block.integration_domain[0]}, {block.integration_domain[1]}]</td>
+                        <th scope="row">{kind}-ERC {name === "partial_au_erc" ? "partial" : "full"}</th><td className="mono">{block.definition[0]}@{block.definition[1]}</td><td className="mono">[{block.integration_domain[0]}, {block.integration_domain[1]}]</td>
                         <td className="mono">{num(block.value, 5)}</td>
                         <td className="mono">{block.uncertainty?.status === "ESTIMATED" ? `${num(block.uncertainty.ci_lower, 5)} – ${num(block.uncertainty.ci_upper, 5)}` : block.uncertainty?.status ?? "—"}</td>
                         <td className="mono">{block.comparison_units}</td>
@@ -339,14 +499,16 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
             <div>
               <h4>Policy: quality ≥ {policyBlock.thresholds.quality_policy.value} at fixed matcher threshold</h4>
               <table className="compact" data-testid="policy-table">
+                <caption>Fixed-threshold quality-policy effects</caption>
+                <thead><tr><th scope="col">Policy measure</th><th scope="col">Recorded value</th></tr></thead>
                 <tbody>
-                  <tr><th>Retention rate</th><td className="mono">{pct(policyBlock.retention_rate, 2)} ({policyBlock.counts.retained} of {policyBlock.counts.usable_units})</td></tr>
-                  <tr><th>Rejection rate</th><td className="mono">{pct(policyBlock.rejection_rate, 2)} ({policyBlock.counts.rejected} rejected)</td></tr>
-                  <tr><th>FNMR before → after</th><td className="mono">{pct(policyBlock.before_policy.fnmr.rate)} → {pct(policyBlock.after_policy.fnmr.rate)} [{pct(policyBlock.after_policy.fnmr.ci_lower)}, {pct(policyBlock.after_policy.fnmr.ci_upper)}]</td></tr>
-                  <tr><th>FMR before → after</th><td className="mono">{pct(policyBlock.before_policy.fmr.rate, 3)} → {pct(policyBlock.after_policy.fmr.rate, 3)}</td></tr>
-                  <tr><th>Errors prevented</th><td className="mono">{policyBlock.impact.errors_prevented} ({policyBlock.impact.false_non_matches_prevented} FNM · {policyBlock.impact.false_matches_prevented} FM)</td></tr>
-                  <tr><th>Successful comparisons removed</th><td className="mono">{policyBlock.impact.successful_comparisons_removed} ({policyBlock.impact.successful_mated_removed} mated · {policyBlock.impact.successful_non_mated_removed} non-mated)</td></tr>
-                  <tr><th>Excluded</th><td className="mono">{policyBlock.counts.processing_failures_excluded} processing failures · {policyBlock.counts.missing_quality_excluded} missing quality</td></tr>
+                  <tr><th scope="row">Retention rate</th><td className="mono">{pct(policyBlock.retention_rate, 2)} ({policyBlock.counts.retained} of {policyBlock.counts.usable_units})</td></tr>
+                  <tr><th scope="row">Rejection rate</th><td className="mono">{pct(policyBlock.rejection_rate, 2)} ({policyBlock.counts.rejected} rejected)</td></tr>
+                  <tr><th scope="row">FNMR before → after</th><td className="mono">{pct(policyBlock.before_policy.fnmr.rate)} → {pct(policyBlock.after_policy.fnmr.rate)} [{pct(policyBlock.after_policy.fnmr.ci_lower)}, {pct(policyBlock.after_policy.fnmr.ci_upper)}]</td></tr>
+                  <tr><th scope="row">FMR before → after</th><td className="mono">{pct(policyBlock.before_policy.fmr.rate, 3)} → {pct(policyBlock.after_policy.fmr.rate, 3)}</td></tr>
+                  <tr><th scope="row">Errors prevented</th><td className="mono">{policyBlock.impact.errors_prevented} ({policyBlock.impact.false_non_matches_prevented} FNM · {policyBlock.impact.false_matches_prevented} FM)</td></tr>
+                  <tr><th scope="row">Successful comparisons removed</th><td className="mono">{policyBlock.impact.successful_comparisons_removed} ({policyBlock.impact.successful_mated_removed} mated · {policyBlock.impact.successful_non_mated_removed} non-mated)</td></tr>
+                  <tr><th scope="row">Excluded</th><td className="mono">{policyBlock.counts.processing_failures_excluded} processing failures · {policyBlock.counts.missing_quality_excluded} missing quality</td></tr>
                 </tbody>
               </table>
               <div className="controls-row">
@@ -358,11 +520,12 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
             <div>
               <h4>Quality-conditioned FNMR (bins recorded with the Run)</h4>
               <table className="compact" data-testid="conditioned-table">
-                <thead><tr><th>Bin</th><th>Units</th><th>Errors</th><th>FNMR</th><th>95 % CI</th><th>Support</th></tr></thead>
+                <caption>False non-match rate by quality bin</caption>
+                <thead><tr><th scope="col">Bin</th><th scope="col">Units</th><th scope="col">Errors</th><th scope="col">FNMR</th><th scope="col">95 % CI</th><th scope="col">Support</th></tr></thead>
                 <tbody>
                   {utility.quality_conditioned.FNMR.bins.map((bin: any) => (
                     <tr key={bin.bin_index}>
-                      <td className="mono">[{bin.quality_low}, {bin.quality_high}{bin.closed_high ? "]" : ")"}</td><td className="mono">{bin.trials}</td><td className="mono">{bin.events}</td>
+                      <th scope="row" className="mono">[{bin.quality_low}, {bin.quality_high}{bin.closed_high ? "]" : ")"}</th><td className="mono">{bin.trials}</td><td className="mono">{bin.events}</td>
                       <td className="mono">{pct(bin.rate)}</td><td className="mono">{bin.ci_lower === null ? "—" : `${pct(bin.ci_lower)} – ${pct(bin.ci_upper)}`}</td>
                       <td>{bin.supported ? "supported" : "unsupported precision"}</td>
                     </tr>
@@ -398,11 +561,12 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
               <h4>Per-quality-measure impact (retention-matched cutoffs)</h4>
               <div className="measure-impact">
                 <table className="compact" data-testid="measure-impact">
-                  <thead><tr><th>Measure</th><th>Cutoff</th><th>Retention</th><th>Errors prevented</th><th>Good removed</th><th>FNMR after</th></tr></thead>
+                  <caption>Retention-matched impact by quality measure</caption>
+                  <thead><tr><th scope="col">Measure</th><th scope="col">Cutoff</th><th scope="col">Retention</th><th scope="col">Errors prevented</th><th scope="col">Good removed</th><th scope="col">FNMR after</th></tr></thead>
                   <tbody>
                     {[...(policyBlock.per_quality_measure_impact?.measures ?? [])].sort((a: any, b: any) => (b.errors_prevented ?? -1) - (a.errors_prevented ?? -1)).map((row: any) => (
                       <tr key={row.quality_measure}>
-                        <td>{row.quality_measure}</td><td className="mono">{row.quality_cutoff ?? row.status}</td><td className="mono">{pct(row.retention_rate, 1)}</td><td className="mono">{row.errors_prevented ?? "—"}</td><td className="mono">{row.successful_comparisons_removed ?? "—"}</td><td className="mono">{pct(row.fnmr_after)}</td>
+                        <th scope="row">{row.quality_measure}</th><td className="mono">{row.quality_cutoff ?? row.status}</td><td className="mono">{pct(row.retention_rate, 1)}</td><td className="mono">{row.errors_prevented ?? "—"}</td><td className="mono">{row.successful_comparisons_removed ?? "—"}</td><td className="mono">{pct(row.fnmr_after)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -417,10 +581,10 @@ export function Utility({ projectId, onMessage }: UtilityProps) {
               <ul>
                 {pairs.rows.map((row) => (
                   <li key={row.pair_id} className="pair" data-testid="utility-pair">
-                    {row.links.left_image && <img src={row.links.left_image} alt="" loading="lazy" />}
-                    {row.links.right_image && <img src={row.links.right_image} alt="" loading="lazy" />}
+                    {row.links.left_image && <img src={row.links.left_image} alt={`Left biometric sample ${row.left_sample_id}; ${row.left_subject_id ? `subject ${row.left_subject_id}` : "subject identity unavailable"}; pair ${row.pair_id}`} loading="lazy" />}
+                    {row.links.right_image && <img src={row.links.right_image} alt={`Right biometric sample ${row.right_sample_id}; ${row.right_subject_id ? `subject ${row.right_subject_id}` : "subject identity unavailable"}; pair ${row.pair_id}`} loading="lazy" />}
                     <div className="pair-facts">
-                      <span className="mono">{row.pair_id} · fold {row.fold} · {row.label}</span>
+                      <span className="mono">{row.pair_id} · fold {row.fold ?? "not recorded"} · {row.label}</span>
                       <button type="button" className="secondary" data-testid="utility-evidence-open" onClick={() => setEvidencePairId(evidencePairId === row.pair_id ? null : row.pair_id)}>
                         {evidencePairId === row.pair_id ? "hide evidence" : "match evidence"}
                       </button>

@@ -92,7 +92,7 @@ class ReportBuilder:
         protocol = self.store.protocol(protocol_id)
         if protocol is None:
             raise ReportError(f"protocol {protocol_id} is not recorded")
-        rows = [["Protocol", protocol.name], ["Protocol ID", protocol_id], ["Category", protocol.category.value], ["Pair policy", protocol.pair_policy.value], ["Folds", str(protocol.fold_count)], ["Pairs", str(protocol.pair_count)], ["Mated", str(protocol.mated_count)], ["Non-mated", str(protocol.nonmated_count)], ["Pairs SHA-256", protocol.pairs_sha256]]
+        rows = [["Protocol", protocol.name], ["Protocol ID", protocol_id], ["Category", protocol.category.value], ["Pair policy", protocol.pair_policy.value], ["Folds", str(protocol.fold_count) if protocol.fold_count is not None else "Not recorded"], ["Subjects", str(protocol.unique_subject_count) if protocol.unique_subject_count is not None else "Not recorded"], ["Pairs", str(protocol.pair_count)], ["Mated", str(protocol.mated_count)], ["Non-mated", str(protocol.nonmated_count)], ["Pairs SHA-256", protocol.pairs_sha256]]
         for limitation in protocol.limitations:
             rows.append(["Limitation", limitation])
         self._add("Protocol", "table", {"columns": ["Field", "Value"], "rows": rows})

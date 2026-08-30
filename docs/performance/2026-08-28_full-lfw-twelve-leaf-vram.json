@@ -1,0 +1,158 @@
+{
+  "acquisition": [
+    {
+      "checkpoint_receipt": "checkpoint-receipt:sha256:a2c65cd1941f3ff5354cb1a3f64b6f01b8bd6b8275e3ccd83884eb813df1e69d",
+      "checkpoint_sha256": "0a379dbaf7d79573d1ff63f317c0296f3adfb637b9c00b6234fdcc53a77a0f61",
+      "matcher_id": "adaface-ir101-local-candidate",
+      "source_event": "system-event:sha256:b449805589f65ae6f617145bf09e2eecdda00814080bfba0fd93048b14073219"
+    },
+    {
+      "checkpoint_receipt": "checkpoint-receipt:sha256:daef998626864ad00992023d71e8fea7067694e0d402d5c2e37663978c7bed3c",
+      "checkpoint_sha256": "8ea1772a9dc0e95b77c171a1713f667f353d86ad66f2e3d418e7973360d2fb28",
+      "matcher_id": "elasticface-arc-r100-local-candidate",
+      "source_event": "system-event:sha256:71425c6d547c1a9dc4a48baa11be54e4ed1122770e71f8a09e9ee1f0fcda1d82"
+    },
+    {
+      "checkpoint_receipt": "checkpoint-receipt:sha256:7cd74c4f42b87540e6b655e2b4cc18bfaed889bf3a25eb359bb8b9ec76c214a8",
+      "checkpoint_sha256": "cfeba792dada6f1f30d1e118aff077d493dd95dd76c77c30f57f90fd0164ad58",
+      "matcher_id": "magface-iresnet100-ms1mv2-local-candidate",
+      "source_event": "system-event:sha256:45db25d8fab1bcd8b9fc6d7b4d8232c7a717ec7802bcf5dd0a08067b762ef9e7"
+    },
+    {
+      "checkpoint_receipt": "checkpoint-receipt:sha256:5ec2011ff0ee44746a44b999f646b3cc0f1ed4c5b1544fa3631d0bbea2cdb377",
+      "checkpoint_sha256": "f92e5e61b326495d32803156ab60aa58abf7e17f84e83d38b5ff6bf1691bdbfe",
+      "matcher_id": "topofr-r100-glint360k-local-candidate",
+      "source_event": "system-event:sha256:dcf77acb5f0d33509460a552c1ca8c0f0bb9bdfe54face65f86dfd73bfe17636"
+    },
+    {
+      "checkpoint_receipt": "checkpoint-receipt:sha256:e6a43347f5c107b941641ae9441ca1ef9c40dedac2d19cdf9043bc96ba8dc948",
+      "checkpoint_sha256": "95e5db485b2755ecfd50c0ae7b7681d229d295bbd15e18c7ddc7a24f47298c78",
+      "matcher_id": "transface-b-glint360k-local-candidate",
+      "source_event": "system-event:sha256:ea60547d003a3dbc99c4037c9afb4b6645a630db3a83a7433498fbff3ba68b47"
+    },
+    {
+      "checkpoint_receipt": "checkpoint-receipt:sha256:1ae6c3d90522b21ec8c8a5a834b984807b1a92c941469d610dd3fb6a45356608",
+      "checkpoint_sha256": "8a334ecc85fd0b547fb86836f5b926abdb4ec9b137ef65ed536d7b2d781905ce",
+      "matcher_id": "transface-s-glint360k-local-candidate",
+      "source_event": "system-event:sha256:13c09b1b7527f9e2254fd8158fa4e85023e79a4d5c871d65a9a7d3ccdcf1f961"
+    }
+  ],
+  "cpu_model": "Intel(R) Core(TM) i9-14900K",
+  "data_dir": "/tmp/qualsight-vram-benchmark-PTvSGU",
+  "detector_workers": 2,
+  "ended_at": "2026-08-29T00:05:17.145899-05:00",
+  "gpu": "NVIDIA GeForce RTX 3090, 535.309.01, 24576 MiB",
+  "kind": "QUALSIGHT_REAL_MATRIX_BENCHMARK_V1",
+  "lfw_fixture_mtime_ns": 1786994403899855697,
+  "matcher_device": "auto",
+  "platform": "Linux-6.1.0-52-amd64-x86_64-with-glibc2.36",
+  "processor": "",
+  "python": "3.11.2",
+  "registry_mtime_ns": 1787901633194848927,
+  "repetitions": [
+    {
+      "leaf_timings": {
+        "QS-C22.AN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-29T00:03:52.119369-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.AS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-29T00:03:42.642014-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.BN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-29T00:05:06.976834-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.BS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-29T00:04:58.936916-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.EN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-29T00:04:11.307191-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.ES": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-29T00:04:01.945580-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.MN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-29T00:04:29.720063-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.MS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-29T00:04:20.806718-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.PN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-29T00:04:49.385489-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.PS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-29T00:04:40.061766-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        },
+        "QS-C22.TN": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-29T00:05:16.612357-05:00",
+          "failed_count": 43,
+          "scored_count": 5957
+        },
+        "QS-C22.TS": {
+          "comparison_count": 6000,
+          "created_at": "2026-08-29T00:05:12.229323-05:00",
+          "failed_count": 0,
+          "scored_count": 6000
+        }
+      },
+      "leaves": 12,
+      "matrix_id": "matrix:sha256:a2ae107a67d5ccc3a45b3ce805870a685b0a6a271e4bd7a1ab0f8c2783e064d2",
+      "pairs": 6000,
+      "process_peak_gpu_vram_bytes": 2571108352,
+      "process_peak_rss_bytes": 3705274368,
+      "repetition": 1,
+      "rss_after_bytes": 2770567168,
+      "rss_before_bytes": 776990720,
+      "run_ids": [
+        "run:sha256:efb60c6b428f5493bb0337f89ed362800b40f87fffcac824fa208d1af9e00e0c",
+        "run:sha256:fe665452fe21a798368588e07604397315436616cf70879198e4f1625dedd23f",
+        "run:sha256:84756998636068b6438eb68cd1e707c43bee3bff56185fd9ddb04887686bfa48",
+        "run:sha256:b0c6f7a31c69f41fa5d113dd7d8db76e18511fc3220b71de0dd0a8b9311e2d15",
+        "run:sha256:16ccf4534a5c21af21c01a2eb7fe4b4d068cdd51d6ef6820b8d8c159175dfa64",
+        "run:sha256:e66cb6852a343c27d7f7baedcf0b19207ead4461e35a1696b105f7876a2a92a0",
+        "run:sha256:62d2403df5eac9f993157ed9a57f38d273f01aa3b9b2f9423f8bd3a0165bb280",
+        "run:sha256:e8b154aad0a5030ae288cb1084e9ea6b00b9210b50490e6323974903f6bd8ac4",
+        "run:sha256:1b7c04a92a6353854453421c1d813a04e9c1eec4d11ba65827d5e5bb51669694",
+        "run:sha256:892ec8dc7b97ade90b1c50b8254e8d0bb305dbdedcd75c9e72f2cc2d0ca70e92",
+        "run:sha256:f0a196e97b9b1b1d3d2b688acba1d4a0154a9b1333c23be08a05bbc4b8e08842",
+        "run:sha256:aae0215173cda1bb1132904ac4ac68c0e3efca840d13aaafe3d0dfcda4188583"
+      ],
+      "samples": 7701,
+      "wall_seconds": 451.564
+    }
+  ],
+  "repository_commit": "8abdf3eac6bdf91e5a347fe3e50bab172c83f052",
+  "repository_dirty": true,
+  "scientific_workers": 1,
+  "started_at": "2026-08-28T23:57:21.221557-05:00"
+}

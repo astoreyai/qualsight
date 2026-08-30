@@ -1894,7 +1894,7 @@
         "https://people.cs.umass.edu/~elm/papers/Huang_eccv2008-lfw.pdf",
         "https://web.cs.umass.edu/publication/docs/2014/UM-CS-2014-003.pdf"
       ],
-      "installation_or_access_method": "Setup acquires lfw-funneled.tgz (registered SHA-256) from the UMass LFW distribution or a byte-identical mirror such as Hugging Face; on this workstation the registered archive and tree already exist at /mnt/projects/datasets/lfw and are read in place. QualSight never copies the images into its own tree.",
+      "installation_or_access_method": "QualSight verifies and reads the registered archive and extracted tree in place at /mnt/projects/datasets/lfw. Automated LFW acquisition is unavailable because no governed live HTTPS source, redirect policy, third-party image-rights determination, and durable acquisition receipt are registered. QualSight never copies the images into its own tree.",
       "data_classification": "PRIVATE",
       "runtime_requirements": {
         "platform": "local-filesystem",
@@ -2095,15 +2095,15 @@
       "citations": [
         "https://github.com/mk-minchul/AdaFace"
       ],
-      "installation_or_access_method": "Setup acquires the AdaFace IR-101 WebFace4M checkpoint (registered SHA-256) from the upstream author's published checkpoint link or a byte-identical Hugging Face mirror; on this workstation the registered bytes already exist under ofiq_29794/data/weights and are read in place.",
+      "installation_or_access_method": "QualSight verifies and reads the registered external checkpoint in place under ofiq_29794/data/weights. Automated checkpoint acquisition is unavailable because the repository license does not establish checkpoint-specific rights; no mirror is implicitly trusted.",
       "data_classification": "SENSITIVE_BIOMETRIC_DERIVED",
       "runtime_requirements": {
-        "platform": "UNEXECUTED_IN_QUALSIGHT",
+        "platform": "local-pytorch-2.10.0",
         "environment": {},
         "notes": [
           "The checkpoint is 683066959 bytes.",
-          "The current loader uses weights_only=False, non-strict state loading, random-weight fallback, and an implicitly resolved buffalo_l model pack.",
-          "A pinned QualSight runtime has not loaded or executed this checkpoint.",
+          "The frozen QualSight runtime verifies the registered checkpoint SHA-256 and pinned architecture-source SHA-256 values before deserializing with weights_only=True and loading the exact state_dict with strict=True.",
+          "The real matcher runtime gate executes this checkpoint over registered LFW images and checks finite normalized embeddings plus mated/non-mated separation; the matrix gate executes both admitted preprocessing profiles.",
           "The upstream repository is MIT licensed; the published checkpoint carries no separate license statement, so third-party rights are recorded as REPOSITORY_LICENSE_ONLY.",
           "The historical download receipt MD5 matches but its byte count conflicts with the current checkpoint; the current SHA-256 identity is authoritative.",
           "The published AdaFace training sets (MS1MV2, MS1MV3, WebFace4M, WebFace12M) are stated by the authors to be evaluated against LFW as a held-out benchmark; this is a published claim, not a QualSight-verified identity exclusion."
@@ -2251,15 +2251,15 @@
       "citations": [
         "https://github.com/fdbtrs/ElasticFace/tree/5496ec0643bfdcd5e6b53b885aa4e919e26ce442"
       ],
-      "installation_or_access_method": "Setup acquires the ElasticFace-Arc R100 MS1MV2 checkpoint (registered SHA-256) from the upstream author's published checkpoint link or a byte-identical mirror; on this workstation the registered bytes already exist under ofiq_29794/data/weights and are read in place.",
+      "installation_or_access_method": "QualSight may acquire the exact author-published ElasticFace-Arc checkpoint into private managed local storage under the registered CC-BY-NC-SA-4.0/noncommercial scope, verifies its SHA-256 and size before no-clobber installation, and records a durable receipt. A verified registered external checkpoint remains a read-in-place fallback; QualSight never bundles checkpoint bytes.",
       "data_classification": "SENSITIVE_BIOMETRIC_DERIVED",
       "runtime_requirements": {
-        "platform": "UNEXECUTED_IN_QUALSIGHT",
+        "platform": "local-pytorch-2.10.0",
         "environment": {},
         "notes": [
           "The checkpoint is 261216371 bytes and its MD5 matches the historical download receipt.",
-          "The current loader uses strict state loading and weights_only=True but still permits random weights and implicit buffalo_l resolution.",
-          "No frozen QualSight runtime has loaded or executed this checkpoint.",
+          "The frozen QualSight runtime verifies the registered checkpoint SHA-256 and pinned architecture-source SHA-256 values before deserializing with weights_only=True and loading the exact state_dict with strict=True; it has no random-weight or implicit model-pack fallback.",
+          "The real matcher runtime gate executes this checkpoint over registered LFW images and checks finite normalized embeddings plus mated/non-mated separation; the matrix gate executes both admitted preprocessing profiles.",
           "The historical download receipt MD5 matches but its byte count conflicts with the current checkpoint; the current SHA-256 identity is authoritative.",
           "ElasticFace is published as trained on MS1MV2 and evaluated on LFW as a held-out benchmark; this is a published claim, not a QualSight-verified identity exclusion."
         ]
@@ -2390,15 +2390,15 @@
       "citations": [
         "https://github.com/DanJun6737/TransFace/tree/fb6cd56d04c7ea525e328219f5d5066adac03ada"
       ],
-      "installation_or_access_method": "Setup acquires the TransFace-S Glint360K checkpoint (registered SHA-256) from the upstream author's published checkpoint link or a byte-identical mirror; on this workstation the registered bytes already exist under ofiq_29794/data/weights and are read in place.",
+      "installation_or_access_method": "QualSight verifies and reads the registered external checkpoint in place under ofiq_29794/data/weights. Automated checkpoint acquisition is unavailable because no upstream license or checkpoint-specific permission was found; no mirror is implicitly trusted.",
       "data_classification": "SENSITIVE_BIOMETRIC_DERIVED",
       "runtime_requirements": {
-        "platform": "UNEXECUTED_IN_QUALSIGHT",
+        "platform": "local-pytorch-2.10.0",
         "environment": {},
         "notes": [
           "The checkpoint is 346705361 bytes.",
-          "The current loader uses strict state loading and weights_only=True but still permits random weights and implicit buffalo_l resolution.",
-          "No frozen QualSight runtime has loaded or executed this checkpoint.",
+          "The frozen QualSight runtime verifies the registered checkpoint SHA-256 and pinned architecture-source SHA-256 values before deserializing with weights_only=True and loading the exact state_dict with strict=True; it has no random-weight or implicit model-pack fallback.",
+          "The real matcher runtime gate executes this checkpoint over registered LFW images and checks finite normalized embeddings plus mated/non-mated separation; the matrix gate executes both admitted preprocessing profiles.",
           "No upstream license or checkpoint-specific permission was found in the pinned repository evidence; the project owner accepted local, non-redistributed research use under the recorded receipt.",
           "TransFace-S is published as trained on Glint360K and evaluated on LFW as a held-out benchmark; this is a published claim, not a QualSight-verified identity exclusion."
         ]
@@ -2486,6 +2486,266 @@
       "checks": []
     },
     {
+      "resource_id": "magface-iresnet100-ms1mv2-local-candidate",
+      "kind": "LOCAL_MATCHER_CANDIDATE",
+      "name": "MagFace iResNet100 MS1MV2 local checkpoint",
+      "state": "APPROVED_LOCAL_RESEARCH_USE",
+      "version": "sha256:cfeba792dada6f1f30d1e118aff077d493dd95dd76c77c30f57f90fd0164ad58",
+      "source": {
+        "uri": "https://github.com/IrvingMeng/MagFace",
+        "local_root": "/mnt/projects/02_perception_biometrics/ofiq_29794",
+        "evidence_artifacts": [
+          "/mnt/projects/ofiqgui/resources/upstream/addon-download-evidence-2026-08-28.json",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/configs/matchers/magface.yaml",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/data/weights/magface/magface_iresnet100.pth"
+        ],
+        "notes": [
+          "The author repository publishes Google Drive file 1Bd87admxOZvbIOAyTkGEntsEz3fyMt7H as the iResNet100 MS1MV2 model.",
+          "The live endpoint byte length and filename match the local checkpoint, whose complete SHA-256 is registered here.",
+          "Repository licensing is recorded separately from checkpoint-specific rights."
+        ]
+      },
+      "licenses": [],
+      "use_restrictions": [
+        "Owner-approved local noncommercial research use only; never bundle, publish, commit, transmit, or redistribute the checkpoint or its embeddings.",
+        "Acquire only by an explicit operator action from the recorded author endpoint and require the registered SHA-256 and byte length before installation.",
+        "Do not treat the repository license as a checkpoint-specific permission grant.",
+        "Load only through the strict frozen matcher runtime; random or partially loaded weights are prohibited."
+      ],
+      "redistribution_status": "NOT_APPROVED_FOR_QUALSIGHT_DISTRIBUTION",
+      "research_use_status": "OWNER_APPROVED_LOCAL_NONCOMMERCIAL_RESEARCH_REPOSITORY_LICENSE_ONLY_CHECKPOINT_UNSTATED",
+      "citations": [
+        "https://github.com/IrvingMeng/MagFace/tree/99bae614ac2643b9694bf18e0c5645272ff6acfa"
+      ],
+      "installation_or_access_method": "QualSight may import the verified external checkpoint or explicitly download the exact author-published bytes into private managed storage, verify them before atomic promotion, and record a durable receipt.",
+      "data_classification": "SENSITIVE_BIOMETRIC_DERIVED",
+      "runtime_requirements": {
+        "platform": "local-pytorch-2.10.0",
+        "environment": {},
+        "notes": [
+          "The runtime removes only the published features.module backbone prefix and the separate identity-classifier tensors, then requires every inference-backbone tensor with strict loading.",
+          "Input is an aligned 112 by 112 BGR uint8 crop scaled to the published zero-to-one range; output is a finite 512-dimensional L2-normalized embedding."
+        ]
+      },
+      "owner_authorization": {
+        "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+        "authority": "QualSight project owner (interactive user)",
+        "recorded_at": "2026-08-28T02:16:25-05:00",
+        "scopes": [
+          "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+        ],
+        "redistribution_allowed": false,
+        "evidence_artifact_path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-addon-acquisition-2026-08-28.json"
+      },
+      "third_party_rights_status": "REPOSITORY_LICENSE_ONLY",
+      "consumers": ["QS-C22", "QS-C23", "QS-E40"],
+      "approved_scopes": ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"],
+      "blocked_reasons": [],
+      "artifacts": [
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-addon-acquisition-2026-08-28.json",
+          "sha256": "bea38a611978e0296cb969cf798ec463553f2f8612a9af87ed2d8f1b8881c926",
+          "size_bytes": 2993,
+          "mtime_ns": 1787901614570375091
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/addon-download-evidence-2026-08-28.json",
+          "sha256": "865912419e25acb530870e50ae57516daa816d722c8ee7b00bc9f94f55c12db2",
+          "size_bytes": 2370,
+          "mtime_ns": 1787901428349648607
+        },
+        {
+          "role": "CONFIGURATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/configs/matchers/magface.yaml",
+          "sha256": "8fcf2850e7c3ba9c27554f81b9eafce1ef13502b54ee5c2238fc97761c57ab56",
+          "size_bytes": 877,
+          "mtime_ns": 1786597063054304968
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/weights/magface/magface_iresnet100.pth",
+          "sha256": "cfeba792dada6f1f30d1e118aff077d493dd95dd76c77c30f57f90fd0164ad58",
+          "size_bytes": 283040192,
+          "mtime_ns": 1615770178000000000
+        }
+      ],
+      "checks": []
+    },
+    {
+      "resource_id": "topofr-r100-glint360k-local-candidate",
+      "kind": "LOCAL_MATCHER_CANDIDATE",
+      "name": "TopoFR R100 Glint360K local checkpoint",
+      "state": "APPROVED_LOCAL_RESEARCH_USE",
+      "version": "sha256:f92e5e61b326495d32803156ab60aa58abf7e17f84e83d38b5ff6bf1691bdbfe",
+      "source": {
+        "uri": "https://github.com/DanJun6737/TopoFR",
+        "local_root": "/mnt/projects/02_perception_biometrics/ofiq_29794",
+        "evidence_artifacts": [
+          "/mnt/projects/ofiqgui/resources/upstream/addon-download-evidence-2026-08-28.json",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/configs/matchers/topofr.yaml",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/data/weights/topofr/topofr_r100_glint360k.pth"
+        ],
+        "notes": [
+          "The author repository publishes Google Drive file 1vQBGXc_nXytEx8fpV9jykeLdxD45cE8B as the R100 Glint360K checkpoint.",
+          "The live endpoint byte length and filename match the local checkpoint, whose complete SHA-256 is registered here.",
+          "No upstream license or checkpoint-specific permission grant was found."
+        ]
+      },
+      "licenses": [],
+      "use_restrictions": [
+        "Owner-approved local noncommercial research use only; never bundle, publish, commit, transmit, or redistribute the checkpoint or its embeddings.",
+        "Acquire only by an explicit operator action from the recorded author endpoint and require the registered SHA-256 and byte length before installation.",
+        "Do not represent owner authorization as third-party permission.",
+        "Load only through the strict frozen matcher runtime; random or partially loaded weights are prohibited."
+      ],
+      "redistribution_status": "NOT_APPROVED_FOR_QUALSIGHT_DISTRIBUTION",
+      "research_use_status": "OWNER_APPROVED_LOCAL_NONCOMMERCIAL_RESEARCH_NO_UPSTREAM_LICENSE_FOUND",
+      "citations": [
+        "https://github.com/DanJun6737/TopoFR/tree/5960a33220968e6f9f74adcffb3f1a4ca31f9a0a"
+      ],
+      "installation_or_access_method": "QualSight may import the verified external checkpoint or explicitly download the exact author-published bytes into private managed storage, verify them before atomic promotion, and record a durable receipt.",
+      "data_classification": "SENSITIVE_BIOMETRIC_DERIVED",
+      "runtime_requirements": {
+        "platform": "local-pytorch-2.10.0",
+        "environment": {},
+        "notes": [
+          "The runtime removes only published wrapper prefixes and the separate 360232-identity classifier tensor, then requires every iResNet100 backbone tensor with strict loading.",
+          "Input is an aligned 112 by 112 BGR uint8 crop converted to RGB and scaled to minus-one-to-one; output is a finite 512-dimensional L2-normalized embedding."
+        ]
+      },
+      "owner_authorization": {
+        "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+        "authority": "QualSight project owner (interactive user)",
+        "recorded_at": "2026-08-28T02:16:25-05:00",
+        "scopes": ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"],
+        "redistribution_allowed": false,
+        "evidence_artifact_path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-addon-acquisition-2026-08-28.json"
+      },
+      "third_party_rights_status": "NO_LICENSE_FOUND",
+      "consumers": ["QS-C22", "QS-C23", "QS-E40"],
+      "approved_scopes": ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"],
+      "blocked_reasons": [],
+      "artifacts": [
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-addon-acquisition-2026-08-28.json",
+          "sha256": "bea38a611978e0296cb969cf798ec463553f2f8612a9af87ed2d8f1b8881c926",
+          "size_bytes": 2993,
+          "mtime_ns": 1787901614570375091
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/addon-download-evidence-2026-08-28.json",
+          "sha256": "865912419e25acb530870e50ae57516daa816d722c8ee7b00bc9f94f55c12db2",
+          "size_bytes": 2370,
+          "mtime_ns": 1787901428349648607
+        },
+        {
+          "role": "CONFIGURATION",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/configs/matchers/topofr.yaml",
+          "sha256": "a937f68c0808eddb63569ce90438f2975f06de962738b0f0520d70c5d779be0e",
+          "size_bytes": 459,
+          "mtime_ns": 1786597063058305071
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/weights/topofr/topofr_r100_glint360k.pth",
+          "sha256": "f92e5e61b326495d32803156ab60aa58abf7e17f84e83d38b5ff6bf1691bdbfe",
+          "size_bytes": 998958213,
+          "mtime_ns": 1684727403000000000
+        }
+      ],
+      "checks": []
+    },
+    {
+      "resource_id": "transface-b-glint360k-local-candidate",
+      "kind": "LOCAL_MATCHER_CANDIDATE",
+      "name": "TransFace-B Glint360K local checkpoint",
+      "state": "APPROVED_LOCAL_RESEARCH_USE",
+      "version": "sha256:95e5db485b2755ecfd50c0ae7b7681d229d295bbd15e18c7ddc7a24f47298c78",
+      "source": {
+        "uri": "https://github.com/DanJun6737/TransFace",
+        "local_root": "/mnt/projects/02_perception_biometrics/ofiq_29794",
+        "evidence_artifacts": [
+          "/mnt/projects/ofiqgui/resources/upstream/addon-download-evidence-2026-08-28.json",
+          "/mnt/projects/ofiqgui/resources/upstream/transface/README.fb6cd56d.md",
+          "/mnt/projects/02_perception_biometrics/ofiq_29794/data/weights/transface/transface_vitb_glint360k.pth"
+        ],
+        "notes": [
+          "The pinned author README publishes Google Drive file 13IezvOo5GvtGVsRap2s5RVqtIl1y0ke5 as the Glint360K TransFace-B checkpoint.",
+          "The live endpoint byte length and filename match the local checkpoint, whose complete SHA-256 is registered here.",
+          "No upstream license or checkpoint-specific permission grant was found."
+        ]
+      },
+      "licenses": [],
+      "use_restrictions": [
+        "Owner-approved local noncommercial research use only; never bundle, publish, commit, transmit, or redistribute the checkpoint or its embeddings.",
+        "Acquire only by an explicit operator action from the recorded author endpoint and require the registered SHA-256 and byte length before installation.",
+        "Do not represent owner authorization as third-party permission.",
+        "Load only through the strict frozen matcher runtime; random or partially loaded weights are prohibited."
+      ],
+      "redistribution_status": "NOT_APPROVED_FOR_QUALSIGHT_DISTRIBUTION",
+      "research_use_status": "OWNER_APPROVED_LOCAL_NONCOMMERCIAL_RESEARCH_NO_UPSTREAM_LICENSE_FOUND",
+      "citations": [
+        "https://github.com/DanJun6737/TransFace/tree/fb6cd56d04c7ea525e328219f5d5066adac03ada"
+      ],
+      "installation_or_access_method": "QualSight may import the verified external checkpoint or explicitly download the exact author-published bytes into private managed storage, verify them before atomic promotion, and record a durable receipt.",
+      "data_classification": "SENSITIVE_BIOMETRIC_DERIVED",
+      "runtime_requirements": {
+        "platform": "local-pytorch-2.10.0",
+        "environment": {},
+        "notes": [
+          "The runtime constructs the pinned ViT-B patch-9 architecture and requires every checkpoint tensor with strict loading.",
+          "Input is an aligned 112 by 112 BGR uint8 crop converted to RGB and scaled to minus-one-to-one; output is a finite 512-dimensional L2-normalized embedding."
+        ]
+      },
+      "owner_authorization": {
+        "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+        "authority": "QualSight project owner (interactive user)",
+        "recorded_at": "2026-08-28T02:16:25-05:00",
+        "scopes": ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"],
+        "redistribution_allowed": false,
+        "evidence_artifact_path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-addon-acquisition-2026-08-28.json"
+      },
+      "third_party_rights_status": "NO_LICENSE_FOUND",
+      "consumers": ["QS-C22", "QS-C23", "QS-E40"],
+      "approved_scopes": ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"],
+      "blocked_reasons": [],
+      "artifacts": [
+        {
+          "role": "AUTHORIZATION",
+          "path": "/mnt/projects/ofiqgui/resources/authorizations/qualsight-owner-addon-acquisition-2026-08-28.json",
+          "sha256": "bea38a611978e0296cb969cf798ec463553f2f8612a9af87ed2d8f1b8881c926",
+          "size_bytes": 2993,
+          "mtime_ns": 1787901614570375091
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/addon-download-evidence-2026-08-28.json",
+          "sha256": "865912419e25acb530870e50ae57516daa816d722c8ee7b00bc9f94f55c12db2",
+          "size_bytes": 2370,
+          "mtime_ns": 1787901428349648607
+        },
+        {
+          "role": "DOCUMENTATION",
+          "path": "/mnt/projects/ofiqgui/resources/upstream/transface/README.fb6cd56d.md",
+          "sha256": "3fbda289775281dd19d7e03aec6320f0f8f6a24776971c7db85e8a170e23b83a",
+          "size_bytes": 6740,
+          "mtime_ns": 1786719273927102401
+        },
+        {
+          "role": "MODEL",
+          "path": "/mnt/projects/02_perception_biometrics/ofiq_29794/data/weights/transface/transface_vitb_glint360k.pth",
+          "sha256": "95e5db485b2755ecfd50c0ae7b7681d229d295bbd15e18c7ddc7a24f47298c78",
+          "size_bytes": 497994377,
+          "mtime_ns": 1678440529000000000
+        }
+      ],
+      "checks": []
+    },
+    {
       "resource_id": "insightface-scrfd-10g-local-candidate",
       "kind": "FACE_DETECTOR_CANDIDATE",
       "name": "InsightFace buffalo_l SCRFD-10GF local detector",
@@ -2526,7 +2786,7 @@
         "https://github.com/deepinsight/insightface/tree/7fadd420c2351d0ffa8cac403421c1a3ed733365/python-package",
         "https://github.com/deepinsight/insightface/releases/tag/v0.7"
       ],
-      "installation_or_access_method": "Setup acquires buffalo_l.zip (registered SHA-256, official InsightFace v0.7 release asset) from GitHub or a byte-identical mirror and extracts det_10g.onnx; on this workstation the registered bytes already exist under ~/.insightface/models/buffalo_l and are read in place.",
+      "installation_or_access_method": "QualSight verifies and reads the registered external buffalo_l archive and det_10g.onnx bytes in place. Automated detector acquisition is not exposed by setup or the add-on catalog; no mirror is implicitly trusted.",
       "data_classification": "SENSITIVE_BIOMETRIC_DERIVED",
       "runtime_requirements": {
         "platform": "python-3.11-linux-x86_64-unvalidated",
@@ -2534,7 +2794,7 @@
         "notes": [
           "The installed InsightFace distribution reports version 0.7.3.",
           "The current Python environment cannot import InsightFace because its dependency set is incompatible.",
-          "No frozen QualSight runtime has loaded or executed this detector.",
+          "The real matcher runtime and matrix gates load this exact SHA-256-verified detector through ONNX Runtime and execute both admitted preprocessing profiles over registered LFW images.",
           "The InsightFace model-zoo notice permits noncommercial research use and directs licensing questions to the maintainers; no model redistribution license exists, and the project owner accepted local, non-redistributed research use under the recorded receipt.",
           "The original historical acquisition event of the existing archive is not reconstructed; the archive and detector member are byte-bound to the official v0.7 release asset."
         ]

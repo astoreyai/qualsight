@@ -60,7 +60,7 @@ class OwnerSuppliedRealTests(unittest.TestCase):
             runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID,
             input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, LFW_RESOURCE_ID),
         )
-        cls.client = TestClient(create_app(settings))
+        cls.client = TestClient(create_app(settings), base_url="http://127.0.0.1")
         cls.client.__enter__()
         project = cls.client.post(
             "/api/projects",
@@ -237,6 +237,8 @@ class OwnerSuppliedRealTests(unittest.TestCase):
         self.assertIn(second.status_code, (200, 201), second.text)
         self.assertEqual(second.json()["pairs_sha256"], record["pairs_sha256"])
         # The frozen owner protocol executes through the real matcher matrix.
+        pulled = self.client.post("/api/matcher-assets/adaface-ir101-local-candidate/pull-sources")
+        self.assertEqual(pulled.status_code, 200, pulled.text)
         started = self.client.post(
             f"/api/projects/{self.project_id}/protocols/{record['protocol_id']}/matrix",
             params={"leaves": "QS-C22.AS"},
@@ -283,6 +285,46 @@ class OwnerSuppliedRealTests(unittest.TestCase):
         )
         self.assertIn(purged.status_code, (200, 201), purged.text)
         self.assertFalse(stored.exists(), "purge must remove the owner-supplied stored copy")
+
+    def test_y80_shared_content_addressed_copy_survives_until_last_project_purge(self) -> None:
+        data = (self.owner_root / "operator_c" / "photo_02.jpg").read_bytes()
+        projects: list[str] = []
+        uploads: list[dict] = []
+        for name in ("shared owner reference one", "shared owner reference two"):
+            project = self.client.post(
+                "/api/projects",
+                json={"name": name, "description": "Cross-project owner-input purge gate.", "purpose_scope": RESEARCH_SCOPE},
+            ).json()
+            project_id = project["project_id"]
+            projects.append(project_id)
+            self.client.post(f"/api/projects/{project_id}/open")
+            response = self.client.post(
+                "/api/quality/assess-upload",
+                params={"project_id": project_id, "purpose_scope": RESEARCH_SCOPE, "filename": "shared_real_photo.jpg"},
+                content=data,
+                headers={"content-type": "application/octet-stream"},
+            )
+            self.assertEqual(response.status_code, 201, response.text)
+            uploads.append(response.json())
+
+        stored = Path(uploads[0]["stored_path"])
+        self.assertEqual(uploads[1]["stored_path"], str(stored))
+        self.assertTrue(stored.exists())
+
+        first_purge = self.client.post(
+            f"/api/projects/{projects[0]}/purge",
+            json={"confirm": projects[0]},
+        )
+        self.assertIn(first_purge.status_code, (200, 201), first_purge.text)
+        self.assertTrue(stored.exists(), "a managed copy referenced by the second project must survive the first purge")
+        self.assertEqual(len(self.client.get(f"/api/projects/{projects[1]}/datasets").json()), 1)
+
+        second_purge = self.client.post(
+            f"/api/projects/{projects[1]}/purge",
+            json={"confirm": projects[1]},
+        )
+        self.assertIn(second_purge.status_code, (200, 201), second_purge.text)
+        self.assertFalse(stored.exists(), "the managed copy must be deleted after its final project reference is purged")
 
 
 if __name__ == "__main__":

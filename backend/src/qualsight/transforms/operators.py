@@ -93,6 +93,15 @@ def occlusion(image: np.ndarray, fraction: float) -> Encoded:
 
 OPERATORS = {"jpeg": jpeg, "gaussian_blur": gaussian_blur, "downscale": downscale, "gamma": gamma, "contrast": contrast, "rotation": rotation, "occlusion": occlusion}
 PARAMETER_NAMES = {"jpeg": "quality", "gaussian_blur": "sigma", "downscale": "factor", "gamma": "gamma", "contrast": "alpha", "rotation": "degrees", "occlusion": "fraction"}
+PARAMETER_CONTRACTS: dict[str, dict[str, Any]] = {
+    "jpeg": {"value_type": "integer", "minimum": 1, "maximum": 100, "minimum_exclusive": False, "maximum_exclusive": False, "guidance": "integer quality levels from 1 through 100"},
+    "gaussian_blur": {"value_type": "number", "minimum": 0, "maximum": 20, "minimum_exclusive": True, "maximum_exclusive": False, "guidance": "sigma values greater than 0 and no greater than 20 pixels"},
+    "downscale": {"value_type": "number", "minimum": 0, "maximum": 1, "minimum_exclusive": True, "maximum_exclusive": True, "guidance": "dimensionless factors greater than 0 and less than 1"},
+    "gamma": {"value_type": "number", "minimum": 0.1, "maximum": 10, "minimum_exclusive": False, "maximum_exclusive": False, "guidance": "dimensionless gamma values from 0.1 through 10"},
+    "contrast": {"value_type": "number", "minimum": 0.05, "maximum": 5, "minimum_exclusive": False, "maximum_exclusive": False, "guidance": "alpha multipliers from 0.05 through 5"},
+    "rotation": {"value_type": "number", "minimum": -180, "maximum": 180, "minimum_exclusive": False, "maximum_exclusive": False, "guidance": "angles from −180 through 180 degrees"},
+    "occlusion": {"value_type": "number", "minimum": 0, "maximum": 1, "minimum_exclusive": True, "maximum_exclusive": True, "guidance": "image-area fractions greater than 0 and less than 1"},
+}
 
 
 def apply(kind: str, image_bgr: np.ndarray, parameter: float) -> Encoded:

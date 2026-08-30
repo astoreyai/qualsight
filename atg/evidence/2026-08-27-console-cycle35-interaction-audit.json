@@ -1,0 +1,107 @@
+{
+  "console_errors": [],
+  "exit_code": 0,
+  "gate": "console interaction/piping audit",
+  "link_checks": {
+    "non_200": [],
+    "total": 426
+  },
+  "steps": [
+    {
+      "failures": [],
+      "newly_checked": 122,
+      "runs_listed": 71,
+      "scope": "projects",
+      "seconds": 27.6,
+      "step": "load",
+      "urls_in_dom": 122
+    },
+    {
+      "failures": [],
+      "measures": 28,
+      "newly_checked": 6,
+      "ofiq_points": 98,
+      "scope": "assess",
+      "scrfd_points": 5,
+      "seconds": 16.3,
+      "step": "assess",
+      "upload_uqs": "58",
+      "urls_in_dom": 128
+    },
+    {
+      "bins": 20,
+      "failures": [],
+      "newly_checked": 4,
+      "scope": "data",
+      "seconds": 0.8,
+      "step": "data",
+      "urls_in_dom": 132
+    },
+    {
+      "evidence_decisions": 4,
+      "failures": [],
+      "matcher_drilldowns": [
+        "AdaFace IR-101 WebFace4M local checkpoint",
+        "ElasticFace-Arc R100 MS1MV2 local checkpoint",
+        "TransFace-S Glint360K local checkpoint"
+      ],
+      "matrix_cells": 6,
+      "newly_checked": 82,
+      "scope": "matchers",
+      "seconds": 1.8,
+      "step": "matchers",
+      "urls_in_dom": 214
+    },
+    {
+      "erc_polylines": 7,
+      "failures": [],
+      "newly_checked": 194,
+      "pair_counts": {
+        "prevented": 26,
+        "rejected": 60,
+        "removed": 60
+      },
+      "scope": "utility",
+      "seconds": 3.1,
+      "step": "utility",
+      "urls_in_dom": 408
+    },
+    {
+      "contrasts": 9,
+      "failures": [],
+      "newly_checked": 14,
+      "scope": "cross",
+      "seconds": 1.7,
+      "step": "cross",
+      "urls_in_dom": 422
+    },
+    {
+      "failures": [],
+      "figures_opened": 8,
+      "newly_checked": 4,
+      "scope": "reports",
+      "seconds": 0.9,
+      "step": "reports",
+      "urls_in_dom": 426
+    },
+    {
+      "failures": [],
+      "newly_checked": 0,
+      "scope": "advanced",
+      "seconds": 0.4,
+      "step": "advanced",
+      "urls_in_dom": 426
+    },
+    {
+      "failures": [],
+      "matcher_assets": 3,
+      "newly_checked": 0,
+      "resources": 10,
+      "scope": "system",
+      "seconds": 0.4,
+      "step": "system",
+      "urls_in_dom": 426
+    }
+  ],
+  "total_seconds": 53.4
+}

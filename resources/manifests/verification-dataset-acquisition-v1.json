@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0.0",
+  "manifest_id": "verification-dataset-acquisition-v1",
+  "policy": "Explicit operator-triggered local noncommercial research acquisition only. Publisher availability does not establish image redistribution rights. The complete HTTPS archive is SHA-256 verified before private local installation; extraction accepts only the registered regular-file layout and records a byte manifest and durable receipt.",
+  "archive": {
+    "published_url": "https://drive.google.com/file/d/1HBGwyTFnl4Bt4hl5BpLE3t__J84R72TX/view?usp=sharing",
+    "url": "https://drive.usercontent.google.com/download?id=1HBGwyTFnl4Bt4hl5BpLE3t__J84R72TX&export=download&confirm=t",
+    "host": "drive.usercontent.google.com",
+    "allowed_redirect_hosts": [],
+    "filename": "lfw_cfp_agedb.tar",
+    "sha256": "d16039c1aa5b801b3a121c1748e3b49ccefe3e5b72f3f918d8a0cd09bb597b96",
+    "size_bytes": 249538560,
+    "managed_relative_path": "datasets/archives/lfw_cfp_agedb.tar",
+    "observed_at": "2026-08-28T02:16:25-05:00",
+    "observed_content_type": "application/octet-stream",
+    "observed_content_disposition": "attachment; filename=\"lfw_cfp_agedb.tar\"",
+    "observed_last_modified": "Mon, 24 Jan 2022 06:35:54 GMT",
+    "evidence_path": "resources/upstream/addon-download-evidence-2026-08-28.json",
+    "evidence_sha256": "865912419e25acb530870e50ae57516daa816d722c8ee7b00bc9f94f55c12db2"
+  },
+  "protocols": [
+    {
+      "addon_id": "magface-lfw-verification-v1",
+      "display_name": "LFW verification pairs · MagFace release",
+      "archive_directory": "lfw",
+      "sample_count": 12000,
+      "pair_count": 6000,
+      "mated_pair_count": 3000,
+      "nonmated_pair_count": 3000,
+      "image_list_sha256": "be31bb63280e61450c7487c625a7b17997d2165938e61b7f44eb9fe852326431",
+      "pair_list_sha256": "90f1c803a5bd4c24f7c3e4c44f4cb5fc986520906e9d6b9421a5ae64bdce389e"
+    },
+    {
+      "addon_id": "magface-cfp-fp-verification-v1",
+      "display_name": "CFP-FP verification pairs · MagFace release",
+      "archive_directory": "cfp",
+      "sample_count": 14000,
+      "pair_count": 7000,
+      "mated_pair_count": 3500,
+      "nonmated_pair_count": 3500,
+      "image_list_sha256": "3e2f3688283dd9db310ee50a1c9b2c0db11625a748ef9b8c5bca6e7242633fa9",
+      "pair_list_sha256": "21f27555cca60095b0ab00d939439e87aa4ee407f92a034ba745d9a87446a8ac"
+    },
+    {
+      "addon_id": "magface-agedb-30-verification-v1",
+      "display_name": "AgeDB-30 verification pairs · MagFace release",
+      "archive_directory": "agedb",
+      "sample_count": 12000,
+      "pair_count": 6000,
+      "mated_pair_count": 3000,
+      "nonmated_pair_count": 3000,
+      "image_list_sha256": "c9c5e24db4055edd79d72419f255ad164757fd5028e0e1db7a9de5d25c7ce5f2",
+      "pair_list_sha256": "90f1c803a5bd4c24f7c3e4c44f4cb5fc986520906e9d6b9421a5ae64bdce389e"
+    }
+  ]
+}

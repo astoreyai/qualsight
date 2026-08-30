@@ -32,11 +32,22 @@ from ..provenance import sha256_file
 
 HONESTY_STATEMENT = (
     "Recorded evidence only: scores, thresholds, and quality measures come from immutable Runs; "
-    "overlays show the matcher pipeline's SCRFD-10G detection, not OFIQ's internal landmarks; "
-    "aligned crops are recomputed deterministically under the recorded frozen preprocessing "
-    "condition; associations between quality and errors are not causal claims; nothing here is an "
-    "identity decision or an ISO/IEC certification."
+    "visual inputs are reproduced under the recorded frozen preprocessing condition; associations "
+    "between quality and errors are not causal claims; nothing here is an identity decision or an "
+    "ISO/IEC certification."
 )
+
+
+def _honesty_statement(condition_id: str) -> str:
+    if condition_id == ConditionId.PREALIGNED_ARCFACE112.value:
+        return (
+            f"{HONESTY_STATEMENT} This Run used the publisher's hash-verified prealigned 112x112 image "
+            "directly; QualSight executed no face detector, landmark selection, or realignment."
+        )
+    return (
+        f"{HONESTY_STATEMENT} Matcher overlays show the recorded SCRFD-10G detection, not OFIQ's "
+        "internal landmarks; aligned crops are recomputed deterministically."
+    )
 
 
 class EvidenceError(RuntimeError):
@@ -58,6 +69,21 @@ def detection_geometry(
         condition = ConditionId(condition_id) if condition_id else ConditionId.ADAPTIVE_LARGEST_JPEG95
     except ValueError as error:
         raise EvidenceError(f"unknown preprocessing condition {condition_id}") from error
+    if condition is ConditionId.PREALIGNED_ARCFACE112:
+        result = preprocess(image, condition, None)
+        return {
+            "source": "PUBLISHER_PREALIGNED_INPUT",
+            "label": "Publisher-provided, hash-verified 112x112 comparison input; no detector or landmarks executed",
+            "condition_id": condition.value,
+            "condition": CONDITION_DEFINITIONS[condition],
+            "image": {"path": image_path, "sha256": expected_sha256, "width": image.shape[1], "height": image.shape[0]},
+            "canvas": result.canvas,
+            "face_count": None,
+            "chosen_index": None,
+            "selection_rule": str(CONDITION_DEFINITIONS[condition]["selection"]),
+            "failure": result.failure,
+            "detections": [],
+        }
     result = preprocess(image, condition, detector)
     detections = detector.detect(image, result.canvas)
     chosen_index = None
@@ -103,9 +129,13 @@ def recompute_crop(detector: SCRFDDetector, image_path: str, expected_sha256: st
         raise EvidenceError(
             f"condition {condition_id} is not a frozen preprocessing condition (externally computed Runs carry no crops)"
         ) from error
-    result = preprocess(image, condition, detector)
+    result = preprocess(
+        image,
+        condition,
+        None if condition is ConditionId.PREALIGNED_ARCFACE112 else detector,
+    )
     if result.crop_bgr is None:
-        raise EvidenceError(f"no face passes the detector under {condition_id}: {result.failure}")
+        raise EvidenceError(f"the recorded comparison input cannot be reproduced under {condition_id}: {result.failure}")
     return result.crop_bgr, result.crop_sha256 or ""
 
 
@@ -205,7 +235,7 @@ def pair_evidence(store: Any, leaf_row: dict[str, Any], pair_id: str) -> dict[st
             "impostor_count": len(impostor),
         },
         "quality_attribution": quality_attribution,
-        "statement": HONESTY_STATEMENT,
+        "statement": _honesty_statement(leaf_row["condition_id"]),
     }
 
 

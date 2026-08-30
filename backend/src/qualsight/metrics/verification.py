@@ -109,7 +109,7 @@ class ComparisonInputs:
     scores: np.ndarray  # float64, NaN when failed
     mated: np.ndarray  # bool
     failed: np.ndarray  # bool
-    folds: np.ndarray  # int
+    folds: np.ndarray  # positive int when the protocol publishes fold authority; otherwise None
 
 
 def _rates_at(inputs: ComparisonInputs, threshold: float, policy: str) -> dict[str, float | int | None]:
@@ -152,13 +152,40 @@ def _curve(inputs: ComparisonInputs, policy: str) -> tuple[np.ndarray, np.ndarra
     ok = ~inputs.failed
     thresholds = np.unique(inputs.scores[ok])
     thresholds = np.concatenate(([-np.inf], thresholds, [np.inf]))
-    fmr = np.empty(thresholds.shape[0])
-    fnmr = np.empty(thresholds.shape[0])
-    for index, threshold in enumerate(thresholds):
-        rates = _rates_at(inputs, threshold, policy)
-        fmr[index] = rates["fmr"] if rates["fmr"] is not None else np.nan
-        fnmr[index] = rates["fnmr"] if rates["fnmr"] is not None else np.nan
+    nonmated_scores = np.sort(inputs.scores[ok & ~inputs.mated])
+    mated_scores = np.sort(inputs.scores[ok & inputs.mated])
+    false_matches = nonmated_scores.size - np.searchsorted(nonmated_scores, thresholds, side="left")
+    false_non_matches = np.searchsorted(mated_scores, thresholds, side="left")
+    if policy == "EXCLUDE_FAILED_TRIALS":
+        nonmated_trials = nonmated_scores.size
+        mated_trials = mated_scores.size
+    else:
+        nonmated_trials = int((~inputs.mated).sum())
+        mated_trials = int(inputs.mated.sum())
+        false_non_matches = false_non_matches + int((inputs.failed & inputs.mated).sum())
+    fmr = false_matches.astype(np.float64) / nonmated_trials if nonmated_trials else np.full(thresholds.shape, np.nan)
+    fnmr = false_non_matches.astype(np.float64) / mated_trials if mated_trials else np.full(thresholds.shape, np.nan)
     return thresholds, fmr, fnmr
+
+
+def _best_accuracy_threshold(inputs: ComparisonInputs, policy: str) -> tuple[float | None, float]:
+    ok = ~inputs.failed
+    candidates = np.unique(inputs.scores[ok])
+    if candidates.size == 0:
+        return None, -1.0
+    nonmated_scores = np.sort(inputs.scores[ok & ~inputs.mated])
+    mated_scores = np.sort(inputs.scores[ok & inputs.mated])
+    correct_nonmated = np.searchsorted(nonmated_scores, candidates, side="left")
+    correct_mated = mated_scores.size - np.searchsorted(mated_scores, candidates, side="left")
+    correct = correct_nonmated + correct_mated
+    if policy == "EXCLUDE_FAILED_TRIALS":
+        included = int(ok.sum())
+    else:
+        included = int(inputs.scores.shape[0])
+        correct = correct + int((inputs.failed & ~inputs.mated).sum())
+    accuracy = correct.astype(np.float64) / included if included else np.full(candidates.shape, np.nan)
+    best = int(np.nanargmax(accuracy))
+    return float(candidates[best]), float(accuracy[best])
 
 
 def _eer(thresholds: np.ndarray, fmr: np.ndarray, fnmr: np.ndarray) -> dict[str, float | str]:
@@ -191,6 +218,15 @@ def _threshold_at_target_fmr(thresholds: np.ndarray, fmr: np.ndarray, target: fl
 def _fold_accuracy(inputs: ComparisonInputs, policy: str) -> dict[str, object]:
     """Official View 2 protocol: choose the threshold on nine folds, test on the held-out fold."""
 
+    if any(value is None for value in inputs.folds.tolist()):
+        return {
+            "status": "NOT_ASSESSED",
+            "reason": "The protocol authority publishes no fold assignments.",
+            "method": "NOT_APPLICABLE_WITHOUT_RECORDED_FOLDS",
+            "folds": [],
+            "mean_accuracy": None,
+            "std_accuracy": None,
+        }
     folds = sorted(int(f) for f in np.unique(inputs.folds))
     per_fold: list[dict[str, float | int]] = []
     for held_out in folds:
@@ -198,13 +234,7 @@ def _fold_accuracy(inputs: ComparisonInputs, policy: str) -> dict[str, object]:
         test = inputs.folds == held_out
         train_inputs = ComparisonInputs(inputs.scores[train], inputs.mated[train], inputs.failed[train], inputs.folds[train])
         test_inputs = ComparisonInputs(inputs.scores[test], inputs.mated[test], inputs.failed[test], inputs.folds[test])
-        train_ok = ~train_inputs.failed
-        candidates = np.unique(train_inputs.scores[train_ok])
-        best_threshold, best_accuracy = None, -1.0
-        for threshold in candidates:
-            accuracy = _accuracy(train_inputs, threshold, policy)
-            if accuracy > best_accuracy:
-                best_threshold, best_accuracy = float(threshold), accuracy
+        best_threshold, best_accuracy = _best_accuracy_threshold(train_inputs, policy)
         test_accuracy = _accuracy(test_inputs, best_threshold, policy) if best_threshold is not None else None
         per_fold.append({"fold": held_out, "threshold": best_threshold, "train_accuracy": best_accuracy, "test_accuracy": test_accuracy, "test_trials": int(test.sum())})
     accuracies = [item["test_accuracy"] for item in per_fold if item["test_accuracy"] is not None]

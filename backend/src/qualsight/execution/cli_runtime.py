@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
+import selectors
 import signal
 import subprocess
 import threading
+import time
 
 from .contracts import (
     AdapterDescriptor,
@@ -33,6 +35,8 @@ from .registry_binding import ResourceRegistry
 USABLE_RESOURCE_STATES = frozenset(
     {"VERIFIED_LIMITED_USE", "APPROVED_LOCAL_RESEARCH_USE"}
 )
+DEFAULT_EXECUTION_TIMEOUT_SECONDS = 7200.0
+DEFAULT_OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +77,17 @@ class RunningExecution:
         process: subprocess.Popen[bytes],
         command: tuple[str, ...],
         running_event: LifecycleEvent,
+        execution_timeout_seconds: float = DEFAULT_EXECUTION_TIMEOUT_SECONDS,
+        output_limit_bytes: int = DEFAULT_OUTPUT_LIMIT_BYTES,
     ) -> None:
+        if (
+            not isinstance(execution_timeout_seconds, (int, float))
+            or isinstance(execution_timeout_seconds, bool)
+            or execution_timeout_seconds <= 0
+        ):
+            raise ContractValidationError("execution timeout must be positive")
+        if not isinstance(output_limit_bytes, int) or isinstance(output_limit_bytes, bool) or output_limit_bytes < 1:
+            raise ContractValidationError("execution output limit must be a positive integer")
         self._prepared = prepared
         self._process = process
         self._command = command
@@ -84,6 +98,8 @@ class RunningExecution:
         self._record: ExecutionRecord | None = None
         self._collecting = False
         self._lock = threading.Lock()
+        self._execution_timeout_seconds = float(execution_timeout_seconds)
+        self._output_limit_bytes = output_limit_bytes
 
     @property
     def process_id(self) -> int:
@@ -119,6 +135,93 @@ class RunningExecution:
             self._process.wait()
         return True
 
+    def _terminate_for_limit(self, grace_seconds: float = 2.0) -> int | None:
+        """Terminate the process group without classifying it as an operator cancellation."""
+
+        if self._process.poll() is not None:
+            return None
+        termination_signal = signal.SIGTERM
+        try:
+            os.killpg(self._process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return None
+        try:
+            self._process.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            if self._process.poll() is None:
+                try:
+                    os.killpg(self._process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                else:
+                    termination_signal = signal.SIGKILL
+            self._process.wait()
+        return int(termination_signal)
+
+    def _bounded_communicate(self) -> tuple[bytes, bytes, str | None]:
+        streams = {
+            "stdout": self._process.stdout,
+            "stderr": self._process.stderr,
+        }
+        if streams["stdout"] is None or streams["stderr"] is None:
+            raise ContractValidationError("execution process streams are unavailable")
+        buffers = {"stdout": bytearray(), "stderr": bytearray()}
+        selector = selectors.DefaultSelector()
+        for role, stream in streams.items():
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, role)
+        deadline = time.monotonic() + self._execution_timeout_seconds
+        failure_kind: str | None = None
+        try:
+            while selector.get_map():
+                remaining_seconds = deadline - time.monotonic()
+                if remaining_seconds <= 0 and failure_kind is None:
+                    failure_kind = "TIMEOUT"
+                    termination_signal = self._terminate_for_limit()
+                    if termination_signal is not None:
+                        with self._lock:
+                            self._termination_signal = termination_signal
+                events = selector.select(timeout=max(0.0, min(0.1, remaining_seconds)))
+                for key, _ in events:
+                    role = key.data
+                    try:
+                        chunk = os.read(key.fileobj.fileno(), 64 * 1024)
+                    except BlockingIOError:
+                        continue
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    room = self._output_limit_bytes - len(buffers[role])
+                    if room > 0:
+                        buffers[role].extend(chunk[:room])
+                    if len(chunk) > room and failure_kind is None:
+                        failure_kind = "OUTPUT_LIMIT_EXCEEDED"
+                        termination_signal = self._terminate_for_limit()
+                        if termination_signal is not None:
+                            with self._lock:
+                                self._termination_signal = termination_signal
+                if self._process.poll() is not None and not events:
+                    for key in list(selector.get_map().values()):
+                        try:
+                            chunk = os.read(key.fileobj.fileno(), 64 * 1024)
+                        except BlockingIOError:
+                            continue
+                        if not chunk:
+                            selector.unregister(key.fileobj)
+                            continue
+                        role = key.data
+                        room = self._output_limit_bytes - len(buffers[role])
+                        if room > 0:
+                            buffers[role].extend(chunk[:room])
+                        if len(chunk) > room and failure_kind is None:
+                            failure_kind = "OUTPUT_LIMIT_EXCEEDED"
+            self._process.wait()
+        finally:
+            selector.close()
+            for stream in streams.values():
+                stream.close()
+        return bytes(buffers["stdout"]), bytes(buffers["stderr"]), failure_kind
+
     def collect(self) -> ExecutionRecord:
         with self._lock:
             if self._record is not None:
@@ -127,7 +230,7 @@ class RunningExecution:
                 raise ContractValidationError("execution collection is already in progress")
             self._collecting = True
         try:
-            stdout_bytes, stderr_bytes = self._process.communicate()
+            stdout_bytes, stderr_bytes, limit_failure = self._bounded_communicate()
             exit_code = self._process.returncode
             if exit_code is None:
                 raise ContractValidationError("process ended without an exit status")
@@ -137,6 +240,20 @@ class RunningExecution:
             if cancellation_requested:
                 state = LifecycleState.CANCELLED
                 failure = None
+            elif limit_failure == "TIMEOUT":
+                state = LifecycleState.FAILED
+                failure = ExecutionFailureDetail(
+                    kind="TIMEOUT",
+                    message=f"process exceeded the {self._execution_timeout_seconds:g}-second execution deadline",
+                    exit_code=exit_code,
+                )
+            elif limit_failure == "OUTPUT_LIMIT_EXCEEDED":
+                state = LifecycleState.FAILED
+                failure = ExecutionFailureDetail(
+                    kind="OUTPUT_LIMIT_EXCEEDED",
+                    message=f"process output exceeded the {self._output_limit_bytes}-byte per-stream capture limit",
+                    exit_code=exit_code,
+                )
             elif exit_code == 0:
                 state = LifecycleState.SUCCEEDED
                 failure = None
@@ -187,6 +304,8 @@ class RegisteredCLIAdapter:
         runtime_resource_id: str,
         input_resource_ids: tuple[str, ...],
         repository_root: Path,
+        execution_timeout_seconds: float = DEFAULT_EXECUTION_TIMEOUT_SECONDS,
+        output_limit_bytes: int = DEFAULT_OUTPUT_LIMIT_BYTES,
     ) -> None:
         if not isinstance(registry, ResourceRegistry):
             raise ContractValidationError(
@@ -219,6 +338,16 @@ class RegisteredCLIAdapter:
         self._working_directory = runtime_resource.source.local_root
         self._environment = runtime_resource.runtime_environment
         self._resources = (runtime_resource, *input_resources)
+        if (
+            not isinstance(execution_timeout_seconds, (int, float))
+            or isinstance(execution_timeout_seconds, bool)
+            or execution_timeout_seconds <= 0
+        ):
+            raise ContractValidationError("execution timeout must be positive")
+        if not isinstance(output_limit_bytes, int) or isinstance(output_limit_bytes, bool) or output_limit_bytes < 1:
+            raise ContractValidationError("execution output limit must be a positive integer")
+        self.execution_timeout_seconds = float(execution_timeout_seconds)
+        self.output_limit_bytes = output_limit_bytes
         self._preparation_token = object()
         self._validate_binding()
 
@@ -231,6 +360,8 @@ class RegisteredCLIAdapter:
         runtime_resource_id: str,
         input_resource_ids: tuple[str, ...],
         repository_root: Path,
+        execution_timeout_seconds: float = DEFAULT_EXECUTION_TIMEOUT_SECONDS,
+        output_limit_bytes: int = DEFAULT_OUTPUT_LIMIT_BYTES,
     ) -> RegisteredCLIAdapter:
         return cls(
             descriptor=descriptor,
@@ -238,6 +369,8 @@ class RegisteredCLIAdapter:
             runtime_resource_id=runtime_resource_id,
             input_resource_ids=input_resource_ids,
             repository_root=repository_root,
+            execution_timeout_seconds=execution_timeout_seconds,
+            output_limit_bytes=output_limit_bytes,
         )
 
     def _validate_binding(self) -> None:
@@ -502,6 +635,8 @@ class RegisteredCLIAdapter:
             process=process,
             command=command,
             running_event=running_event,
+            execution_timeout_seconds=self.execution_timeout_seconds,
+            output_limit_bytes=self.output_limit_bytes,
         )
 
     def execute(self, request: ExecutionRequest) -> ExecutionRecord:

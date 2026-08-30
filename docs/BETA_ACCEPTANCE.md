@@ -1,7 +1,7 @@
 # QualSight 0.1.0-beta.1 — beta acceptance record
 
-Every row below names the evidence that closes it. Identifiers are content hashes recorded in
-`atg/ledger.jsonl` (176 records) and in the persistent store on the reference workstation;
+Every row below names the evidence that closes it. Identifiers are content hashes recorded in the
+append-only `atg/ledger.jsonl` and in the persistent store on the reference workstation;
 gate files live in `atg/evidence/`. Nothing here is projected: every number was produced by the
 shipped code on real registered inputs.
 
@@ -13,7 +13,7 @@ shipped code on real registered inputs.
 | Import identity-labeled dataset | LFW funneled release, 13,233 samples, directory identity | offline gate 02 `lfw-imported`; dataset `dataset:sha256:98a15dd7…` |
 | Run OFIQ | registered OFIQ v1.1.2 (787/787 conformance), single image + batch | r-01 UQS 79 (`assessment`); full LFW batch `job:sha256:5c6b51c8…` (13,233 measured, 0 failures) |
 | Inspect quality/components | console *Sample inspector*, *Quality explorer* (28 measures, distributions, drilldown) | console observation 03–09 `explorer` steps |
-| Import/run matcher | frozen AdaFace / ElasticFace / TransFace runtime (GPU) under two frozen preprocessing conditions; registered external score artifact imported as `EXTERNALLY_COMPUTED` | matrix `matrix:sha256:3769cdaf…` (six Runs); external import `run:sha256:36b47713…` (decision 29) |
+| Import/run matcher | six frozen checkpoint runtimes (GPU) under two SCRFD profiles or publisher-prealigned ArcFace-112 pass-through; registered external score artifacts remain `EXTERNALLY_COMPUTED` | historical matrix `matrix:sha256:3769cdaf…` (three matchers × two profiles); all six real loaders and executable catalog are covered by `test_matcher_runtime_real.py`; exact checkpoint acquisition by `test_checkpoint_acquisition_real.py` |
 | Generate genuine + impostor comparisons | frozen LFW View 2 protocol, 6,000 pairs × 10 folds, every pair retained with explicit failures | protocol `protocol:sha256:68125d45…` |
 | Compute FMR/FNMR + DET | `biometric.verification.*@1.0.0`, Clopper–Pearson 95 %, two failure policies | six leaf Runs (EER ≈ 2.1 % shared, ≈ 2.35 % native); DET overlay figure `2295409…` |
 | Compute ERC | `biometric.quality.utility.*@1.0.0` (registry v1.2.0), fixed MATCHER THRESHOLD, cluster-bootstrap intervals | six utility Runs (e.g. AS `run:sha256:6005f48a…`; AU-ERC 0.0147); verifier 213 checks × 6 |
@@ -27,6 +27,15 @@ shipped code on real registered inputs.
 Whole-chain executions: `atg/evidence/2026-08-18-offline-gate-02.json` (product started with the network
 guard, 24 attributed audit events, zero refused connections, exit 0) and
 `atg/evidence/2026-08-18-docs-workflow-gate-03.json` (user guide executed verbatim, 10 blocks, exit 0).
+
+Independent database verification uses a consistent snapshot, never the API-owned live WAL store:
+
+```sh gate
+SNAPSHOT_PATH="$QUALSIGHT_DATA_DIR/cross-verifier-$(date -u +%Y%m%dT%H%M%SZ)-$$.snapshot.sqlite3"
+$QS snapshot-database --output "$SNAPSHOT_PATH"
+$UV run --directory backend --frozen --offline python ../scripts/verify_cross_matcher.py "$CROSS_DIR" "$SNAPSHOT_PATH"
+rm -- "$SNAPSHOT_PATH"
+```
 
 ## §58 scientific acceptance fields
 
@@ -48,7 +57,7 @@ hashes), matcher and preprocessing (`matcher`, `matcher_preprocessing`, `model_h
 | Users (single-user; optional local account) | single-user attribution done (QS-H71); optional local-account mode not built (documented as optional) |
 | Data (import, manifests, identity mappings, pair definitions) | done — LFW import, protocol freeze, subset fixture, derived sets |
 | Quality (OFIQ adapter, single image, batch, distributions) | done |
-| Matchers (score import; approved local matchers) | done — three matchers, two conditions; external score import |
+| Matchers (score import; approved local matchers) | done — six matchers, three representation-compatible preprocessing profiles; external score import |
 | Verification (FMR/FNMR/ROC/DET/EER/operating points) | done |
 | FIQA (ERC, AU-ERC, quality-conditioned, quality-error modelling) | done |
 | Cross-matcher (overlays, failure overlap, utility differences) | done |
@@ -56,6 +65,50 @@ hashes), matcher and preprocessing (`matcher`, `matcher_preprocessing`, `model_h
 | Visualization (plots, failure drilldown, dashboards) | done |
 | Reporting (PDF, HTML, print, CSV, Parquet, JSON, SVG/PNG/PDF) | done |
 | Provenance (immutable Runs, hashes, versions, configuration, reproduction bundle) | done |
+
+## 2026-08-29 closure hardening evidence
+
+The closure pass adds cross-process data-directory ownership, durable operation admission and restart
+reconciliation, crash-recoverable purge, streaming request ceilings, bounded scientific work admission,
+separate liveness/readiness/metrics/version operations, bounded native/container execution, pre-decode
+encoded-image dimension refusal, and completed-job controller release. The real twelve-leaf LFW benchmark
+records a 3.92 GB post-fix peak RSS, only 30.2 MB incremental RSS on the second run, and 2.57 GB measured
+process GPU VRAM (`docs/performance/2026-08-28_full-lfw-twelve-leaf-post-retention.json` and
+`2026-08-28_full-lfw-twelve-leaf-vram.json`).
+
+The closed add-on catalog contains six matcher drivers, four dataset drivers (identity-labeled LFW plus
+three downloadable pair-only protocols), three representation-compatible preprocessing profiles, seven
+controlled transforms, and no admitted remote connection. All checkpoint and pair-dataset transfers are
+explicit setup actions with exact source, size, SHA-256, no-clobber promotion, and durable receipts; scientific
+execution remains offline. The release builder emits committed-tree source/console archives, a real uv/pnpm
+CycloneDX graph, a lock-bound vulnerability audit, checksums, and a unified manifest. It still refuses to call
+the result a portable installer because identity-labeled LFW, SCRFD, native OFIQ, and 199 deployment-specific
+registry paths remain external prerequisites.
+
+`atg/evidence/2026-08-29-console-cycle41-observation.json` records a completed 30-step Chromium 145 workflow
+covering all nine views, real CUDA load/unload, real OFIQ and matcher work, project-switch isolation, reports,
+identification, degradation, semantic accessibility, and a 390 px viewport. Across every view it found zero
+contrast, labeling, focusability, duplicate-id, heading, table, image-alt, overflow, or ordinary-control-size
+failures. `atg/evidence/2026-08-29-console-cycle41-interaction-audit.json` records 386 unique rendered API/image
+links, zero non-200 responses, zero browser errors, and drilldowns for every matcher row in the selected real
+matrix. These gates establish professional organization, interaction correctness, and mechanical accessibility;
+they do not establish first-time intuitiveness with independent DHS biometric operators.
+
+`atg/evidence/2026-08-29-dependency-vulnerability-audit-final-v6.json` records zero frontend advisories and
+two exact local-only PyTorch acceptances (`PYSEC-2025-194`, `PYSEC-2026-139`). The waiver gate scans 73
+repository Python sources plus all 9 byte-pinned setup-time upstream sources by AST, finds no direct or imported-alias references to the
+affected `torch.jit.script` or `torch.compile` paths, rejects direct `eval`, `exec`, dynamic-import, and torch
+reflection patterns, and constrains each current deployment-source `load_module` call to a literal key whose
+manifest-pinned module is included in the scan before verifying strict hash-bound checkpoint loading. Static
+Python inspection cannot prove the absence of every equivalent dynamic-execution path. This is constrained beta risk acceptance, not a vulnerability-free or
+production-authorized claim.
+
+The complete backend discovery baseline was 149/149 passing in 898.650 seconds with two explicit
+large-network skips. The final discovery on the closure tree ran 166/166 in 1,411.657 seconds with the
+same two skips. The 17 additional tests cover bounded admission, streaming upload rejection, durable
+operation recovery, process leasing, image-header preflight, exact blockwise identification, checkpoint
+and dataset integrity, the corrected representation-compatible matcher matrix contracts, and independent
+SQLite snapshot/lease enforcement.
 
 ## Post-beta (Phase 6) status
 
@@ -70,3 +123,6 @@ with the exact input each needs (ATG_PLAN.md, post-beta branch).
 * The external score artifact (decision 29) is an independent open-source pipeline, not a vendor file, and shares the buffalo_l detector file with the registered SCRFD-10G model.
 * SCRFD detection runs on the CPU execution provider inside the frozen matcher runtime; embeddings and identification similarity run on the GPU.
 * One transient `setUpClass` error in `test_matcher_api_real` was observed once (2026-08-17) and never reproduced.
+* First-time operator intuitiveness has not been established with independent DHS biometric evaluators. The automated Chromium and expert-review gates establish interaction correctness and accessibility, not human usability.
+* The source/console release is unsigned and has no publisher attestation; the release manifest says so. A clean committed tree is required before it will build.
+* The exact pinned InsightFace and TransFace architecture sources call deprecated `torch.cuda.amp.autocast` and `timm.models.layers` APIs. PyTorch 2.10.0 and timm 1.0.28 execute those sources successfully in the real matcher gate; a dependency upgrade must repin or explicitly govern new source bytes and repeat the real embedding and matrix gates rather than silently rewriting the registered upstream code.

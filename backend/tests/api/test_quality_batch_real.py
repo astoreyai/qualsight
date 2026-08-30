@@ -43,7 +43,7 @@ class RealQualityBatchTests(unittest.TestCase):
             runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID,
             input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, LFW_RESOURCE_ID),
         )
-        cls.client = TestClient(create_app(settings))
+        cls.client = TestClient(create_app(settings), base_url="http://127.0.0.1")
         cls.client.__enter__()
         project = cls.client.post(
             "/api/projects",

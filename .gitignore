@@ -15,3 +15,6 @@ node_modules/
 var/
 atg/evidence/screenshots/
 dist/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

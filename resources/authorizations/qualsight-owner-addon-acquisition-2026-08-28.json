@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0.0",
+  "authorization_id": "qualsight-owner-addon-acquisition-2026-08-28",
+  "authority": "QualSight project owner (interactive user)",
+  "recorded_at": "2026-08-28T02:16:25-05:00",
+  "decision_evidence": [
+    "Verbatim project-owner instruction in the active Codex thread: \"wire in and debug the other models matchers and datasets.\"",
+    "Verbatim project-owner clarification in the active Codex thread: \"just wire them in for download and ensure they execute.\"",
+    "Interpretation bound by this receipt: the owner authorizes operator-triggered acquisition and local noncommercial research execution of the named add-ons without asserting third-party rights that the publishers did not grant."
+  ],
+  "grants": [
+    {
+      "resource_id": "adaface-ir101-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"]
+    },
+    {
+      "resource_id": "elasticface-arc-r100-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"]
+    },
+    {
+      "resource_id": "magface-iresnet100-ms1mv2-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"]
+    },
+    {
+      "resource_id": "topofr-r100-glint360k-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"]
+    },
+    {
+      "resource_id": "transface-b-glint360k-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"]
+    },
+    {
+      "resource_id": "transface-s-glint360k-local-candidate",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"]
+    },
+    {
+      "resource_id": "magface-lfw-cfp-agedb-evaluation-archive",
+      "decision": "APPROVED_LOCAL_NONCOMMERCIAL",
+      "scopes": ["QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"]
+    }
+  ],
+  "permitted_actions": [
+    "Download only the exact author-published HTTPS artifacts selected by the operator.",
+    "Verify the complete artifact SHA-256 and byte length before atomic installation in private managed storage.",
+    "Execute the registered matcher checkpoints and verification protocols locally for noncommercial research.",
+    "Record durable acquisition and execution provenance without storing biometric payloads in the audit event stream."
+  ],
+  "prohibited_actions": [
+    "Do not bundle, commit, publish, transmit, or redistribute checkpoint, dataset, crop, image, or embedding bytes.",
+    "Do not represent owner authorization as a third-party license or permission grant.",
+    "Do not use random weights, generated images, fabricated identities, synthetic protocols, or fallback results.",
+    "Do not transmit biometric images or embeddings to an external API."
+  ],
+  "redistribution_allowed": false
+}

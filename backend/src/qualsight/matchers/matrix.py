@@ -1,14 +1,17 @@
-"""Three matchers × two preprocessing conditions over one frozen protocol (QS-C22/QS-C23).
+"""Closed matcher × representation-compatible preprocessing matrix.
 
 Every leaf Run keeps every protocol pair: a comparison carries a cosine score
 when both templates exist, otherwise an explicit processing failure naming the
-failed side. The six Runs share the ordered sample set, the pair manifest, the
-detector bytes, the alignment template, and the score definition; matcher and
+failed side. Runs share the ordered sample set, pair manifest, and score
+definition. Source images use the two registered SCRFD conditions;
+publisher-prealigned images use only the pass-through condition. Matcher and
 preprocessing identities are recorded separately and never pooled.
 """
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import getpass
@@ -63,7 +66,13 @@ from ..provenance import (
     sha256_file,
 )
 from .alignment import ARCFACE_TEMPLATE_SHA256
-from .conditions import CONDITION_DEFINITIONS, ConditionId, preprocess
+from .conditions import (
+    CONDITION_DEFINITIONS,
+    PREALIGNED_CONDITIONS,
+    SCRFD_CONDITIONS,
+    ConditionId,
+    preprocess,
+)
 from .detection import SCRFDDetector
 from .runtime import COLOR_ORDER, TRANSFORM_IDS, FrozenMatcher, MatcherId, cosine_similarity
 from .upstream import UpstreamSources
@@ -74,8 +83,20 @@ LEAF_IDS: dict[tuple[MatcherId, ConditionId], str] = {
     (MatcherId.ADAFACE_IR101, ConditionId.FIXED640_HIGHEST_INMEMORY): "QS-C22.AN",
     (MatcherId.ELASTICFACE_ARC_R100, ConditionId.ADAPTIVE_LARGEST_JPEG95): "QS-C22.ES",
     (MatcherId.ELASTICFACE_ARC_R100, ConditionId.FIXED640_HIGHEST_INMEMORY): "QS-C22.EN",
+    (MatcherId.MAGFACE_IRESNET100, ConditionId.ADAPTIVE_LARGEST_JPEG95): "QS-C22.MS",
+    (MatcherId.MAGFACE_IRESNET100, ConditionId.FIXED640_HIGHEST_INMEMORY): "QS-C22.MN",
+    (MatcherId.TOPOFR_R100, ConditionId.ADAPTIVE_LARGEST_JPEG95): "QS-C22.PS",
+    (MatcherId.TOPOFR_R100, ConditionId.FIXED640_HIGHEST_INMEMORY): "QS-C22.PN",
+    (MatcherId.TRANSFACE_B, ConditionId.ADAPTIVE_LARGEST_JPEG95): "QS-C22.BS",
+    (MatcherId.TRANSFACE_B, ConditionId.FIXED640_HIGHEST_INMEMORY): "QS-C22.BN",
     (MatcherId.TRANSFACE_S, ConditionId.ADAPTIVE_LARGEST_JPEG95): "QS-C22.TS",
     (MatcherId.TRANSFACE_S, ConditionId.FIXED640_HIGHEST_INMEMORY): "QS-C22.TN",
+    (MatcherId.ADAFACE_IR101, ConditionId.PREALIGNED_ARCFACE112): "QS-C22.AU",
+    (MatcherId.ELASTICFACE_ARC_R100, ConditionId.PREALIGNED_ARCFACE112): "QS-C22.EU",
+    (MatcherId.MAGFACE_IRESNET100, ConditionId.PREALIGNED_ARCFACE112): "QS-C22.MU",
+    (MatcherId.TOPOFR_R100, ConditionId.PREALIGNED_ARCFACE112): "QS-C22.PU",
+    (MatcherId.TRANSFACE_B, ConditionId.PREALIGNED_ARCFACE112): "QS-C22.BU",
+    (MatcherId.TRANSFACE_S, ConditionId.PREALIGNED_ARCFACE112): "QS-C22.TU",
 }
 
 
@@ -90,10 +111,11 @@ class ConditionTemplates:
     crops: np.ndarray  # N×112×112×3 uint8 for successful samples (aligned with success list)
     success_index: dict[str, int]  # sample_id → row in crops
     failures: dict[str, str]  # sample_id → failure kind
-    face_counts: dict[str, int]
+    face_counts: dict[str, int | None]
     canvas_by_sample: dict[str, int]
     crop_sha256: dict[str, str]
     seconds: float
+    storage_path: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,11 +153,33 @@ class MatcherMatrixJob:
         purpose_scope: str = "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1",
         actor_id: str | None = None,
         matchers: tuple[MatcherId, ...] = tuple(MatcherId),
-        conditions: tuple[ConditionId, ...] = tuple(ConditionId),
+        conditions: tuple[ConditionId, ...] | None = None,
         selection_rule: str = "every pair of the frozen protocol",
+        runtime_manager: Any | None = None,
+        detector_workers: int = 2,
     ) -> None:
         if not pairs:
             raise MatrixError("the protocol has no pairs")
+        if not matchers:
+            raise MatrixError("the matcher selection is empty")
+        descriptor = json.loads(dataset.manifest.text)
+        prealigned_dataset = descriptor.get("source_kind") == "MANAGED_PREALIGNED_PAIR_DATASET"
+        allowed_conditions = PREALIGNED_CONDITIONS if prealigned_dataset else SCRFD_CONDITIONS
+        selected_conditions = allowed_conditions if conditions is None else conditions
+        if not selected_conditions:
+            raise MatrixError("the preprocessing selection is empty")
+        if len(set(matchers)) != len(matchers):
+            raise MatrixError("the matcher selection contains duplicates")
+        if len(set(selected_conditions)) != len(selected_conditions):
+            raise MatrixError("the preprocessing selection contains duplicates")
+        incompatible = set(selected_conditions) - set(allowed_conditions)
+        if incompatible:
+            representation = "author-prealigned pair images" if prealigned_dataset else "source images requiring SCRFD alignment"
+            raise MatrixError(
+                f"preprocessing conditions {sorted(item.value for item in incompatible)} are incompatible with {representation}"
+            )
+        if detector_workers < 1 or detector_workers > 4:
+            raise MatrixError("detector worker count must be between one and four")
         self.registry = registry
         self.registry_path = registry_path
         self.repository_root = repository_root
@@ -144,21 +188,35 @@ class MatcherMatrixJob:
         self.project = project
         self.dataset = dataset
         self.protocol = protocol
-        self.pairs = sorted(pairs, key=lambda item: (item.fold, item.source_order))
+        fold_states = {pair.fold is None for pair in pairs}
+        if len(fold_states) != 1:
+            raise MatrixError("a protocol cannot mix recorded and unrecorded fold assignments")
+        folds_absent = True in fold_states
+        if folds_absent != (protocol.fold_count is None):
+            raise MatrixError("protocol fold authority disagrees with its pair rows")
+        self.pairs = sorted(
+            pairs,
+            key=lambda item: (item.fold is None, item.fold or 0, item.source_order),
+        )
         self.purpose_scope = purpose_scope
         self.actor = actor_id or f"local-user:{getpass.getuser()}"
         self.matchers = matchers
-        self.conditions = conditions
+        self.conditions = selected_conditions
+        self.expected_leaf_count = len(matchers) * len(selected_conditions)
         self.selection_rule = selection_rule
-        for resource_id in filter(None, (SCRFD_RESOURCE_ID, *(m.value for m in matchers), dataset_resource_of(dataset))):
+        self.runtime_manager = runtime_manager
+        self.detector_workers = detector_workers
+        scoped_resources = tuple(m.value for m in matchers) + (dataset_resource_of(dataset),)
+        if not prealigned_dataset:
+            scoped_resources = (SCRFD_RESOURCE_ID, *scoped_resources)
+        for resource_id in filter(None, scoped_resources):
             resource = registry.resource(resource_id)
             if purpose_scope not in resource.approved_scopes:
                 raise MatrixError(f"{resource_id} does not approve scope {purpose_scope}")
         self.created_at = _now()
         self.matrix_id = content_id("matrix", project.project_id, protocol.protocol_id, protocol.pairs_sha256, self.created_at.isoformat())
         self.job_dir = job_root / self.matrix_id.replace(":", "_")
-        self.job_dir.mkdir(parents=True, exist_ok=False)
-        # Ordered sample set shared by all six Runs.
+        # Ordered sample set shared by every selected leaf Run.
         ordered: dict[str, ProtocolPair] = {}
         self.sample_ids: list[str] = []
         for pair in self.pairs:
@@ -172,11 +230,17 @@ class MatcherMatrixJob:
             if sample is None:
                 raise MatrixError(f"protocol pair references an unrecorded sample {sample_id}")
             self.samples[sample_id] = sample
-        scrfd = registry.resource(SCRFD_RESOURCE_ID)
-        detector_model = next(item.identity for item in scrfd.artifacts if item.role == "MODEL")
-        self.detector_identity = detector_model
-        self.detector = SCRFDDetector(Path(detector_model.path), detector_model.sha256)
+        self.detector_identity = None
+        self.detector = None
+        if not prealigned_dataset:
+            scrfd = registry.resource(SCRFD_RESOURCE_ID)
+            detector_model = next(item.identity for item in scrfd.artifacts if item.role == "MODEL")
+            self.detector_identity = detector_model
+            self.detector = SCRFDDetector(Path(detector_model.path), detector_model.sha256)
         self.templates: dict[ConditionId, ConditionTemplates] = {}
+        self.template_storage_kind = "NUMPY_DISK_BACKED_MEMMAP_V1"
+        self.template_manifest_sha256: dict[ConditionId, str] = {}
+        self.template_set_sha256: str | None = None
         self.leaves: list[LeafResult] = []
         self.progress: dict[str, Any] = {"phase": "created", "detail": ""}
 
@@ -185,44 +249,87 @@ class MatcherMatrixJob:
     def _preprocess_all(self) -> None:
         for condition in self.conditions:
             started = time.perf_counter()
-            crops: list[np.ndarray] = []
+            storage_path = self.job_dir / f".{condition.value.lower()}-crops.npy"
+            crops = np.lib.format.open_memmap(
+                storage_path,
+                mode="w+",
+                dtype=np.uint8,
+                shape=(len(self.sample_ids), 112, 112, 3),
+            )
+            successful_crops = 0
             success_index: dict[str, int] = {}
             failures: dict[str, str] = {}
-            face_counts: dict[str, int] = {}
+            face_counts: dict[str, int | None] = {}
             canvas_by_sample: dict[str, int] = {}
             crop_sha: dict[str, str] = {}
-            for position, sample_id in enumerate(self.sample_ids):
+            def prepare_sample(sample_id: str) -> tuple[str, Any | None, str | None]:
                 sample = self.samples[sample_id]
                 path = Path(sample.source_path)
                 if sha256_file(path) != sample.sha256:
-                    failures[sample_id] = ProcessingFailureKind.INTEGRITY_FAILURE.value
-                    continue
+                    return sample_id, None, ProcessingFailureKind.INTEGRITY_FAILURE.value
                 image = cv2.imread(str(path), cv2.IMREAD_COLOR)
                 if image is None:
-                    failures[sample_id] = ProcessingFailureKind.FAILURE_TO_ACQUIRE.value
-                    continue
-                result = preprocess(image, condition, self.detector)
-                face_counts[sample_id] = result.face_count
-                canvas_by_sample[sample_id] = result.canvas
-                if result.failure is not None or result.crop_bgr is None:
-                    failures[sample_id] = ProcessingFailureKind.FAILURE_TO_DETECT.value
-                    continue
-                success_index[sample_id] = len(crops)
-                crops.append(result.crop_bgr)
-                crop_sha[sample_id] = result.crop_sha256 or ""
-                if position % 500 == 0:
-                    self.progress = {"phase": f"preprocess:{condition.value}", "detail": f"{position}/{len(self.sample_ids)}"}
+                    return sample_id, None, ProcessingFailureKind.FAILURE_TO_ACQUIRE.value
+                return sample_id, preprocess(image, condition, self.detector), None
+
+            try:
+                with ThreadPoolExecutor(
+                    max_workers=self.detector_workers,
+                    thread_name_prefix="qualsight-scrfd",
+                ) as detector_pool:
+                    position = 0
+                    for batch_start in range(0, len(self.sample_ids), 64):
+                        for sample_id, result, admission_failure in detector_pool.map(
+                            prepare_sample,
+                            self.sample_ids[batch_start : batch_start + 64],
+                        ):
+                            if admission_failure is not None:
+                                failures[sample_id] = admission_failure
+                            else:
+                                assert result is not None
+                                face_counts[sample_id] = result.face_count
+                                canvas_by_sample[sample_id] = result.canvas
+                                if result.failure is not None or result.crop_bgr is None:
+                                    failures[sample_id] = result.failure or ProcessingFailureKind.FAILURE_TO_ACQUIRE.value
+                                else:
+                                    success_index[sample_id] = successful_crops
+                                    crops[successful_crops] = result.crop_bgr
+                                    written_sha = hashlib.sha256(crops[successful_crops].tobytes()).hexdigest()
+                                    if written_sha != result.crop_sha256:
+                                        raise MatrixError(f"disk-backed crop verification failed for {sample_id}")
+                                    successful_crops += 1
+                                    crop_sha[sample_id] = result.crop_sha256
+                            if position % 500 == 0:
+                                self.progress = {"phase": f"preprocess:{condition.value}", "detail": f"{position}/{len(self.sample_ids)}"}
+                            position += 1
+                crops.flush()
+            except BaseException:
+                crops._mmap.close()  # type: ignore[union-attr]
+                storage_path.unlink(missing_ok=True)
+                raise
             self.templates[condition] = ConditionTemplates(
                 condition=condition,
                 sample_ids=list(self.sample_ids),
-                crops=np.stack(crops) if crops else np.zeros((0, 112, 112, 3), dtype=np.uint8),
+                crops=crops[:successful_crops],
                 success_index=success_index,
                 failures=failures,
                 face_counts=face_counts,
                 canvas_by_sample=canvas_by_sample,
                 crop_sha256=crop_sha,
                 seconds=time.perf_counter() - started,
+                storage_path=storage_path,
             )
+            self.template_manifest_sha256[condition] = sha256_bytes(
+                json.dumps(crop_sha, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            )
+
+    def _release_templates(self) -> None:
+        for templates in self.templates.values():
+            mapping = getattr(templates.crops, "_mmap", None)
+            if mapping is not None:
+                mapping.close()
+            templates.storage_path.unlink(missing_ok=True)
+        self.templates.clear()
 
     # -- stage 2: one leaf Run per matcher × condition ---------------------------
 
@@ -242,7 +349,7 @@ class MatcherMatrixJob:
         comparison_inputs_scores: list[float] = []
         comparison_inputs_mated: list[bool] = []
         comparison_inputs_failed: list[bool] = []
-        comparison_inputs_folds: list[int] = []
+        comparison_inputs_folds: list[int | None] = []
         scored = 0
         for pair in self.pairs:
             left_index = templates.success_index.get(pair.left_sample_id)
@@ -316,7 +423,7 @@ class MatcherMatrixJob:
                 scores=np.array(comparison_inputs_scores, dtype=np.float64),
                 mated=np.array(comparison_inputs_mated, dtype=bool),
                 failed=np.array(comparison_inputs_failed, dtype=bool),
-                folds=np.array(comparison_inputs_folds, dtype=np.int64),
+                folds=np.array(comparison_inputs_folds, dtype=object),
             )
         )
         metrics_path = leaf_dir / "verification_metrics.json"
@@ -328,7 +435,16 @@ class MatcherMatrixJob:
         binding = matcher.binding
         matcher_record = self.registry.raw_resource(matcher.matcher_id.value)
         checkpoint_identity = next(item.identity for item in self.registry.resource(matcher.matcher_id.value).artifacts if item.role == "MODEL")
-        detector_domain = DomainArtifactIdentity(path=self.detector_identity.path, sha256=self.detector_identity.sha256, size_bytes=self.detector_identity.size_bytes, mtime_ns=self.detector_identity.mtime_ns)
+        detector_domain = (
+            DomainArtifactIdentity(
+                path=self.detector_identity.path,
+                sha256=self.detector_identity.sha256,
+                size_bytes=self.detector_identity.size_bytes,
+                mtime_ns=self.detector_identity.mtime_ns,
+            )
+            if self.detector_identity is not None
+            else None
+        )
         checkpoint_domain = DomainArtifactIdentity(path=checkpoint_identity.path, sha256=checkpoint_identity.sha256, size_bytes=checkpoint_identity.size_bytes, mtime_ns=checkpoint_identity.mtime_ns)
         condition_definition = CONDITION_DEFINITIONS[condition]
         condition_sha = sha256_bytes(json.dumps(condition_definition, sort_keys=True).encode("utf-8"))
@@ -345,7 +461,15 @@ class MatcherMatrixJob:
                 "ordered_sample_ids_sha256": sha256_bytes("\n".join(self.sample_ids).encode("utf-8")),
                 "sample_count": len(self.sample_ids),
                 "matcher": {"resource_id": matcher.matcher_id.value, "transform_id": transform_id, "checkpoint_sha256": binding.checkpoint_sha256, "architecture_source_sha256": list(binding.architecture_source_sha256), "parameter_count": binding.parameter_count, "device": binding.device, "torch_version": binding.torch_version},
-                "preprocessing": {"condition_id": condition.value, **{k: v for k, v in condition_definition.items()}, "detector_sha256": self.detector_identity.sha256, "detector_threshold": 0.5, "nms_threshold": 0.4, "alignment_template_sha256": ARCFACE_TEMPLATE_SHA256},
+                "preprocessing": {
+                    "condition_id": condition.value,
+                    **{k: v for k, v in condition_definition.items()},
+                    "detector_sha256": self.detector_identity.sha256 if self.detector_identity is not None else None,
+                    "detector_threshold": 0.5 if self.detector_identity is not None else None,
+                    "nms_threshold": 0.4 if self.detector_identity is not None else None,
+                    "detector_workers": self.detector_workers if self.detector_identity is not None else None,
+                },
+                "template_storage": {"kind": self.template_storage_kind, "allocated_rows": len(self.sample_ids), "successful_rows": templates.crops.shape[0], "write_verification": "SHA256_MATCHES_PREPROCESS_OUTPUT", "crop_manifest_sha256": self.template_manifest_sha256[condition]},
                 "score": {"definition": "cosine similarity between L2-normalized 512-d embeddings", "direction": "HIGHER_IS_MORE_SIMILAR"},
                 "failure_policy": "every protocol pair retained; a pair without two templates carries an explicit processing failure and no score",
                 "purpose_scope": self.purpose_scope,
@@ -353,7 +477,14 @@ class MatcherMatrixJob:
             }
         )
         experiment_id = content_id("experiment", self.project.project_id, self.dataset.dataset_id, self.protocol.protocol_id, matcher.matcher_id.value, condition.value)
-        run_id = content_id("run", experiment_id, started_at.isoformat(), sha256_file(comparisons_path), binding.checkpoint_sha256, self.detector_identity.sha256)
+        run_id = content_id(
+            "run",
+            experiment_id,
+            started_at.isoformat(),
+            sha256_file(comparisons_path),
+            binding.checkpoint_sha256,
+            self.detector_identity.sha256 if self.detector_identity is not None else condition_sha,
+        )
         policy = metrics["by_policy"]["EXCLUDE_FAILED_TRIALS"]
         generalized = metrics["by_policy"]["FAILURES_AS_REJECT"]
         observations = [
@@ -397,13 +528,23 @@ class MatcherMatrixJob:
             user_id=self.actor,
             dataset_manifest=self.dataset.manifest,
             dataset_hash=self.dataset.manifest.sha256,
-            subject_protocol=ComponentBinding(state=ComponentState.CONFIGURED, component_id="lfw-directory-identity", version="1.0.0"),
-            pair_search_protocol=ComponentBinding(state=ComponentState.CONFIGURED, component_id=self.protocol.protocol_id, version="LFW_VIEW2", configuration_sha256=self.protocol.pairs_sha256),
+            subject_protocol=self.dataset.identity_schema,
+            pair_search_protocol=ComponentBinding(state=ComponentState.CONFIGURED, component_id=self.protocol.protocol_id, version="1.0.0", configuration_sha256=self.protocol.pairs_sha256),
             quality_engine=None,
             quality_engine_configuration=None,
-            model_hashes=(checkpoint_domain, detector_domain),
+            model_hashes=(checkpoint_domain,) + ((detector_domain,) if detector_domain is not None else ()),
             matcher=ComponentBinding(state=ComponentState.CONFIGURED, component_id=matcher.matcher_id.value, version=binding.checkpoint_sha256[:16], configuration_sha256=transform_sha, artifact_hashes=(binding.checkpoint_sha256, *binding.architecture_source_sha256)),
-            matcher_preprocessing=ComponentBinding(state=ComponentState.CONFIGURED, component_id=condition.value, version="1.0.0", configuration_sha256=condition_sha, artifact_hashes=(self.detector_identity.sha256, ARCFACE_TEMPLATE_SHA256)),
+            matcher_preprocessing=ComponentBinding(
+                state=ComponentState.CONFIGURED,
+                component_id=condition.value,
+                version="1.0.0",
+                configuration_sha256=condition_sha,
+                artifact_hashes=(
+                    (self.detector_identity.sha256, ARCFACE_TEMPLATE_SHA256)
+                    if self.detector_identity is not None
+                    else ()
+                ),
+            ),
             operating_thresholds=ComponentBinding(state=ComponentState.CONFIGURED, component_id="registry-defined-operating-points", version="1.0.0", configuration_sha256=sha256_bytes(json.dumps({"targets": [0.1, 0.01, 0.001], "eer": "linear interpolation"}, sort_keys=True).encode("utf-8"))),
             statistical_methods=ComponentBinding(state=ComponentState.CONFIGURED, component_id="qualsight.metrics.verification", version="1.0.0", configuration_sha256=sha256_bytes(b"clopper-pearson binomial CI; view2 tenfold accuracy")),
             confidence_interval_method=ComponentBinding(state=ComponentState.CONFIGURED, component_id="CLOPPER_PEARSON_EXACT_BINOMIAL_95", version="1.0.0"),
@@ -412,7 +553,14 @@ class MatcherMatrixJob:
             application_version=application_version(self.repository_root / "backend" / "pyproject.toml"),
             repository=repository_identity(self.repository_root),
             environment=environment_identity(self.repository_root / "uv.lock", {}),
-            hardware=hardware_identity(f"matcher device {binding.device}; detector on CPUExecutionProvider"),
+            hardware=hardware_identity(
+                f"matcher device {binding.device}; "
+                + (
+                    "detector on CPUExecutionProvider"
+                    if self.detector_identity is not None
+                    else "publisher-prealigned input; no detector execution"
+                )
+            ),
             start_time=started_at,
             end_time=_now(),
             runtime_seconds=round(templates.seconds + embed_seconds, 3),
@@ -433,22 +581,40 @@ class MatcherMatrixJob:
     # -- run --------------------------------------------------------------------
 
     def run(self) -> list[LeafResult]:
+        self.job_dir.mkdir(parents=True, exist_ok=False)
         self.progress = {"phase": "preprocess", "detail": ""}
-        self._preprocess_all()
-        for matcher_id in self.matchers:
-            self.progress = {"phase": f"load:{matcher_id.value}", "detail": ""}
-            matcher = FrozenMatcher(matcher_id, self.registry, self.upstream)
-            for condition in self.conditions:
-                self.progress = {"phase": f"leaf:{LEAF_IDS[(matcher_id, condition)]}", "detail": ""}
-                leaf = self._leaf(matcher, condition)
-                self.store.record_matcher_leaf(self, leaf)
-                self.leaves.append(leaf)
+        try:
+            self._preprocess_all()
+            self.template_set_sha256 = sha256_bytes(
+                json.dumps(
+                    {
+                        condition.value: templates.crop_sha256
+                        for condition, templates in self.templates.items()
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+            for matcher_id in self.matchers:
+                self.progress = {"phase": f"load:{matcher_id.value}", "detail": ""}
+                lease = self.runtime_manager.lease(matcher_id) if self.runtime_manager is not None else nullcontext(FrozenMatcher(matcher_id, self.registry, self.upstream))
+                with lease as matcher:
+                    for condition in self.conditions:
+                        self.progress = {"phase": f"leaf:{LEAF_IDS[(matcher_id, condition)]}", "detail": ""}
+                        leaf = self._leaf(matcher, condition)
+                        self.store.record_matcher_leaf(self, leaf)
+                        self.leaves.append(leaf)
+        finally:
+            self._release_templates()
         self.progress = {"phase": "completed", "detail": f"{len(self.leaves)} leaves"}
         return self.leaves
 
 
 def dataset_resource_of(dataset: Dataset) -> str | None:
     descriptor = json.loads(dataset.manifest.text)
-    if descriptor.get("source_kind") == "OWNER_SUPPLIED_LOCAL_INPUT":
-        return None  # decision 30: not a registered resource; scope authority is the runtime grant
+    if descriptor.get("source_kind") in {
+        "OWNER_SUPPLIED_LOCAL_INPUT",
+        "MANAGED_PREALIGNED_PAIR_DATASET",
+    }:
+        return None  # scope authority is the runtime grant or the managed add-on descriptor
     return descriptor["dataset_resource_id"]

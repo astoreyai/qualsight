@@ -94,12 +94,14 @@ def main() -> int:
             def minute_0_system():
                 page.goto(f"http://127.0.0.1:{PORT}/", wait_until="networkidle")
                 goto("system")
-                rows = page.wait_for_selector("[data-testid=resource-table] tbody tr", timeout=60_000) and page.evaluate(
-                    "() => document.querySelectorAll('[data-testid=resource-table] tbody tr').length"
-                )
+                page.wait_for_selector("[data-testid=matcher-assets] .asset-card", timeout=60_000)
+                assets = page.evaluate("() => document.querySelectorAll('[data-testid=matcher-assets] .asset-card').length")
+                resources = page.evaluate("() => document.querySelectorAll('[data-testid=resource-table] .resource-card').length")
                 badge = page.inner_text("[data-testid=engine-badge]")
+                assert assets == 3, assets
+                assert resources == 10, resources
                 assert "OFIQ" in badge and "1.1.2" in badge, badge
-                return {"resources": rows}
+                return {"matcher_assets": assets, "resources": resources}
 
             def select_demo_project():
                 goto("projects")

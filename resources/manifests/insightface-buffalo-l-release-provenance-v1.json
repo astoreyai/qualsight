@@ -108,8 +108,8 @@
   "registered_detector": {
     "resource_registry": {
       "path": "/mnt/projects/ofiqgui/resources/resource-registry.json",
-      "sha256": "a4f5bfc2dcb31463ec543d8dc3024c68b7b8c31f9fd1611da891f9b59dcd3b09",
-      "size_bytes": 146892
+      "sha256": "ce34349c8c9474eae236bcfd771b4195fc95ca7cdea088df982080696dec5f05",
+      "size_bytes": 162426
     },
     "resource_id": "insightface-scrfd-10g-local-candidate",
     "archive_member_path": "det_10g.onnx",

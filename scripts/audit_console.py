@@ -1,9 +1,9 @@
 """Interaction / piping audit: walk every console view on the recorded evidence,
 exercise every drilldown, and resolve every link and image the DOM renders.
 
-Read-mostly on the persistent store: the only mutations are the live-demo ones
-(one owner-supplied upload of a real LFW copy, one annotation), both recorded
-application flows. Reproduce/matrix/report builders are not triggered here —
+Read-mostly on the persistent store: the only mutation is one owner-supplied
+upload of a real LFW copy through the recorded application flow.
+Reproduce/matrix/report builders are not triggered here —
 they are covered by the observation and docs gates.
 
 Usage: python3 scripts/audit_console.py --observation atg/evidence/<name>.json
@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 import shutil
 import sys
 import tempfile
@@ -22,7 +23,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 PORT = 8480
-UPLOAD_SOURCE = Path("/mnt/projects/datasets/lfw/lfw_funneled/John_Howard/John_Howard_0001.jpg")
+UPLOAD_SOURCE = Path("/mnt/projects/datasets/lfw/lfw_funneled/John_Howard/John_Howard_0002.jpg")
 
 FINDINGS: list[dict] = []
 CHECKED: dict[str, int] = {}
@@ -50,8 +51,15 @@ def check_links(page, scope: str) -> dict:
         """async (urls) => {
             const out = {};
             for (const u of urls) {
-              try { const r = await fetch(u, { method: 'GET' }); out[u] = r.status; }
+              const controller = new AbortController();
+              const timer = setTimeout(() => controller.abort(), 15000);
+              try {
+                const r = await fetch(u, { method: 'GET', signal: controller.signal });
+                out[u] = r.status;
+                if (r.body) await r.body.cancel();
+              }
               catch (e) { out[u] = -1; }
+              finally { clearTimeout(timer); }
             }
             return out;
         }""",
@@ -99,8 +107,16 @@ def main() -> int:
                 page.goto(f"http://127.0.0.1:{PORT}/", wait_until="networkidle")
                 goto("projects")
                 page.wait_for_function("() => document.querySelectorAll('[data-testid=project-select] option').length > 1", timeout=30_000)
-                value = page.evaluate("() => Array.from(document.querySelectorAll('[data-testid=project-select] option')).find(o => o.innerText.includes('LFW quality workbench'))?.value")
-                assert value, "demo project missing"
+                value = page.evaluate("""() => {
+                    const projects = Array.from(document.querySelectorAll('[data-testid=project-select] option')).filter((option) => option.value);
+                    projects.sort((left, right) => {
+                        const leftRuns = Number(left.innerText.match(/(\d+) run\(s\)/)?.[1] ?? 0);
+                        const rightRuns = Number(right.innerText.match(/(\d+) run\(s\)/)?.[1] ?? 0);
+                        return rightRuns - leftRuns;
+                    });
+                    return projects[0]?.value;
+                }""")
+                assert value, "no recorded project is available for the interaction audit"
                 page.select_option("[data-testid=project-select]", value)
                 page.wait_for_timeout(1200)
                 rows = page.evaluate("() => document.querySelectorAll('[data-testid=run-table] tbody tr').length")
@@ -153,8 +169,39 @@ def main() -> int:
                 goto("matchers")
                 page.wait_for_selector("[data-testid=matrix-table]", timeout=60_000)
                 cells = page.evaluate("() => document.querySelectorAll('[data-testid=matrix-table] button.cell').length")
-                assert cells >= 6, cells
-                page.evaluate("() => document.querySelector('[data-testid=matrix-table] button.cell').click()")
+                assert cells >= 1, "no recorded matcher leaf is available"
+                registered_matchers = page.evaluate(
+                    """async () => {
+                        const response = await fetch("/api/addons");
+                        if (!response.ok) throw new Error(`add-on catalog returned ${response.status}`);
+                        return (await response.json()).matchers.map((item) => item.name);
+                    }"""
+                )
+                matcher_rows = page.query_selector_all("[data-testid=matrix-table] tbody tr")
+                audited_matchers: list[str] = []
+                for row in matcher_rows:
+                    name = row.query_selector("th").inner_text().strip()
+                    button = row.query_selector("button.cell")
+                    assert button is not None, f"registered matcher {name} has no recorded matrix leaf"
+                    leaf_test_id = button.get_attribute("data-testid")
+                    assert leaf_test_id, f"registered matcher {name} has an unidentified matrix leaf"
+                    button.click()
+                    page.wait_for_function(
+                        "testId => document.querySelector(`[data-testid='${testId}']`)?.classList.contains('selected')",
+                        arg=leaf_test_id,
+                        timeout=60_000,
+                    )
+                    page.wait_for_selector("[data-testid=matcher-errors]", timeout=60_000)
+                    audited_matchers.append(name)
+                assert len(audited_matchers) == len(set(audited_matchers)), (
+                    f"matrix renders duplicate matcher rows: {audited_matchers}"
+                )
+                unregistered = sorted(set(audited_matchers) - set(registered_matchers))
+                assert not unregistered, (
+                    f"matrix renders matcher rows outside the admitted catalog: {unregistered}"
+                )
+                page.fill("[data-testid=matcher-errors] input", "0.9")
+                page.click("[data-testid=matcher-errors] button:has-text('Recompute')")
                 page.wait_for_selector("[data-testid=error-pair]", timeout=120_000)
                 page.click("[data-testid=evidence-open]")
                 scope = "main div[data-view=matchers] "
@@ -162,7 +209,13 @@ def main() -> int:
                 decisions = page.evaluate("(s) => document.querySelectorAll(s + '[data-testid=evidence-decisions] tbody tr').length", scope)
                 marker = bool(page.query_selector(scope + "[data-testid=pair-score-marker]"))
                 assert decisions >= 1 and marker, (decisions, marker)
-                return {"matrix_cells": cells, "evidence_decisions": decisions, **check_links(page, "matchers")}
+                return {
+                    "matrix_cells": cells,
+                    "registered_matchers": registered_matchers,
+                    "matcher_drilldowns": audited_matchers,
+                    "evidence_decisions": decisions,
+                    **check_links(page, "matchers"),
+                }
 
             # ---- utility: detail + all three pair filters + evidence -----------
             def utility():
@@ -191,9 +244,21 @@ def main() -> int:
             def cross():
                 goto("cross")
                 page.wait_for_selector("[data-testid=cross-table] tbody tr", timeout=60_000)
-                page.evaluate("() => document.querySelector('[data-testid=cross-analysis]')?.click()")
+                analysis = None
+                for row in page.query_selector_all("[data-testid=cross-table] tbody tr"):
+                    candidate = row.query_selector("[data-testid=cross-analysis]")
+                    cells = row.query_selector_all("td")
+                    if candidate is None or len(cells) < 2:
+                        continue
+                    counts = [int(value) for value in re.findall(r"\d+", cells[-2].inner_text())]
+                    if counts[:2] == [6, 3]:
+                        analysis = candidate
+                        break
+                assert analysis is not None, "no recorded cross-matcher analysis is available"
+                analysis.click()
                 page.wait_for_selector("[data-testid=contrast-row]", timeout=120_000)
                 contrasts = page.evaluate("() => document.querySelectorAll('[data-testid=contrast-row]').length")
+                assert contrasts >= 9, f"expected the complete 3 matcher × 2 preprocessing contrast set; found {contrasts}"
                 got_pairs = False
                 for button in page.query_selector_all("[data-testid=contrast-row] button")[:16]:
                     button.click()
@@ -202,9 +267,6 @@ def main() -> int:
                         got_pairs = True
                         break
                 assert got_pairs, "no contrast category produced pairs"
-                page.fill("[data-testid=cross-pair] [data-testid=annotation-input]", "piping audit: reviewed")
-                page.click("[data-testid=cross-pair] [data-testid=annotation-save]")
-                page.wait_for_function("() => Array.from(document.querySelectorAll('[data-testid=cross-pair] .annotations li')).some(li => li.innerText.includes('piping audit'))", timeout=30_000)
                 page.click("[data-testid=cross-evidence-open]")
                 page.wait_for_selector("main div[data-view=cross] [data-testid=pair-evidence]", timeout=180_000)
                 return {"contrasts": contrasts, **check_links(page, "cross")}
@@ -228,9 +290,12 @@ def main() -> int:
 
             def system():
                 goto("system")
-                rows = page.wait_for_selector("[data-testid=resource-table] tbody tr", timeout=60_000) and page.evaluate("() => document.querySelectorAll('[data-testid=resource-table] tbody tr').length")
-                assert rows == 10, rows
-                return {"resources": rows, **check_links(page, "system")}
+                page.wait_for_selector("[data-testid=matcher-assets] .asset-card", timeout=60_000)
+                assets = page.evaluate("() => document.querySelectorAll('[data-testid=matcher-assets] .asset-card').length")
+                resources = page.evaluate("() => document.querySelectorAll('[data-testid=resource-table] .resource-card').length")
+                assert assets == 6, assets
+                assert resources == 13, resources
+                return {"matcher_assets": assets, "resources": resources, **check_links(page, "system")}
 
             step("load", load)
             step("assess", assess)

@@ -176,8 +176,17 @@ class UtilityAnalysisJob:
         failed = np.array([r["failure"] is not None for r in rows])
         q_left = np.array([quality.get(r["left_sample_id"], np.nan) for r in rows], dtype=np.float64)
         q_right = np.array([quality.get(r["right_sample_id"], np.nan) for r in rows], dtype=np.float64)
-        subject_left = np.array([r["left_subject_id"] for r in rows])
-        subject_right = np.array([r["right_subject_id"] for r in rows])
+        subjects_recorded = all(
+            r["left_subject_id"] is not None and r["right_subject_id"] is not None
+            for r in rows
+        )
+        subject_left = np.array([r["left_subject_id"] for r in rows], dtype=object)
+        subject_right = np.array([r["right_subject_id"] for r in rows], dtype=object)
+        uncertainty_sampling_unit = (
+            "LEFT_SUBJECT_ID_OF_THE_COMPARISON_UNIT"
+            if subjects_recorded
+            else None
+        )
         if request.matcher_threshold is None:
             point = next((p for p in self.metrics["by_policy"]["EXCLUDE_FAILED_TRIALS"]["operating_points"] if p["target_fmr"] == request.target_fmr and p.get("threshold") is not None), None)
             if point is None:
@@ -205,6 +214,7 @@ class UtilityAnalysisJob:
             UtilityInputs(scores, mated, failed, q_left, q_right, subject_left, subject_right),
             policy=self.policy, threshold=threshold, threshold_provenance=provenance, partial_interval=request.partial_interval,
             quality_range=quality_range, bootstrap_replicates=request.bootstrap_replicates, seed=request.seed, quality_cutoff_for_prediction=quality_threshold,
+            uncertainty_sampling_unit=uncertainty_sampling_unit,
         )
         policy_block = analyze_policy(scores, mated, failed, pq_values, quality_threshold=quality_threshold, matcher_threshold=threshold, quality_measure=request.quality_measure, pair_quality_policy=self.policy.value)
         policy_block["thresholds"]["quality_policy"]["provenance"] = quality_provenance
@@ -297,6 +307,7 @@ class UtilityAnalysisJob:
         experiment_id = content_id("experiment", self.project.project_id, self.leaf["dataset_id"], ANALYSIS_KIND, request.matcher_run_id, request.quality_job_id, request.quality_measure, self.policy.value)
         run_id = content_id("run", experiment_id, started.isoformat(), sha256_file(utility_path), sha256_file(policy_path), sha256_file(pair_table))
         utility = document["utility"]
+        uncertainty_estimated = utility["uncertainty"].get("status") == "ESTIMATED"
         observations = [
             MetricObservation(metric_id="comparisons.total", value=document["counts"]["comparison_units"], unit="count"),
             MetricObservation(metric_id="comparisons.failed", value=document["counts"]["processing_failures"], unit="count"),
@@ -326,9 +337,17 @@ class UtilityAnalysisJob:
             model_hashes=source.model_hashes, matcher=source.matcher, matcher_preprocessing=source.matcher_preprocessing,
             operating_thresholds=ComponentBinding(state=ComponentState.CONFIGURED, component_id="qualsight.metrics.policy", version="1.0.0", configuration_sha256=sha256_bytes(json.dumps({"matcher_threshold": threshold, "quality_threshold": quality_threshold, "pair_quality_policy": self.policy.value}, sort_keys=True).encode("utf-8"))),
             statistical_methods=ComponentBinding(state=ComponentState.CONFIGURED, component_id="qualsight.metrics.utility+statistics", version="1.0.0", configuration_sha256=sha256_bytes(json.dumps({"partial_interval": request.partial_interval, "replicates": request.bootstrap_replicates, "seed": request.seed}, sort_keys=True).encode("utf-8"))),
-            confidence_interval_method=ComponentBinding(state=ComponentState.CONFIGURED, component_id="CLUSTER_BOOTSTRAP_PERCENTILE_95+CLOPPER_PEARSON_95", version="1.0.0"),
-            randomness=ComponentBinding(state=ComponentState.CONFIGURED, component_id="numpy.random.default_rng", version="PCG64", configuration_sha256=sha256_bytes(str(request.seed).encode("utf-8"))),
-            random_seeds=(request.seed,),
+            confidence_interval_method=(
+                ComponentBinding(state=ComponentState.CONFIGURED, component_id="CLUSTER_BOOTSTRAP_PERCENTILE_95+CLOPPER_PEARSON_95", version="1.0.0")
+                if uncertainty_estimated
+                else ComponentBinding(state=ComponentState.NOT_APPLICABLE, reason="Subject-cluster intervals were not assessed because the protocol records no subject identities; point rates retain exact binomial intervals where applicable.")
+            ),
+            randomness=(
+                ComponentBinding(state=ComponentState.CONFIGURED, component_id="numpy.random.default_rng", version="PCG64", configuration_sha256=sha256_bytes(str(request.seed).encode("utf-8")))
+                if uncertainty_estimated
+                else ComponentBinding(state=ComponentState.NOT_APPLICABLE, reason="No bootstrap resampling was executed because subject identities are unavailable.")
+            ),
+            random_seeds=(request.seed,) if uncertainty_estimated else (),
             application_version=application_version(self.repository_root / "backend" / "pyproject.toml"), repository=repository_identity(self.repository_root),
             environment=environment_identity(self.repository_root / "uv.lock", {}), hardware=hardware_identity("numpy on CPU"),
             start_time=started, end_time=_now(), runtime_seconds=round(seconds, 3), initialization_ms=0, assessment_ms=int(seconds * 1000),
@@ -337,6 +356,7 @@ class UtilityAnalysisJob:
             warnings=tuple(w for w in (
                 f"{document['counts']['units_missing_quality']} comparison units lack a {request.quality_measure} value on one side and are excluded from utility curves" if document["counts"]["units_missing_quality"] else None,
                 "quality-conditioned bins with fewer than 30 units are flagged as unsupported precision",
+                "subject-cluster uncertainty is not assessed because the protocol authority records no subject identities" if not uncertainty_estimated else None,
             ) if w),
             provenance_limits=tuple(source.provenance_limits) + ("Utility results are QualSight-executed on the recorded matcher Run and quality job; they are not published-figure reproductions.",),
             exit_code=0, status=RunStatus.COMPLETED, scientific_support=ScientificSupportState.NOT_ASSESSED,
@@ -344,7 +364,7 @@ class UtilityAnalysisJob:
         experiment = Experiment(
             experiment_id=experiment_id, project_id=self.project.project_id, dataset_id=self.leaf["dataset_id"],
             name=f"utility: {self.leaf['leaf_id']} × {request.quality_measure} ({self.policy.value})", created_by=self.actor, created_at=started,
-            protocol=VerificationProtocol(kind=ProtocolKind.VERIFICATION, protocol_id=self.leaf["protocol_id"], pair_manifest=self.protocol.pair_manifest, identity_schema=ComponentBinding(state=ComponentState.CONFIGURED, component_id="lfw-directory-identity", version="1.0.0")),
+            protocol=VerificationProtocol(kind=ProtocolKind.VERIFICATION, protocol_id=self.leaf["protocol_id"], pair_manifest=self.protocol.pair_manifest, identity_schema=source.subject_protocol),
             configuration=configuration,
         )
         return run, experiment

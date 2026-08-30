@@ -107,8 +107,6 @@ def export_bundle(store: Any, *, run_id: str, root: Path, repository_root: Path)
                 for name, item in provenance["files"].items():
                     shutil.copyfile(item["path"], target / Path(item["path"]).name)
                 (target / "figure.provenance.json").write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        for name in ("metrics.json",):
-            pass
         (stage / "README.md").write_text(
             f"# QualSight reproducibility bundle\n\nRun `{run_id}` (evidence sha256 `{evidence_sha256}`), exported {_now()} by QualSight {run.application_version}.\n\n"
             "Contents: manifest.json, experiment.yaml, protocol.yaml, dataset-manifest.json (paths and hashes only — no image bytes), environment.json, metrics.json, results.parquet, figures/, tables/, checksums.sha256.\n\n"

@@ -38,7 +38,7 @@ class RealProjectLifecycleTests(unittest.TestCase):
             runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID,
             input_resource_ids=(OFIQ_INPUT_RESOURCE_ID,),
         )
-        cls.client = TestClient(create_app(settings))
+        cls.client = TestClient(create_app(settings), base_url="http://127.0.0.1")
         cls.client.__enter__()
 
     @classmethod
@@ -159,6 +159,29 @@ class RealProjectLifecycleTests(unittest.TestCase):
             json={"image_path": R01, "purpose_scope": SCOPE, "project_id": "project:sha256:" + "1" * 64},
         )
         self.assertEqual(refused.status_code, 404)
+
+    def test_run_inventory_can_be_scoped_to_one_real_project(self) -> None:
+        unscoped = self.client.get("/api/runs")
+        self.assertEqual(unscoped.status_code, 422, unscoped.text)
+        projects = [self._create(name) for name in ("Run inventory scope A", "Run inventory scope B")]
+        run_ids: list[str] = []
+        for project in projects:
+            assessed = self.client.post(
+                "/api/quality/assess",
+                json={"image_path": R01, "purpose_scope": SCOPE, "project_id": project["project_id"]},
+            )
+            self.assertEqual(assessed.status_code, 200, assessed.text)
+            run_ids.append(assessed.json()["run_id"])
+
+        for project, expected_run_id, excluded_run_id in (
+            (projects[0], run_ids[0], run_ids[1]),
+            (projects[1], run_ids[1], run_ids[0]),
+        ):
+            response = self.client.get("/api/runs", params={"project_id": project["project_id"]})
+            self.assertEqual(response.status_code, 200, response.text)
+            observed = [row["run_id"] for row in response.json()]
+            self.assertEqual(observed, [expected_run_id])
+            self.assertNotIn(excluded_run_id, observed)
 
 
 if __name__ == "__main__":

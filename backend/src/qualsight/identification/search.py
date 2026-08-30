@@ -13,6 +13,7 @@ same similarities on deterministic gallery subsets.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
@@ -65,7 +66,7 @@ class SearchResult:
 
 
 class IdentificationSearchJob:
-    def __init__(self, *, store: Any, registry: Any, upstream: Any, repository_root: Path, project: Any, protocol: dict[str, Any], entries: list[dict[str, Any]], matcher_id: str, condition_id: str, job_root: Path, actor: str, purpose_scope: str = "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1", quality_job_id: str | None = None) -> None:
+    def __init__(self, *, store: Any, registry: Any, upstream: Any, repository_root: Path, project: Any, protocol: dict[str, Any], entries: list[dict[str, Any]], matcher_id: str, condition_id: str, job_root: Path, actor: str, purpose_scope: str = "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1", quality_job_id: str | None = None, runtime_manager: Any | None = None) -> None:
         self.store = store
         self.registry = registry
         self.upstream = upstream
@@ -76,6 +77,7 @@ class IdentificationSearchJob:
         self.actor = actor
         self.purpose_scope = purpose_scope
         self.quality_job_id = quality_job_id
+        self.runtime_manager = runtime_manager
         try:
             self.matcher_id = MatcherId(matcher_id)
             self.condition = ConditionId(condition_id)
@@ -94,7 +96,6 @@ class IdentificationSearchJob:
         self.detector = SCRFDDetector(Path(self.detector_identity.path), self.detector_identity.sha256)
         self.search_id = content_id("identification-search", project.project_id, protocol["protocol_id"], matcher_id, condition_id, _now().isoformat())
         self.directory = job_root / self.search_id.replace(":", "_")
-        self.directory.mkdir(parents=True, exist_ok=False)
         self.progress: dict[str, Any] = {"phase": "created", "detail": ""}
 
     # -- templates ----------------------------------------------------------------
@@ -130,7 +131,55 @@ class IdentificationSearchJob:
     # -- search -------------------------------------------------------------------
 
     @staticmethod
-    def _records(similarity: torch.Tensor, probes: list[dict[str, Any]], probe_index: dict[str, int], probe_failures: dict[str, str], gallery: list[dict[str, Any]], gallery_index: dict[str, int], gallery_failures: dict[str, str], gallery_positions: list[int], rank_depth: int) -> tuple[list[SearchRecord], list[dict[str, Any]]]:
+    def _topk_exact(
+        probe_tensor: torch.Tensor,
+        gallery_tensor: torch.Tensor,
+        gallery_positions: list[int],
+        *,
+        rank_depth: int,
+        probe_block_size: int = 128,
+        gallery_block_size: int = 4096,
+    ) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+        """Exact stable top-k without constructing the complete probe×gallery matrix."""
+
+        if probe_block_size < 1 or gallery_block_size < 1:
+            raise ValueError("identification block sizes must be positive")
+        depth = min(rank_depth, len(gallery_positions))
+        if depth == 0:
+            return {
+                row: (np.empty(0, dtype=np.float32), np.empty(0, dtype=np.int64))
+                for row in range(probe_tensor.shape[0])
+            }
+        result: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+        for probe_start in range(0, probe_tensor.shape[0], probe_block_size):
+            probe_stop = min(probe_start + probe_block_size, probe_tensor.shape[0])
+            probe_block = probe_tensor[probe_start:probe_stop]
+            best_values = [np.empty(0, dtype=np.float32) for _ in range(probe_block.shape[0])]
+            best_ordinals = [np.empty(0, dtype=np.int64) for _ in range(probe_block.shape[0])]
+            for gallery_start in range(0, len(gallery_positions), gallery_block_size):
+                gallery_stop = min(gallery_start + gallery_block_size, len(gallery_positions))
+                actual_rows = gallery_positions[gallery_start:gallery_stop]
+                row_tensor = torch.tensor(actual_rows, dtype=torch.long, device=gallery_tensor.device)
+                scores = (probe_block @ gallery_tensor.index_select(0, row_tensor).T).float().cpu().numpy()
+                ordinals = np.arange(gallery_start, gallery_stop, dtype=np.int64)
+                for local_probe in range(probe_block.shape[0]):
+                    values = np.concatenate((best_values[local_probe], scores[local_probe]))
+                    positions = np.concatenate((best_ordinals[local_probe], ordinals))
+                    keep = np.lexsort((positions, -values))[:depth]
+                    best_values[local_probe] = values[keep]
+                    best_ordinals[local_probe] = positions[keep]
+            for local_probe in range(probe_block.shape[0]):
+                result[probe_start + local_probe] = (
+                    best_values[local_probe],
+                    np.asarray(
+                        [gallery_positions[int(position)] for position in best_ordinals[local_probe]],
+                        dtype=np.int64,
+                    ),
+                )
+        return result
+
+    @staticmethod
+    def _records(probe_tensor: torch.Tensor, gallery_tensor: torch.Tensor, probes: list[dict[str, Any]], probe_index: dict[str, int], probe_failures: dict[str, str], gallery: list[dict[str, Any]], gallery_index: dict[str, int], gallery_failures: dict[str, str], gallery_positions: list[int], rank_depth: int) -> tuple[list[SearchRecord], list[dict[str, Any]]]:
         """Candidate lists and search records over the gallery columns ``gallery_positions`` (embedding rows)."""
 
         records: list[SearchRecord] = []
@@ -138,9 +187,14 @@ class IdentificationSearchJob:
         gallery_subject_by_row = {gallery_index[e["sample_id"]]: e["subject_id"] for e in gallery if e["sample_id"] in gallery_index}
         gallery_sample_by_row = {gallery_index[e["sample_id"]]: e["sample_id"] for e in gallery if e["sample_id"] in gallery_index}
         gallery_failed_subjects = {e["subject_id"] for e in gallery if e["sample_id"] in gallery_failures}
-        columns = torch.tensor(gallery_positions, dtype=torch.long, device=similarity.device) if gallery_positions else None
         depth = min(rank_depth, len(gallery_positions)) if gallery_positions else 0
         subset_subjects = {gallery_subject_by_row[p] for p in gallery_positions}
+        candidates = IdentificationSearchJob._topk_exact(
+            probe_tensor,
+            gallery_tensor,
+            gallery_positions,
+            rank_depth=rank_depth,
+        )
         for entry in probes:
             kind = "MATED" if entry["role"] == "PROBE_MATED" else "NON_MATED"
             if kind == "MATED" and entry["subject_id"] not in subset_subjects and entry["subject_id"] not in gallery_failed_subjects:
@@ -149,13 +203,11 @@ class IdentificationSearchJob:
             if row_index is None or depth == 0:
                 records.append(SearchRecord(entry["sample_id"], entry["subject_id"], kind, True, None, None, None, entry["subject_id"] in gallery_failed_subjects))
                 continue
-            scores = similarity[row_index].index_select(0, columns)
-            values, order = torch.sort(scores, descending=True, stable=True)
-            values, order = values[:depth].cpu().numpy(), order[:depth].cpu().numpy()
+            values, gallery_rows = candidates[row_index]
             true_rank = None
             true_score = None
-            for rank, (value, position) in enumerate(zip(values, order), start=1):
-                gallery_row = gallery_positions[int(position)]
+            for rank, (value, gallery_row) in enumerate(zip(values, gallery_rows), start=1):
+                gallery_row = int(gallery_row)
                 is_mate = gallery_subject_by_row[gallery_row] == entry["subject_id"]
                 if is_mate and true_rank is None:
                     true_rank, true_score = rank, float(value)
@@ -164,6 +216,12 @@ class IdentificationSearchJob:
         return records, rows
 
     def run(self) -> SearchResult:
+        self.directory.mkdir(parents=True, exist_ok=False)
+        lease = self.runtime_manager.lease(self.matcher_id) if self.runtime_manager is not None else nullcontext(FrozenMatcher(self.matcher_id, self.registry, self.upstream))
+        with lease as matcher:
+            return self._execute(matcher)
+
+    def _execute(self, matcher: FrozenMatcher) -> SearchResult:
         started = _now()
         clock = time.perf_counter()
         gallery = [e for e in self.entries if e["role"] == "GALLERY"]
@@ -174,7 +232,6 @@ class IdentificationSearchJob:
         self.progress = {"phase": "preprocess", "detail": "probes"}
         probe_crops, probe_index, probe_failures, probe_seconds = self._templates([e["sample_id"] for e in probes])
         self.progress = {"phase": "embed", "detail": self.matcher_id.value}
-        matcher = FrozenMatcher(self.matcher_id, self.registry, self.upstream)
         embed_clock = time.perf_counter()
         gallery_embeddings = matcher.embed(gallery_crops) if gallery_crops.shape[0] else np.zeros((0, 512), dtype=np.float32)
         probe_embeddings = matcher.embed(probe_crops) if probe_crops.shape[0] else np.zeros((0, 512), dtype=np.float32)
@@ -182,17 +239,16 @@ class IdentificationSearchJob:
         device = torch.device(matcher.device)
         gallery_tensor = torch.from_numpy(gallery_embeddings).to(device)
         probe_tensor = torch.from_numpy(probe_embeddings).to(device)
-        self.progress = {"phase": "search", "detail": f"{probe_tensor.shape[0]}×{gallery_tensor.shape[0]} on {device}"}
-        similarity = probe_tensor @ gallery_tensor.T if gallery_tensor.shape[0] and probe_tensor.shape[0] else torch.zeros((probe_tensor.shape[0], gallery_tensor.shape[0]), device=device)
+        self.progress = {"phase": "search", "detail": f"exact blockwise top-k over {probe_tensor.shape[0]}×{gallery_tensor.shape[0]} on {device}"}
         all_positions = list(range(gallery_tensor.shape[0]))
-        records, rows = self._records(similarity, probes, probe_index, probe_failures, gallery, gallery_index, gallery_failures, all_positions, rank_depth)
+        records, rows = self._records(probe_tensor, gallery_tensor, probes, probe_index, probe_failures, gallery, gallery_index, gallery_failures, all_positions, rank_depth)
         metrics = compute_identification_metrics(records, gallery_size=len(gallery), gallery_template_failures=len(gallery_failures), rank_depth=rank_depth)
         # Gallery-size effects: deterministic subsets of the enrolled gallery templates.
         generator = np.random.default_rng(GALLERY_EFFECT_SEED)
         effects = []
         for size in [s for s in GALLERY_EFFECT_SIZES if s < len(all_positions)] + [len(all_positions)]:
             positions = sorted(int(p) for p in generator.choice(np.array(all_positions), size=size, replace=False)) if size < len(all_positions) else all_positions
-            sub_records, _ = self._records(similarity, probes, probe_index, probe_failures, gallery, gallery_index, gallery_failures, positions, rank_depth)
+            sub_records, _ = self._records(probe_tensor, gallery_tensor, probes, probe_index, probe_failures, gallery, gallery_index, gallery_failures, positions, rank_depth)
             sub_metrics = compute_identification_metrics(sub_records, gallery_size=size, gallery_template_failures=0, rank_depth=rank_depth)
             closed = sub_metrics["closed_set"]["EXCLUDE_FAILED_TRIALS"]
             open_set = sub_metrics["open_set"]["EXCLUDE_FAILED_TRIALS"]
@@ -243,7 +299,7 @@ class IdentificationSearchJob:
             "search_id": self.search_id, "version": SEARCH_VERSION, "protocol_id": self.protocol["protocol_id"], "protocol_manifest_sha256": self.protocol["manifest_sha256"], "mode": self.protocol["mode"], "rank_depth": self.protocol["rank_depth"],
             "gallery_count": gallery_count, "probe_count": probe_count, "matcher": {"resource_id": self.matcher_id.value, "transform_id": transform_id, "checkpoint_sha256": binding.checkpoint_sha256, "architecture_source_sha256": list(binding.architecture_source_sha256), "parameter_count": binding.parameter_count, "device": binding.device, "torch_version": binding.torch_version},
             "preprocessing": {"condition_id": self.condition.value, **condition_definition, "detector_sha256": self.detector_identity.sha256, "detector_threshold": 0.5, "nms_threshold": 0.4, "alignment_template_sha256": ARCFACE_TEMPLATE_SHA256},
-            "score": {"definition": "cosine similarity between L2-normalized 512-d embeddings; probe × gallery on the matcher device", "direction": "HIGHER_IS_MORE_SIMILAR", "similarity_device": device},
+            "score": {"definition": "cosine similarity between L2-normalized 512-d embeddings; exact stable blockwise top-k on the matcher device", "direction": "HIGHER_IS_MORE_SIMILAR", "similarity_device": device, "search_strategy": "EXACT_BLOCKWISE_STABLE_TOPK_V1", "probe_block_size": 128, "gallery_block_size": 4096},
             "failure_policy": "every search retained; failed probe or gallery templates are explicit and reported under EXCLUDE_FAILED_TRIALS and FAILURES_AS_MISS", "gallery_effects_seed": GALLERY_EFFECT_SEED, "purpose_scope": self.purpose_scope, "quality_job_id": self.quality_job_id,
         })
         experiment_id = content_id("experiment", self.project.project_id, self.dataset.dataset_id, self.protocol["protocol_id"], self.matcher_id.value, self.condition.value, "identification")
