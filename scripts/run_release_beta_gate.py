@@ -18,6 +18,7 @@ class GateDefinition(NamedTuple):
     argv: tuple[str, ...]
     timeout_seconds: int
     environment: tuple[tuple[str, str], ...] = ()
+    working_directory: Path | None = None
 
 
 def _release_interpreter(python: str) -> Path:
@@ -36,9 +37,12 @@ def gate_definitions(
     root = root.resolve(strict=True)
     deployment_root = (deployment_root or root).resolve(strict=True)
     work_root = work_root or root / ".release-beta-gate-work"
+    deployment_environment = (
+        ("QUALSIGHT_REPOSITORY_ROOT", str(deployment_root)),
+    )
     backend_environment = (
         ("PYTHONPATH", f"{root / 'backend' / 'src'}:{root}"),
-        ("QUALSIGHT_REPOSITORY_ROOT", str(deployment_root)),
+        *deployment_environment,
     )
     staged_backend_environment = (
         ("PYTHONPATH", f"{root / 'backend' / 'src'}:{root}"),
@@ -110,6 +114,8 @@ def gate_definitions(
                 "-q",
             ),
             600,
+            deployment_environment,
+            working_directory=deployment_root,
         ),
         GateDefinition(
             "backend-tests",
@@ -143,7 +149,12 @@ def gate_definitions(
             300,
         ),
         *(
-            GateDefinition(name, (python, "-m", module, *arguments), 600)
+            GateDefinition(
+                name,
+                (python, "-m", module, *arguments),
+                600,
+                deployment_environment,
+            )
             for name, module, arguments in validators
         ),
         GateDefinition(
@@ -254,9 +265,10 @@ def run_beta_gate(
         for gate in definitions:
             environment = dict(os.environ)
             environment.update(gate.environment)
+            working_directory = gate.working_directory or root
             completed = subprocess.run(
                 gate.argv,
-                cwd=root,
+                cwd=working_directory,
                 env=environment,
                 capture_output=True,
                 check=False,
@@ -266,6 +278,11 @@ def run_beta_gate(
                 {
                     "name": gate.name,
                     "argv": _normalised_argv(root, deployment_root, gate.argv),
+                    "working_directory": _normalised_argv(
+                        root,
+                        deployment_root,
+                        (str(working_directory),),
+                    )[0],
                     "exit_code": completed.returncode,
                     "stdout_bytes": len(completed.stdout),
                     "stdout_sha256": _sha256_bytes(completed.stdout),

@@ -119,6 +119,20 @@ OFIQ_V112_ONNX_RUNTIME_NOTICES_SHA256 = (
 OFIQ_V112_ONNX_RUNTIME_CMAKE_SHA256 = (
     "5671027df260e8a43ea043c4cf47a9e245401ac2550e5bbcf07340289ae0f964"
 )
+
+
+def _repository_root() -> Path:
+    configured = os.environ.get("QUALSIGHT_REPOSITORY_ROOT")
+    if configured is None:
+        return Path(__file__).resolve().parents[1]
+    root = Path(configured).resolve(strict=True)
+    if not root.is_dir():
+        raise RegistryValidationError(
+            "QUALSIGHT_REPOSITORY_ROOT must resolve to a directory"
+        )
+    return root
+
+
 OFIQ_V112_ONNX_RUNTIME_ROLES = {
     "GIT_COMMIT_ID": "VERSION_EVIDENCE",
     "LICENSE": "LICENSE",
@@ -1996,7 +2010,7 @@ def _prevalidate_onnx_static_review_authorization(
     )
     expected_authorization_path = _absolute_path(
         str(
-            Path(__file__).resolve().parents[1]
+            _repository_root()
             / "resources"
             / "authorizations"
             / "qualsight-onnxruntime-static-review-2026-08-14.json"

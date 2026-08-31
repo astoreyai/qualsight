@@ -517,6 +517,20 @@ class ReleaseMetadataTests(unittest.TestCase):
         definitions_by_name = {
             definition.name: definition for definition in definitions
         }
+        split_root_definitions = gate.gate_definitions(
+            ROOT / "backend",
+            sys.executable,
+            deployment_root=ROOT,
+        )
+        split_root_gate = next(
+            definition
+            for definition in split_root_definitions
+            if definition.name == "root-tests"
+        )
+        self.assertEqual(split_root_gate.working_directory, ROOT.resolve())
+        split_definitions_by_name = {
+            definition.name: definition for definition in split_root_definitions
+        }
         backend_argv = definitions_by_name["backend-tests"].argv
         self.assertEqual(
             backend_argv[backend_argv.index("-t") + 1],
@@ -535,6 +549,12 @@ class ReleaseMetadataTests(unittest.TestCase):
                 definitions_by_name[validator_name].argv[1],
                 "-m",
                 validator_name,
+            )
+            self.assertEqual(
+                dict(split_definitions_by_name[validator_name].environment)[
+                    "QUALSIGHT_REPOSITORY_ROOT"
+                ],
+                str(ROOT.resolve()),
             )
         offline_argv = definitions_by_name["offline-workflow"].argv
         self.assertIn("--source-root", offline_argv)

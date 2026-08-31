@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
 
 from scripts.capture_tree_manifest import capture
 from scripts.validate_resource_registry import (
+    _repository_root,
     validate_registry_file,
 )
 
@@ -130,6 +132,18 @@ class ResourceRegistryTests(unittest.TestCase):
             summary["states"],
             {"APPROVED_LOCAL_RESEARCH_USE": 10, "BLOCKED": 2, "VERIFIED_LIMITED_USE": 1},
         )
+
+    def test_explicit_repository_root_controls_canonical_governance_paths(self) -> None:
+        variable = "QUALSIGHT_REPOSITORY_ROOT"
+        previous = os.environ.get(variable)
+        os.environ[variable] = str((ROOT / "backend").resolve())
+        try:
+            self.assertEqual(_repository_root(), (ROOT / "backend").resolve())
+        finally:
+            if previous is None:
+                del os.environ[variable]
+            else:
+                os.environ[variable] = previous
 
     def test_ofiq_runtime_records_exact_configured_model_closure(self) -> None:
         runtime = self.resources["ofiq-v1-1-0-build-runtime"]
