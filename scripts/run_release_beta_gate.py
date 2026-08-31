@@ -20,6 +20,13 @@ class GateDefinition(NamedTuple):
     environment: tuple[tuple[str, str], ...] = ()
 
 
+def _release_interpreter(python: str) -> Path:
+    interpreter = Path(python).absolute()
+    if not interpreter.is_file():
+        raise ValueError(f"release interpreter is not a regular file: {interpreter}")
+    return interpreter
+
+
 def gate_definitions(
     root: Path,
     python: str,
@@ -231,9 +238,7 @@ def run_beta_gate(
     ).stdout
     if deployment_status:
         raise ValueError("controlled deployment worktree is not clean")
-    interpreter = Path(python).resolve(strict=True)
-    if not interpreter.is_file():
-        raise ValueError(f"release interpreter is not a regular file: {interpreter}")
+    interpreter = _release_interpreter(python)
 
     temporary = Path(tempfile.mkdtemp(prefix=".release-beta-gate.", dir=root.parent))
     results: list[dict[str, object]] = []

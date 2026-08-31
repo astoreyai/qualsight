@@ -458,6 +458,16 @@ class ReleaseMetadataTests(unittest.TestCase):
         gate_path = ROOT / "scripts" / "run_release_beta_gate.py"
         self.assertTrue(gate_path.is_file())
         gate = _load_script("run_release_beta_gate")
+        venv_entrypoint = Path(sys.executable)
+        self.assertTrue(venv_entrypoint.is_symlink())
+        self.assertNotEqual(
+            venv_entrypoint.absolute(),
+            venv_entrypoint.resolve(strict=True),
+        )
+        self.assertEqual(
+            gate._release_interpreter(str(venv_entrypoint)),
+            venv_entrypoint.absolute(),
+        )
         definitions = gate.gate_definitions(ROOT, sys.executable)
         self.assertEqual(
             [definition.name for definition in definitions],

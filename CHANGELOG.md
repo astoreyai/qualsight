@@ -43,6 +43,9 @@
   gates current Python/npm vulnerability evidence. Vite and its build dependencies were upgraded
   to remove all 13 npm audit findings; two non-reachable local-only PyTorch advisories remain governed
   by an exact fail-closed acceptance policy pending a real six-matcher runtime-upgrade equivalence gate.
+* The committed-tree beta gate now preserves the supplied virtual-environment interpreter entrypoint;
+  resolving its symlink previously launched Debian system Python and failed before the staged root gate
+  could load the release-pinned Pydantic version.
 * Add-on readiness is revalidated from live bytes: checkpoint cache identity includes inode/ctime as well
   as size/mtime, and the LFW card verifies its archive, manifest, exact tree membership, every image hash,
   and the registered tree digest before advertising `READY_TO_IMPORT`.
