@@ -45,7 +45,8 @@
   by an exact fail-closed acceptance policy pending a real six-matcher runtime-upgrade equivalence gate.
 * The committed-tree beta gate now preserves the supplied virtual-environment interpreter entrypoint;
   resolving its symlink previously launched Debian system Python and failed before the staged root gate
-  could load the release-pinned Pydantic version.
+  could load the release-pinned Pydantic version. Backend discovery now also fixes `backend/` as its
+  top-level directory so the root test package cannot shadow the real backend fixture package.
 * Add-on readiness is revalidated from live bytes: checkpoint cache identity includes inode/ctime as well
   as size/mtime, and the LFW card verifies its archive, manifest, exact tree membership, every image hash,
   and the registered tree digest before advertising `READY_TO_IMPORT`.

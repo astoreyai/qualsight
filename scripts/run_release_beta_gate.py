@@ -120,6 +120,8 @@ def gate_definitions(
                 "discover",
                 "-s",
                 str(deployment_root / "backend" / "tests"),
+                "-t",
+                str(deployment_root / "backend"),
                 "-q",
             ),
             3600,

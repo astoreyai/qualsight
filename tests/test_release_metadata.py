@@ -490,6 +490,11 @@ class ReleaseMetadataTests(unittest.TestCase):
         definitions_by_name = {
             definition.name: definition for definition in definitions
         }
+        backend_argv = definitions_by_name["backend-tests"].argv
+        self.assertEqual(
+            backend_argv[backend_argv.index("-t") + 1],
+            str((ROOT / "backend").resolve()),
+        )
         for validator_name in (
             "resource-registry",
             "metric-registry",
