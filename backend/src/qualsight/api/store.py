@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
 import tempfile
 import threading
@@ -32,6 +33,7 @@ SCHEMA_MIGRATIONS = (
     (2, "REPORT_AND_MATCHER_LEAF_COMPATIBILITY_COLUMNS"),
     (3, "DURABLE_OPERATIONS_AND_PURGE_JOURNAL"),
     (4, "PAIR_PROTOCOLS_WITH_OPTIONAL_FOLD_AUTHORITY"),
+    (5, "DURABLE_OPERATION_REQUEST_AND_ATTEMPT_IDENTITIES"),
 )
 
 SCHEMA = """
@@ -378,6 +380,10 @@ CREATE TABLE IF NOT EXISTS reproductions (
 );
 CREATE TABLE IF NOT EXISTS operations (
     operation_id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL,
+    attempt INTEGER NOT NULL,
+    supersedes_operation_id TEXT REFERENCES operations(operation_id),
+    result_id TEXT NOT NULL,
     operation_kind TEXT NOT NULL,
     project_id TEXT NOT NULL REFERENCES projects(project_id),
     state TEXT NOT NULL CHECK (state IN ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'INTERRUPTED')),
@@ -460,10 +466,127 @@ def _evidence(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _migration_snapshot(database_path: Path) -> Path | None:
+    if not database_path.exists() or database_path.stat().st_size == 0:
+        return None
+    source = sqlite3.connect(f"file:{database_path.absolute()}?mode=ro", uri=True)
+    try:
+        integrity = source.execute("PRAGMA integrity_check").fetchall()
+        if integrity != [("ok",)]:
+            raise sqlite3.DatabaseError(
+                f"database integrity check failed before schema migration: {integrity!r}"
+            )
+        current = int(source.execute("PRAGMA user_version").fetchone()[0])
+        target = SCHEMA_MIGRATIONS[-1][0]
+        if current > target:
+            raise RuntimeError(
+                f"database schema version {current} is newer than supported version {target}"
+            )
+        if current == target:
+            return None
+        destination = database_path.with_name(
+            f"{database_path.name}.pre-migration-v{current}-to-v{target}.snapshot.sqlite3"
+        )
+        source_identity = hashlib.sha256(source.serialize()).hexdigest()
+        if destination.exists() or destination.is_symlink():
+            if destination.is_symlink() or not destination.is_file():
+                raise FileExistsError(
+                    f"pre-migration snapshot path is not a reusable regular file: {destination}"
+                )
+            recorded = sqlite3.connect(f"file:{destination.absolute()}?mode=ro", uri=True)
+            try:
+                if recorded.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                    raise sqlite3.DatabaseError(
+                        "existing pre-migration snapshot integrity check failed"
+                    )
+                recorded_version = int(
+                    recorded.execute("PRAGMA user_version").fetchone()[0]
+                )
+                recorded_identity = hashlib.sha256(recorded.serialize()).hexdigest()
+            finally:
+                recorded.close()
+            if recorded_version != current:
+                raise RuntimeError(
+                    "existing pre-migration snapshot schema version does not match the live database"
+                )
+            if recorded_identity == source_identity:
+                return destination
+            destination = database_path.with_name(
+                f"{database_path.name}.pre-migration-v{current}-to-v{target}."
+                f"source-{source_identity}.snapshot.sqlite3"
+            )
+            if destination.exists() or destination.is_symlink():
+                if destination.is_symlink() or not destination.is_file():
+                    raise FileExistsError(
+                        f"content-addressed pre-migration snapshot path is unsafe: {destination}"
+                    )
+                recorded = sqlite3.connect(
+                    f"file:{destination.absolute()}?mode=ro", uri=True
+                )
+                try:
+                    if recorded.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                        raise sqlite3.DatabaseError(
+                            "content-addressed pre-migration snapshot integrity check failed"
+                        )
+                    recorded_identity = hashlib.sha256(recorded.serialize()).hexdigest()
+                finally:
+                    recorded.close()
+                if recorded_identity == source_identity:
+                    return destination
+                raise FileExistsError(
+                    f"content-addressed pre-migration snapshot differs from its identity: {destination}"
+                )
+        descriptor, partial_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.", suffix=".partial", dir=destination.parent
+        )
+        os.close(descriptor)
+        partial = Path(partial_name)
+        snapshot: sqlite3.Connection | None = None
+        try:
+            snapshot = sqlite3.connect(str(partial), isolation_level=None)
+            source.backup(snapshot)
+            if snapshot.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                raise sqlite3.DatabaseError("pre-migration snapshot integrity check failed")
+            snapshot.close()
+            snapshot = None
+            os.chmod(partial, 0o600)
+            os.link(partial, destination)
+        finally:
+            if snapshot is not None:
+                snapshot.close()
+            partial.unlink(missing_ok=True)
+        return destination
+    finally:
+        source.close()
+
+
+def _restore_migration_snapshot(database_path: Path, snapshot: Path) -> None:
+    descriptor, partial_name = tempfile.mkstemp(
+        prefix=f".{database_path.name}.", suffix=".rollback", dir=database_path.parent
+    )
+    os.close(descriptor)
+    partial = Path(partial_name)
+    try:
+        shutil.copyfile(snapshot, partial)
+        os.chmod(partial, 0o600)
+        check = sqlite3.connect(f"file:{partial}?mode=ro", uri=True)
+        try:
+            if check.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                raise sqlite3.DatabaseError("migration rollback snapshot integrity check failed")
+        finally:
+            check.close()
+        Path(f"{database_path}-wal").unlink(missing_ok=True)
+        Path(f"{database_path}-shm").unlink(missing_ok=True)
+        os.replace(partial, database_path)
+    finally:
+        partial.unlink(missing_ok=True)
+
+
 class RunStore:
     def __init__(self, database_path: Path) -> None:
         database_path.parent.mkdir(parents=True, exist_ok=True)
         self.database_path = database_path
+        migration_snapshot = _migration_snapshot(database_path)
         self._lock = threading.Lock()
         # One locked writer connection; every reader thread gets its own
         # connection (QS-S97). Reads on the writer's connection would observe
@@ -473,7 +596,13 @@ class RunStore:
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA foreign_keys=ON")
         self._connection.execute("PRAGMA busy_timeout=30000")
-        self._connection.executescript(SCHEMA)
+        try:
+            self._connection.executescript(SCHEMA)
+        except BaseException:
+            self._connection.close()
+            if migration_snapshot is not None:
+                _restore_migration_snapshot(database_path, migration_snapshot)
+            raise
         recorded_versions = {
             int(row[0]): str(row[1])
             for row in self._connection.execute(
@@ -488,6 +617,9 @@ class RunStore:
             if supported_versions.get(version) != name
         }
         if unknown or mismatched:
+            self._connection.close()
+            if migration_snapshot is not None:
+                _restore_migration_snapshot(database_path, migration_snapshot)
             raise RuntimeError(
                 f"database schema migration history is unsupported: unknown={sorted(unknown)}, mismatched={sorted(mismatched)}"
             )
@@ -532,6 +664,39 @@ class RunStore:
                 self._connection.execute(
                     "CREATE INDEX protocol_pairs_by_fold ON protocol_pairs(protocol_id, fold, source_order)"
                 )
+            operation_columns = {
+                str(row[1])
+                for row in self._connection.execute("PRAGMA table_info(operations)").fetchall()
+            }
+            if "request_id" not in operation_columns:
+                self._connection.execute("ALTER TABLE operations ADD COLUMN request_id TEXT")
+            if "attempt" not in operation_columns:
+                self._connection.execute(
+                    "ALTER TABLE operations ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1"
+                )
+            if "supersedes_operation_id" not in operation_columns:
+                self._connection.execute(
+                    "ALTER TABLE operations ADD COLUMN supersedes_operation_id TEXT REFERENCES operations(operation_id)"
+                )
+            if "result_id" not in operation_columns:
+                self._connection.execute("ALTER TABLE operations ADD COLUMN result_id TEXT")
+            self._connection.execute(
+                "UPDATE operations SET request_id = operation_id WHERE request_id IS NULL"
+            )
+            self._connection.execute(
+                "UPDATE operations SET result_id = operation_id WHERE result_id IS NULL"
+            )
+            if self._connection.execute(
+                "SELECT 1 FROM operations "
+                "WHERE request_id IS NULL OR result_id IS NULL OR attempt < 1 LIMIT 1"
+            ).fetchone() is not None:
+                raise RuntimeError(
+                    "operation request, attempt, and result identity migration is incomplete"
+                )
+            self._connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS operations_by_request_attempt "
+                "ON operations(request_id, attempt)"
+            )
             applied_at = datetime.now(timezone.utc).astimezone().isoformat()
             for version, name in SCHEMA_MIGRATIONS:
                 self._connection.execute(
@@ -542,6 +707,9 @@ class RunStore:
             self._connection.execute("COMMIT")
         except BaseException:
             self._connection.execute("ROLLBACK")
+            self._connection.close()
+            if migration_snapshot is not None:
+                _restore_migration_snapshot(database_path, migration_snapshot)
             raise
         self._readers = threading.local()
 
@@ -635,8 +803,10 @@ class RunStore:
         project_id: str,
         request: dict[str, Any],
         output_path: Path | None,
+        retry_interrupted: bool = False,
+        result_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
-        """Durably admit one immutable operation identity before enqueueing work."""
+        """Durably admit one immutable request, with explicit interrupted retries."""
 
         if not operation_id or not operation_kind or not project_id:
             raise ValueError("operation id, kind, and project id are required")
@@ -648,6 +818,7 @@ class RunStore:
             allow_nan=False,
         )
         output_value = str(output_path) if output_path is not None else None
+        result_value = result_id or operation_id
         accepted_at = datetime.now(timezone.utc).isoformat()
         with self._lock:
             cursor = self._connection.execute(
@@ -660,18 +831,65 @@ class RunStore:
                     "operation_kind": operation_kind,
                     "project_id": project_id,
                     "request_json": request_json,
-                    "output_path": output_value,
                 }
+                if not retry_interrupted:
+                    immutable["output_path"] = output_value
+                    immutable["result_id"] = result_value
                 changed = [key for key, value in immutable.items() if existing[key] != value]
                 if changed:
                     raise ImmutableRecordConflict(
                         f"operation {operation_id} immutable identity differs in {', '.join(changed)}"
                     )
-                return existing, False
+                request_id = str(existing["request_id"])
+                cursor = self._connection.execute(
+                    "SELECT * FROM operations WHERE request_id = ? ORDER BY attempt DESC LIMIT 1",
+                    (request_id,),
+                )
+                latest = self._row(cursor, cursor.fetchone())
+                assert latest is not None
+                if not retry_interrupted or latest["state"] != "INTERRUPTED":
+                    return latest, False
+                attempt = int(latest["attempt"]) + 1
+                attempt_id = f"operation-attempt:sha256:{_evidence(f'{request_id}:{attempt}')}"
+                self._connection.execute(
+                    "INSERT INTO operations "
+                    "(operation_id, request_id, attempt, supersedes_operation_id, result_id, operation_kind, "
+                    "project_id, state, accepted_at, request_json, output_path) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?)",
+                    (
+                        attempt_id,
+                        request_id,
+                        attempt,
+                        latest["operation_id"],
+                        result_value,
+                        operation_kind,
+                        project_id,
+                        accepted_at,
+                        request_json,
+                        output_value,
+                    ),
+                )
+                cursor = self._connection.execute(
+                    "SELECT * FROM operations WHERE operation_id = ?",
+                    (attempt_id,),
+                )
+                admitted = self._row(cursor, cursor.fetchone())
+                assert admitted is not None
+                return admitted, True
             self._connection.execute(
-                "INSERT INTO operations (operation_id, operation_kind, project_id, state, accepted_at, request_json, output_path) "
-                "VALUES (?, ?, ?, 'QUEUED', ?, ?, ?)",
-                (operation_id, operation_kind, project_id, accepted_at, request_json, output_value),
+                "INSERT INTO operations "
+                "(operation_id, request_id, attempt, result_id, operation_kind, project_id, state, accepted_at, request_json, output_path) "
+                "VALUES (?, ?, 1, ?, ?, ?, 'QUEUED', ?, ?, ?)",
+                (
+                    operation_id,
+                    operation_id,
+                    result_value,
+                    operation_kind,
+                    project_id,
+                    accepted_at,
+                    request_json,
+                    output_value,
+                ),
             )
             cursor = self._connection.execute(
                 "SELECT * FROM operations WHERE operation_id = ?",
@@ -754,13 +972,14 @@ class RunStore:
             for operation in pending:
                 assert operation is not None
                 operation_id = operation["operation_id"]
+                result_id = operation["result_id"]
                 operation_kind = operation["operation_kind"]
                 terminal_state: str | None = None
                 terminal_error: str | None = None
                 if operation_kind == "QUALITY_BATCH":
                     recorded = self._connection.execute(
                         "SELECT state FROM jobs WHERE job_id = ?",
-                        (operation_id,),
+                        (result_id,),
                     ).fetchone()
                     if recorded is not None and recorded[0] in {"COMPLETED", "FAILED", "CANCELLED"}:
                         terminal_state = recorded[0]
@@ -770,7 +989,7 @@ class RunStore:
                     expected = int(json.loads(operation["request_json"])["expected_leaf_count"])
                     count = self._connection.execute(
                         "SELECT COUNT(*) FROM matcher_leaves WHERE matrix_id = ?",
-                        (operation_id,),
+                        (result_id,),
                     ).fetchone()[0]
                     if int(count) == expected:
                         terminal_state = "COMPLETED"
@@ -785,7 +1004,7 @@ class RunStore:
                         table, key = result_table_and_key
                         recorded = self._connection.execute(
                             f"SELECT 1 FROM {table} WHERE {key} = ?",
-                            (operation_id,),
+                            (result_id,),
                         ).fetchone()
                         if recorded is not None:
                             terminal_state = "COMPLETED"
@@ -809,6 +1028,21 @@ class RunStore:
         cursor = self._read().execute(
             "SELECT * FROM operations WHERE operation_id = ?",
             (operation_id,),
+        )
+        return self._row(cursor, cursor.fetchone())
+
+    def latest_operation_attempt(self, request_id: str) -> dict[str, Any] | None:
+        cursor = self._read().execute(
+            "SELECT * FROM operations WHERE request_id = ? ORDER BY attempt DESC LIMIT 1",
+            (request_id,),
+        )
+        return self._row(cursor, cursor.fetchone())
+
+    def latest_operation_for_result(self, result_id: str) -> dict[str, Any] | None:
+        cursor = self._read().execute(
+            "SELECT * FROM operations WHERE result_id = ? "
+            "ORDER BY accepted_at DESC, attempt DESC LIMIT 1",
+            (result_id,),
         )
         return self._row(cursor, cursor.fetchone())
 
@@ -851,6 +1085,62 @@ class RunStore:
         placeholders = ", ".join("?" for _ in columns)
         self._connection.execute(
             f"INSERT INTO {table} ({names}) VALUES ({placeholders})", tuple(columns.values())
+        )
+
+    def _insert_audit_event(self, event: AuditEvent) -> None:
+        existing = self._connection.execute(
+            "SELECT record_json, evidence_sha256 FROM audit_events WHERE audit_event_id = ?",
+            (event.audit_event_id,),
+        ).fetchone()
+        if existing is not None:
+            record_json, evidence_sha256 = existing
+            if _evidence(record_json) != evidence_sha256:
+                raise ImmutableRecordConflict(
+                    f"stored audit event {event.audit_event_id} does not match its evidence digest"
+                )
+            recorded = AuditEvent.model_validate_json(record_json)
+            expected = event.model_copy(
+                update={"previous_evidence_sha256": recorded.previous_evidence_sha256}
+            )
+            if recorded != expected:
+                raise ImmutableRecordConflict(
+                    f"audit_events.{event.audit_event_id} is already recorded with different bytes"
+                )
+            return
+
+        prior = self._connection.execute(
+            "SELECT evidence_sha256 FROM audit_events WHERE project_id = ? ORDER BY rowid DESC LIMIT 1",
+            (event.project_id,),
+        ).fetchone()
+        previous_evidence = str(prior[0]) if prior is not None else None
+        if (
+            event.previous_evidence_sha256 is not None
+            and event.previous_evidence_sha256 != previous_evidence
+        ):
+            raise ImmutableRecordConflict(
+                f"audit event {event.audit_event_id} does not link to the current project chain head"
+            )
+        chained = AuditEvent.model_validate(
+            {
+                **event.model_dump(mode="python"),
+                "previous_evidence_sha256": previous_evidence,
+            }
+        )
+        record_json = chained.model_dump_json()
+        self._insert_once(
+            "audit_events",
+            "audit_event_id",
+            chained.audit_event_id,
+            byte_exact=True,
+            columns={
+                "audit_event_id": chained.audit_event_id,
+                "project_id": chained.project_id,
+                "subject_type": chained.subject_type,
+                "subject_id": chained.subject_id,
+                "occurred_at": chained.occurred_at.isoformat(),
+                "evidence_sha256": _evidence(record_json),
+                "record_json": record_json,
+            },
         )
 
     def record_bundle(self, bundle: SingleSampleRunBundle) -> str:
@@ -935,22 +1225,7 @@ class RunStore:
                         "record_json": run_json,
                     },
                 )
-                audit_json = bundle.audit_event.model_dump_json()
-                self._insert_once(
-                    "audit_events",
-                    "audit_event_id",
-                    bundle.audit_event.audit_event_id,
-                    byte_exact=True,
-                    columns={
-                        "audit_event_id": bundle.audit_event.audit_event_id,
-                        "project_id": bundle.audit_event.project_id,
-                        "subject_type": bundle.audit_event.subject_type,
-                        "subject_id": bundle.audit_event.subject_id,
-                        "occurred_at": bundle.audit_event.occurred_at.isoformat(),
-                        "evidence_sha256": _evidence(audit_json),
-                        "record_json": audit_json,
-                    },
-                )
+                self._insert_audit_event(bundle.audit_event)
             except BaseException:
                 self._connection.execute("ROLLBACK")
                 raise
@@ -1006,25 +1281,10 @@ class RunStore:
         return version
 
     def record_audit_event(self, event: AuditEvent) -> None:
-        record_json = event.model_dump_json()
         with self._lock:
             self._connection.execute("BEGIN")
             try:
-                self._insert_once(
-                    "audit_events",
-                    "audit_event_id",
-                    event.audit_event_id,
-                    byte_exact=True,
-                    columns={
-                        "audit_event_id": event.audit_event_id,
-                        "project_id": event.project_id,
-                        "subject_type": event.subject_type,
-                        "subject_id": event.subject_id,
-                        "occurred_at": event.occurred_at.isoformat(),
-                        "evidence_sha256": _evidence(record_json),
-                        "record_json": record_json,
-                    },
-                )
+                self._insert_audit_event(event)
             except BaseException:
                 self._connection.execute("ROLLBACK")
                 raise
@@ -1201,22 +1461,7 @@ class RunStore:
                     "INSERT OR IGNORE INTO dataset_statistics (dataset_id, computed_at, evidence_sha256, record_json) VALUES (?, ?, ?, ?)",
                     (dataset.dataset_id, audit_event.occurred_at.isoformat(), statistics_sha256, statistics_json),
                 )
-                audit_json = audit_event.model_dump_json()
-                self._insert_once(
-                    "audit_events",
-                    "audit_event_id",
-                    audit_event.audit_event_id,
-                    byte_exact=True,
-                    columns={
-                        "audit_event_id": audit_event.audit_event_id,
-                        "project_id": audit_event.project_id,
-                        "subject_type": audit_event.subject_type,
-                        "subject_id": audit_event.subject_id,
-                        "occurred_at": audit_event.occurred_at.isoformat(),
-                        "evidence_sha256": _evidence(audit_json),
-                        "record_json": audit_json,
-                    },
-                )
+                self._insert_audit_event(audit_event)
             except BaseException:
                 self._connection.execute("ROLLBACK")
                 raise
@@ -1372,22 +1617,7 @@ class RunStore:
                         ),
                     )
                 for audit_event in (dataset_audit_event, protocol_audit_event):
-                    audit_json = audit_event.model_dump_json()
-                    self._insert_once(
-                        "audit_events",
-                        "audit_event_id",
-                        audit_event.audit_event_id,
-                        byte_exact=True,
-                        columns={
-                            "audit_event_id": audit_event.audit_event_id,
-                            "project_id": audit_event.project_id,
-                            "subject_type": audit_event.subject_type,
-                            "subject_id": audit_event.subject_id,
-                            "occurred_at": audit_event.occurred_at.isoformat(),
-                            "evidence_sha256": _evidence(audit_json),
-                            "record_json": audit_json,
-                        },
-                    )
+                    self._insert_audit_event(audit_event)
             except BaseException:
                 self._connection.execute("ROLLBACK")
                 raise
@@ -1515,22 +1745,7 @@ class RunStore:
                         current_evidence_sha256=run_sha,
                         local_only=True,
                     )
-                    event_json = event.model_dump_json()
-                    self._insert_once(
-                        "audit_events",
-                        "audit_event_id",
-                        event.audit_event_id,
-                        byte_exact=True,
-                        columns={
-                            "audit_event_id": event.audit_event_id,
-                            "project_id": event.project_id,
-                            "subject_type": event.subject_type,
-                            "subject_id": event.subject_id,
-                            "occurred_at": event.occurred_at.isoformat(),
-                            "evidence_sha256": _evidence(event_json),
-                            "record_json": event_json,
-                        },
-                    )
+                    self._insert_audit_event(event)
             except BaseException:
                 self._connection.execute("ROLLBACK")
                 raise
@@ -1585,10 +1800,7 @@ class RunStore:
                     event_type=AuditEventType.RUN_COMPLETED, subject_type="Run", subject_id=run.run_id, occurred_at=run.end_time,
                     details=CanonicalJson.from_value({"kind": "MATCHER", "leaf_id": leaf.leaf_id, "matrix_id": job.matrix_id, "scored": leaf.scored_count, "failed": leaf.failed_count}),
                     current_evidence_sha256=run_sha, local_only=True)
-                event_json = event.model_dump_json()
-                self._insert_once("audit_events", "audit_event_id", event.audit_event_id, byte_exact=True, columns={
-                    "audit_event_id": event.audit_event_id, "project_id": event.project_id, "subject_type": event.subject_type, "subject_id": event.subject_id,
-                    "occurred_at": event.occurred_at.isoformat(), "evidence_sha256": _evidence(event_json), "record_json": event_json})
+                self._insert_audit_event(event)
             except BaseException:
                 self._connection.execute("ROLLBACK")
                 raise
@@ -1628,10 +1840,7 @@ class RunStore:
                     event_type=AuditEventType.RUN_COMPLETED, subject_type="Run", subject_id=run.run_id, occurred_at=run.end_time,
                     details=CanonicalJson.from_value({"kind": "ANALYSIS", "analysis_id": result.analysis_id, "matcher_run_id": result.summary["matcher_run_id"], "quality_job_id": result.summary["quality_job_id"], "quality_measure": result.summary["quality_measure"]}),
                     current_evidence_sha256=run_sha, local_only=True)
-                event_json = event.model_dump_json()
-                self._insert_once("audit_events", "audit_event_id", event.audit_event_id, byte_exact=True, columns={
-                    "audit_event_id": event.audit_event_id, "project_id": event.project_id, "subject_type": event.subject_type, "subject_id": event.subject_id,
-                    "occurred_at": event.occurred_at.isoformat(), "evidence_sha256": _evidence(event_json), "record_json": event_json})
+                self._insert_audit_event(event)
             except BaseException:
                 self._connection.execute("ROLLBACK")
                 raise
@@ -1660,10 +1869,7 @@ class RunStore:
             audit_event_id=f"audit-event:sha256:{_evidence(run.run_id + run_sha)}", project_id=run.project_id, actor_id=run.user_id,
             event_type=AuditEventType.RUN_COMPLETED, subject_type="Run", subject_id=run.run_id, occurred_at=run.end_time,
             details=CanonicalJson.from_value({"kind": "ANALYSIS", **details}), current_evidence_sha256=run_sha, local_only=True)
-        event_json = event.model_dump_json()
-        self._insert_once("audit_events", "audit_event_id", event.audit_event_id, byte_exact=True, columns={
-            "audit_event_id": event.audit_event_id, "project_id": event.project_id, "subject_type": event.subject_type, "subject_id": event.subject_id,
-            "occurred_at": event.occurred_at.isoformat(), "evidence_sha256": _evidence(event_json), "record_json": event_json})
+        self._insert_audit_event(event)
         return run_sha
 
     def record_cross_matcher_analysis(self, result: Any) -> None:
@@ -2308,22 +2514,7 @@ class RunStore:
                         for pair in pairs
                     ],
                 )
-                audit_json = audit_event.model_dump_json()
-                self._insert_once(
-                    "audit_events",
-                    "audit_event_id",
-                    audit_event.audit_event_id,
-                    byte_exact=True,
-                    columns={
-                        "audit_event_id": audit_event.audit_event_id,
-                        "project_id": audit_event.project_id,
-                        "subject_type": audit_event.subject_type,
-                        "subject_id": audit_event.subject_id,
-                        "occurred_at": audit_event.occurred_at.isoformat(),
-                        "evidence_sha256": _evidence(audit_json),
-                        "record_json": audit_json,
-                    },
-                )
+                self._insert_audit_event(audit_event)
             except BaseException:
                 self._connection.execute("ROLLBACK")
                 raise
@@ -2454,11 +2645,43 @@ class RunStore:
         ).fetchall()
         return [row[0] for row in rows]
 
-    def audit_events_for_project(self, project_id: str) -> list[AuditEvent]:
+    def _validated_audit_chain(self, project_id: str) -> list[AuditEvent]:
         rows = self._read().execute(
-            "SELECT record_json FROM audit_events WHERE project_id = ? ORDER BY occurred_at", (project_id,)
+            "SELECT record_json, evidence_sha256 FROM audit_events "
+            "WHERE project_id = ? ORDER BY rowid",
+            (project_id,),
         ).fetchall()
-        return [AuditEvent.model_validate_json(row[0]) for row in rows]
+        events: list[AuditEvent] = []
+        previous_evidence: str | None = None
+        linked_suffix_started = False
+        for record_json, evidence_sha256 in rows:
+            if _evidence(record_json) != evidence_sha256:
+                raise ImmutableRecordConflict(
+                    f"stored audit event in project {project_id} does not match its evidence digest"
+                )
+            event = AuditEvent.model_validate_json(record_json)
+            if previous_evidence is None:
+                if event.previous_evidence_sha256 is not None:
+                    raise ImmutableRecordConflict(
+                        f"audit chain for project {project_id} has a non-empty first link"
+                    )
+            elif event.previous_evidence_sha256 is None:
+                if linked_suffix_started:
+                    raise ImmutableRecordConflict(
+                        f"audit chain for project {project_id} lost its prior evidence link"
+                    )
+            else:
+                linked_suffix_started = True
+                if event.previous_evidence_sha256 != previous_evidence:
+                    raise ImmutableRecordConflict(
+                        f"audit chain for project {project_id} does not match its prior evidence link"
+                    )
+            events.append(event)
+            previous_evidence = str(evidence_sha256)
+        return events
+
+    def audit_events_for_project(self, project_id: str) -> list[AuditEvent]:
+        return self._validated_audit_chain(project_id)
 
     def run(self, run_id: str) -> tuple[CompletedRun, str] | None:
         row = self._read().execute(
@@ -2505,10 +2728,17 @@ class RunStore:
         return Experiment.model_validate_json(row[0]) if row else None
 
     def audit_events_for(self, subject_id: str) -> list[AuditEvent]:
-        rows = self._read().execute(
-            "SELECT record_json FROM audit_events WHERE subject_id = ? ORDER BY occurred_at", (subject_id,)
+        projects = self._read().execute(
+            "SELECT DISTINCT project_id FROM audit_events WHERE subject_id = ? ORDER BY project_id",
+            (subject_id,),
         ).fetchall()
-        return [AuditEvent.model_validate_json(row[0]) for row in rows]
+        events = [
+            event
+            for (project_id,) in projects
+            for event in self._validated_audit_chain(str(project_id))
+            if event.subject_id == subject_id
+        ]
+        return sorted(events, key=lambda event: (event.occurred_at, event.audit_event_id))
 
     def sample_id_for_run(self, run_id: str) -> str | None:
         row = self._read().execute("SELECT sample_id FROM runs WHERE run_id = ?", (run_id,)).fetchone()

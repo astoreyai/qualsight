@@ -18,7 +18,7 @@ made explicit here:
 
 Areas under the ERC (AU-ERC, partial AU-ERC), risk-coverage, quality-conditioned
 rates, association statistics, and the failure predictor are registered in
-metric registry v1.1.0 (``biometric.quality.utility.*@1.0.0``) and computed by
+metric registry v1.2.0 (``biometric.quality.utility.*@1.0.0``) and computed by
 ``compute_utility_analysis`` below; ``compute_erc`` keeps its compact derived
 summaries for the lightweight ERC endpoint.
 """
@@ -152,7 +152,7 @@ def compute_erc(inputs: ErcInputs, *, policy: PairQualityPolicy, threshold: floa
         points = _curve(inputs.scores[selection], quality[selection], threshold, kind)
         result["curves"][kind] = {"comparison_units": int(np.sum(selection)), "points": points}
         result["derived_summaries"][kind] = {
-            "note": "Compact summaries derived from the registered ERC curve; the registry metrics biometric.quality.utility.au-erc@1.0.0 and partial-au-erc@1.0.0 (metric registry v1.1.0) with recorded integration domains and uncertainty are reported by compute_utility_analysis.",
+            "note": "Compact summaries derived from the registered ERC curve; the registry metrics biometric.quality.utility.au-erc@1.0.0 and partial-au-erc@1.0.0 (metric registry v1.2.0) with recorded integration domains and uncertainty are reported by compute_utility_analysis.",
             "au_erc_0_to_1": _area(points, 1.0),
             "partial_au_erc_0_to_0_2": _area(points, 0.2),
             "error_at_0_rejection": points[0]["error_rate"] if points else None,
@@ -184,9 +184,9 @@ from .statistics import (  # noqa: E402  (kept after the ERC core so the module 
     average_precision,
     classifier_summary,
     clopper_pearson,
-    cluster_bootstrap,
     kendall_tau_b,
     logistic_regression,
+    pair_subject_multi_membership_bootstrap,
     roc_auc,
     spearman,
 )
@@ -272,7 +272,7 @@ def compute_utility_analysis(
     bootstrap_replicates: int = 1000,
     seed: int = 20260817,
     quality_cutoff_for_prediction: float | None = None,
-    uncertainty_sampling_unit: str | None = "LEFT_SUBJECT_ID_OF_THE_COMPARISON_UNIT",
+    uncertainty_sampling_unit: str | None = "SUBJECT_ID_IN_EITHER_PAIR_POSITION",
 ) -> dict[str, object]:
     """ERC plus the PRD §20 family over one matcher Run and one quality measure.
 
@@ -294,7 +294,7 @@ def compute_utility_analysis(
         "uncertainty": (
             {
                 "status": "ESTIMATED",
-                "method": "CLUSTER_BOOTSTRAP_PERCENTILE",
+                "method": "PAIR_SUBJECT_MULTI_MEMBERSHIP_BOOTSTRAP_PERCENTILE",
                 "sampling_unit": uncertainty_sampling_unit,
                 "replicates": int(bootstrap_replicates),
                 "seed": int(seed),
@@ -320,7 +320,8 @@ def compute_utility_analysis(
         q = quality[selection]
         s = inputs.scores[selection]
         errors = _errors_at_threshold(s, threshold, kind)
-        clusters = inputs.subject_left[selection]
+        left_subjects = inputs.subject_left[selection]
+        right_subjects = inputs.subject_right[selection]
         n = int(q.shape[0])
         # Areas under the recorded ERC (interval recorded), with cluster-bootstrap CIs.
         full = _area_from_units(q, errors, 1.0)
@@ -330,12 +331,24 @@ def compute_utility_analysis(
             "reason": "Subject identities are not recorded by the protocol authority.",
         }
         boot_full = (
-            cluster_bootstrap(clusters, lambda idx: _area_from_units(q[idx], errors[idx], 1.0), replicates=bootstrap_replicates, seed=seed)
+            pair_subject_multi_membership_bootstrap(
+                left_subjects,
+                right_subjects,
+                lambda idx: _area_from_units(q[idx], errors[idx], 1.0),
+                replicates=bootstrap_replicates,
+                seed=seed,
+            )
             if n and uncertainty_sampling_unit is not None
             else (unavailable_uncertainty if uncertainty_sampling_unit is None else None)
         )
         boot_partial = (
-            cluster_bootstrap(clusters, lambda idx: _area_from_units(q[idx], errors[idx], partial_interval), replicates=bootstrap_replicates, seed=seed + 1)
+            pair_subject_multi_membership_bootstrap(
+                left_subjects,
+                right_subjects,
+                lambda idx: _area_from_units(q[idx], errors[idx], partial_interval),
+                replicates=bootstrap_replicates,
+                seed=seed + 1,
+            )
             if n and uncertainty_sampling_unit is not None
             else (unavailable_uncertainty if uncertainty_sampling_unit is None else None)
         )

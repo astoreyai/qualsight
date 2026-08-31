@@ -37,6 +37,9 @@ THRESHOLD_EQUALITY_RULE = "ACCEPT_WHEN_SCORE_GE_THRESHOLD"
 SCORE_DIRECTION = "HIGHER_IS_MORE_SIMILAR"
 FAILURE_POLICIES = ("EXCLUDE_FAILED_TRIALS", "FAILURES_AS_REJECT")
 TARGET_FMRS = (0.1, 0.01, 0.001)
+MIN_OBSERVED_FALSE_MATCH_EVENTS = 5
+IN_SAMPLE_SCOPE = "DESCRIPTIVE_IN_SAMPLE"
+IN_SAMPLE_THRESHOLD_SELECTION = "SELECTED_AND_EVALUATED_ON_THE_SAME_RECORDED_TRIALS"
 
 
 def _binom_interval(successes: int, trials: int, alpha: float = 0.05) -> tuple[float | None, float | None]:
@@ -215,6 +218,54 @@ def _threshold_at_target_fmr(thresholds: np.ndarray, fmr: np.ndarray, target: fl
     return float(thresholds[candidates[0]])
 
 
+def _operating_point_support(target_fmr: float, point: dict[str, object]) -> dict[str, object]:
+    nonmated_trials = int(point.get("nonmated_trials_included") or 0)
+    expected_false_matches = float(target_fmr * nonmated_trials)
+    observed_value = point.get("false_matches")
+    observed_false_matches = int(observed_value) if isinstance(observed_value, (int, np.integer)) else None
+    threshold_present = point.get("threshold") is not None
+    event_supported = (
+        threshold_present
+        and observed_false_matches is not None
+        and observed_false_matches >= MIN_OBSERVED_FALSE_MATCH_EVENTS
+    )
+    reasons = ["IN_SAMPLE_THRESHOLD_SELECTION_AND_EVALUATION"]
+    if not threshold_present:
+        reasons.append("NO_RECORDED_THRESHOLD_AT_TARGET_FMR")
+    if observed_false_matches is None:
+        reasons.append("OBSERVED_FALSE_MATCH_COUNT_NOT_AVAILABLE")
+    elif observed_false_matches < MIN_OBSERVED_FALSE_MATCH_EVENTS:
+        reasons.append("FEWER_THAN_FIVE_OBSERVED_FALSE_MATCH_EVENTS_AT_RECORDED_THRESHOLD")
+    return {
+        "evaluation_scope": IN_SAMPLE_SCOPE,
+        "threshold_selection": IN_SAMPLE_THRESHOLD_SELECTION,
+        "event_support": {
+            "rule": "THRESHOLD_PRESENT_AND_AT_LEAST_FIVE_OBSERVED_FALSE_MATCHES",
+            "minimum_observed_false_matches": MIN_OBSERVED_FALSE_MATCH_EVENTS,
+            "nonmated_trials": nonmated_trials,
+            "expected_false_matches_at_target": expected_false_matches,
+            "observed_false_matches": observed_false_matches,
+            "supported": event_supported,
+        },
+        "scientific_support": {
+            "state": "NOT_SUPPORTED",
+            "claim_scope": "PROSPECTIVE_OR_OPERATIONAL_THRESHOLD_PERFORMANCE",
+            "reasons": reasons,
+        },
+    }
+
+
+def operating_point_with_support(
+    target_fmr: float,
+    point: dict[str, object],
+) -> dict[str, object]:
+    """Read current and pre-1.2 operating points under one conservative claim contract."""
+
+    enriched = dict(point)
+    enriched.update(_operating_point_support(target_fmr, point))
+    return enriched
+
+
 def _fold_accuracy(inputs: ComparisonInputs, policy: str) -> dict[str, object]:
     """Official View 2 protocol: choose the threshold on nine folds, test on the held-out fold."""
 
@@ -284,9 +335,20 @@ def compute_verification_metrics(inputs: ComparisonInputs, *, curve_points: int 
         for target in TARGET_FMRS:
             threshold = _threshold_at_target_fmr(thresholds, fmr, target)
             if threshold is None:
-                operating_points.append({"target_fmr": target, "threshold": None, "reason": "no recorded threshold reaches the target FMR"})
+                nonmated_trials = int(np.sum((~inputs.mated) & (~inputs.failed))) if policy == "EXCLUDE_FAILED_TRIALS" else int(np.sum(~inputs.mated))
+                point: dict[str, object] = {
+                    "target_fmr": target,
+                    "threshold": None,
+                    "reason": "no recorded threshold reaches the target FMR",
+                    "false_matches": None,
+                    "nonmated_trials_included": nonmated_trials,
+                }
+                point.update(_operating_point_support(target, point))
+                operating_points.append(point)
             else:
-                operating_points.append({"target_fmr": target, **_rates_at(inputs, threshold, policy)})
+                point = {"target_fmr": target, **_rates_at(inputs, threshold, policy)}
+                point.update(_operating_point_support(target, point))
+                operating_points.append(point)
         # Down-sample the full curve for storage: keep first/last and evenly spaced points, always retaining every distinct FMR step near the low-FMR end.
         finite = np.where(np.isfinite(thresholds))[0]
         if finite.size > curve_points:
@@ -295,7 +357,14 @@ def compute_verification_metrics(inputs: ComparisonInputs, *, curve_points: int 
             picks = finite
         curve = [{"threshold": float(thresholds[i]), "fmr": float(fmr[i]), "fnmr": float(fnmr[i])} for i in picks]
         per_policy[policy] = {
-            "eer": eer,
+            "evaluation_scope": IN_SAMPLE_SCOPE,
+            "threshold_selection": IN_SAMPLE_THRESHOLD_SELECTION,
+            "scientific_support": {
+                "state": "NOT_SUPPORTED",
+                "claim_scope": "PROSPECTIVE_OR_OPERATIONAL_THRESHOLD_PERFORMANCE",
+                "reason": "full-data thresholds are selected and evaluated on the same recorded trials",
+            },
+            "eer": {**eer, "evaluation_scope": IN_SAMPLE_SCOPE},
             "operating_points": operating_points,
             "roc": {"definition": REGISTRY_METRICS["roc"], "x": "fmr", "y": "one_minus_fnmr", "points": [{"fmr": p["fmr"], "tmr": 1.0 - p["fnmr"], "threshold": p["threshold"]} for p in curve]},
             "det": {"definition": REGISTRY_METRICS["det"], "x": "fmr", "y": "fnmr", "points": curve},

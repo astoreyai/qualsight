@@ -1,0 +1,491 @@
+{
+  "metrics": {
+    "by_policy": {
+      "EXCLUDE_FAILED_TRIALS": {
+        "det": {
+          "definition": [
+            "biometric.verification.det",
+            "1.0.0"
+          ],
+          "points": [
+            {
+              "fmr": 1.0,
+              "fnmr": 0.0,
+              "threshold": -0.12466618418693542
+            },
+            {
+              "fmr": 0.8,
+              "fnmr": 0.0,
+              "threshold": -0.08504245430231094
+            },
+            {
+              "fmr": 0.6,
+              "fnmr": 0.0,
+              "threshold": -0.03814002498984337
+            },
+            {
+              "fmr": 0.4,
+              "fnmr": 0.0,
+              "threshold": 0.03650040179491043
+            },
+            {
+              "fmr": 0.2,
+              "fnmr": 0.0,
+              "threshold": 0.05390031635761261
+            },
+            {
+              "fmr": 0.0,
+              "fnmr": 0.0,
+              "threshold": 0.7126103043556213
+            },
+            {
+              "fmr": 0.0,
+              "fnmr": 0.2,
+              "threshold": 0.7235221266746521
+            },
+            {
+              "fmr": 0.0,
+              "fnmr": 0.4,
+              "threshold": 0.7736798524856567
+            },
+            {
+              "fmr": 0.0,
+              "fnmr": 0.6,
+              "threshold": 0.7822457551956177
+            },
+            {
+              "fmr": 0.0,
+              "fnmr": 0.8,
+              "threshold": 0.8463674783706665
+            }
+          ],
+          "x": "fmr",
+          "y": "fnmr"
+        },
+        "eer": {
+          "eer": 0.0,
+          "method": "EXACT_CROSSING_AT_RECORDED_THRESHOLD",
+          "threshold": 0.7126103043556213
+        },
+        "operating_points": [
+          {
+            "false_matches": 0,
+            "false_non_matches": 0,
+            "fmr": 0.0,
+            "fmr_ci95": [
+              0.0,
+              0.5218237501049814
+            ],
+            "fnmr": 0.0,
+            "fnmr_ci95": [
+              0.0,
+              0.5218237501049814
+            ],
+            "mated_trials_included": 5,
+            "nonmated_trials_included": 5,
+            "target_fmr": 0.1,
+            "threshold": 0.7126103043556213
+          },
+          {
+            "false_matches": 0,
+            "false_non_matches": 0,
+            "fmr": 0.0,
+            "fmr_ci95": [
+              0.0,
+              0.5218237501049814
+            ],
+            "fnmr": 0.0,
+            "fnmr_ci95": [
+              0.0,
+              0.5218237501049814
+            ],
+            "mated_trials_included": 5,
+            "nonmated_trials_included": 5,
+            "target_fmr": 0.01,
+            "threshold": 0.7126103043556213
+          },
+          {
+            "false_matches": 0,
+            "false_non_matches": 0,
+            "fmr": 0.0,
+            "fmr_ci95": [
+              0.0,
+              0.5218237501049814
+            ],
+            "fnmr": 0.0,
+            "fnmr_ci95": [
+              0.0,
+              0.5218237501049814
+            ],
+            "mated_trials_included": 5,
+            "nonmated_trials_included": 5,
+            "target_fmr": 0.001,
+            "threshold": 0.7126103043556213
+          }
+        ],
+        "recorded_thresholds": 10,
+        "roc": {
+          "definition": [
+            "biometric.verification.roc",
+            "1.0.0"
+          ],
+          "points": [
+            {
+              "fmr": 1.0,
+              "threshold": -0.12466618418693542,
+              "tmr": 1.0
+            },
+            {
+              "fmr": 0.8,
+              "threshold": -0.08504245430231094,
+              "tmr": 1.0
+            },
+            {
+              "fmr": 0.6,
+              "threshold": -0.03814002498984337,
+              "tmr": 1.0
+            },
+            {
+              "fmr": 0.4,
+              "threshold": 0.03650040179491043,
+              "tmr": 1.0
+            },
+            {
+              "fmr": 0.2,
+              "threshold": 0.05390031635761261,
+              "tmr": 1.0
+            },
+            {
+              "fmr": 0.0,
+              "threshold": 0.7126103043556213,
+              "tmr": 1.0
+            },
+            {
+              "fmr": 0.0,
+              "threshold": 0.7235221266746521,
+              "tmr": 0.8
+            },
+            {
+              "fmr": 0.0,
+              "threshold": 0.7736798524856567,
+              "tmr": 0.6
+            },
+            {
+              "fmr": 0.0,
+              "threshold": 0.7822457551956177,
+              "tmr": 0.4
+            },
+            {
+              "fmr": 0.0,
+              "threshold": 0.8463674783706665,
+              "tmr": 0.19999999999999996
+            }
+          ],
+          "x": "fmr",
+          "y": "one_minus_fnmr"
+        },
+        "view2_tenfold": {
+          "folds": [
+            {
+              "fold": 1,
+              "test_accuracy": null,
+              "test_trials": 10,
+              "threshold": null,
+              "train_accuracy": -1.0
+            }
+          ],
+          "mean_accuracy": null,
+          "method": "VIEW2_TENFOLD_THRESHOLD_ON_HELD_IN_FOLDS",
+          "std_accuracy": null
+        }
+      },
+      "FAILURES_AS_REJECT": {
+        "det": {
+          "definition": [
+            "biometric.verification.det",
+            "1.0.0"
+          ],
+          "points": [
+            {
+              "fmr": 1.0,
+              "fnmr": 0.0,
+              "threshold": -0.12466618418693542
+            },
+            {
+              "fmr": 0.8,
+              "fnmr": 0.0,
+              "threshold": -0.08504245430231094
+            },
+            {
+              "fmr": 0.6,
+              "fnmr": 0.0,
+              "threshold": -0.03814002498984337
+            },
+            {
+              "fmr": 0.4,
+              "fnmr": 0.0,
+              "threshold": 0.03650040179491043
+            },
+            {
+              "fmr": 0.2,
+              "fnmr": 0.0,
+              "threshold": 0.05390031635761261
+            },
+            {
+              "fmr": 0.0,
+              "fnmr": 0.0,
+              "threshold": 0.7126103043556213
+            },
+            {
+              "fmr": 0.0,
+              "fnmr": 0.2,
+              "threshold": 0.7235221266746521
+            },
+            {
+              "fmr": 0.0,
+              "fnmr": 0.4,
+              "threshold": 0.7736798524856567
+            },
+            {
+              "fmr": 0.0,
+              "fnmr": 0.6,
+              "threshold": 0.7822457551956177
+            },
+            {
+              "fmr": 0.0,
+              "fnmr": 0.8,
+              "threshold": 0.8463674783706665
+            }
+          ],
+          "x": "fmr",
+          "y": "fnmr"
+        },
+        "eer": {
+          "eer": 0.0,
+          "method": "EXACT_CROSSING_AT_RECORDED_THRESHOLD",
+          "threshold": 0.7126103043556213
+        },
+        "operating_points": [
+          {
+            "false_matches": 0,
+            "false_non_matches": 0,
+            "fmr": 0.0,
+            "fmr_ci95": [
+              0.0,
+              0.5218237501049814
+            ],
+            "fnmr": 0.0,
+            "fnmr_ci95": [
+              0.0,
+              0.5218237501049814
+            ],
+            "mated_trials_included": 5,
+            "nonmated_trials_included": 5,
+            "target_fmr": 0.1,
+            "threshold": 0.7126103043556213
+          },
+          {
+            "false_matches": 0,
+            "false_non_matches": 0,
+            "fmr": 0.0,
+            "fmr_ci95": [
+              0.0,
+              0.5218237501049814
+            ],
+            "fnmr": 0.0,
+            "fnmr_ci95": [
+              0.0,
+              0.5218237501049814
+            ],
+            "mated_trials_included": 5,
+            "nonmated_trials_included": 5,
+            "target_fmr": 0.01,
+            "threshold": 0.7126103043556213
+          },
+          {
+            "false_matches": 0,
+            "false_non_matches": 0,
+            "fmr": 0.0,
+            "fmr_ci95": [
+              0.0,
+              0.5218237501049814
+            ],
+            "fnmr": 0.0,
+            "fnmr_ci95": [
+              0.0,
+              0.5218237501049814
+            ],
+            "mated_trials_included": 5,
+            "nonmated_trials_included": 5,
+            "target_fmr": 0.001,
+            "threshold": 0.7126103043556213
+          }
+        ],
+        "recorded_thresholds": 10,
+        "roc": {
+          "definition": [
+            "biometric.verification.roc",
+            "1.0.0"
+          ],
+          "points": [
+            {
+              "fmr": 1.0,
+              "threshold": -0.12466618418693542,
+              "tmr": 1.0
+            },
+            {
+              "fmr": 0.8,
+              "threshold": -0.08504245430231094,
+              "tmr": 1.0
+            },
+            {
+              "fmr": 0.6,
+              "threshold": -0.03814002498984337,
+              "tmr": 1.0
+            },
+            {
+              "fmr": 0.4,
+              "threshold": 0.03650040179491043,
+              "tmr": 1.0
+            },
+            {
+              "fmr": 0.2,
+              "threshold": 0.05390031635761261,
+              "tmr": 1.0
+            },
+            {
+              "fmr": 0.0,
+              "threshold": 0.7126103043556213,
+              "tmr": 1.0
+            },
+            {
+              "fmr": 0.0,
+              "threshold": 0.7235221266746521,
+              "tmr": 0.8
+            },
+            {
+              "fmr": 0.0,
+              "threshold": 0.7736798524856567,
+              "tmr": 0.6
+            },
+            {
+              "fmr": 0.0,
+              "threshold": 0.7822457551956177,
+              "tmr": 0.4
+            },
+            {
+              "fmr": 0.0,
+              "threshold": 0.8463674783706665,
+              "tmr": 0.19999999999999996
+            }
+          ],
+          "x": "fmr",
+          "y": "one_minus_fnmr"
+        },
+        "view2_tenfold": {
+          "folds": [
+            {
+              "fold": 1,
+              "test_accuracy": null,
+              "test_trials": 10,
+              "threshold": null,
+              "train_accuracy": -1.0
+            }
+          ],
+          "mean_accuracy": null,
+          "method": "VIEW2_TENFOLD_THRESHOLD_ON_HELD_IN_FOLDS",
+          "std_accuracy": null
+        }
+      }
+    },
+    "completed_score_count": 10,
+    "confidence_interval_method": "CLOPPER_PEARSON_EXACT_BINOMIAL_95 (independence among LFW trials is not established; subject reuse is real)",
+    "counts": {
+      "completed_trials": 10,
+      "failed_mated_trials": 0,
+      "failed_nonmated_trials": 0,
+      "failed_trials": 0,
+      "mated_trials": 5,
+      "nonmated_trials": 5,
+      "trials": 10
+    },
+    "definitions": {
+      "det": [
+        "biometric.verification.det",
+        "1.0.0"
+      ],
+      "eer": [
+        "biometric.verification.eer",
+        "1.0.0"
+      ],
+      "fmr": [
+        "biometric.verification.fmr",
+        "1.0.0"
+      ],
+      "fnmr": [
+        "biometric.verification.fnmr",
+        "1.0.0"
+      ],
+      "roc": [
+        "biometric.verification.roc",
+        "1.0.0"
+      ]
+    },
+    "evidence_sha256": "358159098a8854a832bdb2297681a0bbe6b601ac5b30881f69c81725a33d5cc0",
+    "failure_policies": [
+      "EXCLUDE_FAILED_TRIALS",
+      "FAILURES_AS_REJECT"
+    ],
+    "score_direction": "HIGHER_IS_MORE_SIMILAR",
+    "score_distribution": {
+      "mated": {
+        "count": 5,
+        "max": 0.8463674783706665,
+        "mean": 0.7676851034164429,
+        "median": 0.7736798524856567,
+        "min": 0.7126103043556213,
+        "std": 0.05343797276132415
+      },
+      "nonmated": {
+        "count": 5,
+        "max": 0.05390031635761261,
+        "mean": -0.031489589065313336,
+        "median": -0.03814002498984337,
+        "min": -0.12466618418693542,
+        "std": 0.0766617413656358
+      }
+    },
+    "threshold_equality_rule": "ACCEPT_WHEN_SCORE_GE_THRESHOLD"
+  },
+  "provenance": {
+    "extraction": "Exact metrics_json plus exact sources object; no field deletion, value invention, or recomputation.",
+    "kind": "REAL_HISTORICAL_QUALSIGHT_RECORD_SUBSET",
+    "matcher_leaf": {
+      "created_at": "2026-08-17T19:26:18.356868-05:00",
+      "leaf_id": "QS-C22.AS",
+      "metrics_sha256": "310cdc6942698486af279ec9b7de0b5e3ab913f0e816a12f688a8da94c987e9c",
+      "run_id": "run:sha256:7667d7d5b52178df7dc71e4ce052ed077e791bba0ff9eea6aa2e9fa746bdcf61"
+    },
+    "source_database": "/mnt/projects/ofiqgui/var/qualsight.sqlite3",
+    "utility_analysis": {
+      "analysis_id": "analysis:sha256:d98ed037cadd82839856b0872a5de7f2ae514b0339702a80ed7cd0fe66791066",
+      "created_at": "2026-08-17T19:26:21.276139-05:00",
+      "source_artifact": "/mnt/projects/ofiqgui/var/analyses/analysis_sha256_d98ed037cadd82839856b0872a5de7f2ae514b0339702a80ed7cd0fe66791066/utility.json",
+      "source_artifact_sha256": "b3f3ad071cc0c9d0f55cee26f383b878b84cab8cb14f8182417313ce2e304a40"
+    }
+  },
+  "utility_sources": {
+    "comparisons_sha256": "f355035fda7b36076df19a0fcd51f65c74aa6918aec3395dff867a61819866f3",
+    "condition_id": "SCRFD10G_ADAPTIVE_LARGEST_ARCFACE112_JPEG95_V1",
+    "matcher_id": "adaface-ir101-local-candidate",
+    "matcher_leaf_id": "QS-C22.AS",
+    "matcher_run_id": "run:sha256:7667d7d5b52178df7dc71e4ce052ed077e791bba0ff9eea6aa2e9fa746bdcf61",
+    "quality_job_id": "job:sha256:cdf5864e4d18b7161da1593d6933f2a27de59c2879503e1c6dd2ea2223766ddd",
+    "quality_measure": "UnifiedQualityScore",
+    "quality_measure_column": "UnifiedQualityScore.scalar",
+    "quality_parquet_sha256": "fad05640faec5fe8815d7061f763b8078455a30b4d99dfa6ca884663cb8a7c76",
+    "quality_run_id": "run:sha256:ba0651a5cbc7f91f63d7612dd2dc119462d80f52a15fbd382284ad4a9ba65dc1",
+    "samples_measured": 16,
+    "samples_with_measure_value": 16
+  }
+}

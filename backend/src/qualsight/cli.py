@@ -63,6 +63,21 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="new no-clobber path ending in .snapshot.sqlite3",
     )
+    backup_create = sub.add_parser(
+        "backup-create",
+        help="create a no-clobber offline backup while exclusively owning the data directory",
+    )
+    backup_create.add_argument("--output", type=Path, required=True)
+    backup_verify = sub.add_parser(
+        "backup-verify",
+        help="verify every hash and the SQLite integrity of an existing backup",
+    )
+    backup_verify.add_argument("--backup", type=Path, required=True)
+    backup_restore = sub.add_parser(
+        "backup-restore",
+        help="restore a verified backup to its recorded, currently absent data directory",
+    )
+    backup_restore.add_argument("--backup", type=Path, required=True)
     sub.add_parser("serve", help="run the local control plane on 127.0.0.1:8480")
     project_create = sub.add_parser("project-create", help="create a project (lifecycle NEW)")
     project_create.add_argument("--name", required=True)
@@ -149,9 +164,19 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = Settings.from_environment()
     activate_private_umask()
-    secure_data_tree(settings.data_dir, protected_roots=(settings.repository_root, Path.home()))
     if settings.network_guard:
         install_network_guard()
+    if args.command == "backup-verify":
+        from .security.backup import verify_backup
+
+        print(json.dumps(verify_backup(args.backup), sort_keys=True))
+        return 0
+    if args.command == "backup-restore":
+        from .security.backup import restore_backup
+
+        print(json.dumps(restore_backup(args.backup, settings.data_dir), sort_keys=True))
+        return 0
+    secure_data_tree(settings.data_dir, protected_roots=(settings.repository_root, Path.home()))
     if args.command == "serve":
         import uvicorn
 
@@ -173,6 +198,21 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "snapshot-database":
             print(json.dumps(store.snapshot_database(args.output), sort_keys=True))
+            return 0
+        if args.command == "backup-create":
+            from .security.backup import create_backup
+
+            print(
+                json.dumps(
+                    create_backup(
+                        store,
+                        settings.data_dir,
+                        args.output,
+                        lease=lease,
+                    ),
+                    sort_keys=True,
+                )
+            )
             return 0
         if args.command == "assess":
             engine = _engine(settings)

@@ -87,7 +87,7 @@ from ..matchers.runtime import MatcherId
 from .evidence import EvidenceError, HONESTY_STATEMENT, detection_geometry, ofiq_landmarks, pair_evidence, recompute_crop
 from ..execution.contracts import ContractValidationError, ExecutionOutcomeError
 from ..execution.bounded_executor import BoundedExecutor, ExecutorOverloaded, ExecutorReservation
-from ..provenance import artifact_identity
+from ..provenance import application_version, artifact_identity
 from .settings import Settings
 from .store import ImmutableRecordConflict, RunStore
 
@@ -568,7 +568,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     daemon=True,
                 ).start()
 
-    app = FastAPI(title="QualSight", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(
+        title="QualSight",
+        version=application_version(settings.repository_root / "backend" / "pyproject.toml"),
+        lifespan=lifespan,
+    )
     app.state.settings = settings
 
     @app.exception_handler(RequestValidationError)
@@ -727,11 +731,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         project_id: str,
         request: dict[str, Any],
         output_path: Path,
+        retry_interrupted: bool = False,
+        result_id: str | None = None,
     ) -> tuple[dict[str, Any], ExecutorReservation | None]:
         """Reserve bounded capacity before making a new operation durable."""
 
         existing = store().operation(operation_id)
-        if existing is not None:
+        if existing is not None and not retry_interrupted:
             return existing, None
         reservation = reserve_scientific_work(operation_id)
         try:
@@ -741,6 +747,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 project_id=project_id,
                 request=request,
                 output_path=output_path,
+                retry_interrupted=retry_interrupted,
+                result_id=result_id,
             )
         except BaseException:
             reservation.release()
@@ -825,7 +833,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def operation_job_out(row: dict[str, Any]) -> JobOut:
         request = json.loads(row["request_json"])
         return JobOut(
-            job_id=row["operation_id"],
+            job_id=row["result_id"],
             state=row["state"],
             total=int(request["sample_count"]),
             assessed=0,
@@ -844,8 +852,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             dataset_id=request["dataset_id"],
         )
 
-    @app.post("/api/projects/{project_id}/datasets/{dataset_id}/quality-batch", response_model=JobOut, status_code=202)
-    def start_batch(project_id: str, dataset_id: str, request: BatchRequest) -> JobOut:
+    def _start_batch(
+        project_id: str,
+        dataset_id: str,
+        request: BatchRequest,
+        *,
+        retry_operation_id: str | None = None,
+    ) -> tuple[JobOut, dict[str, Any]]:
         try:
             project = projects().require_writable(project_id)
         except KeyError as error:
@@ -904,7 +917,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     execution=request.execution,
                 )
                 operation, reservation = admit_scientific_operation(
-                    operation_id=job.job_id,
+                    operation_id=retry_operation_id or job.job_id,
                     operation_kind="QUALITY_BATCH",
                     project_id=project_id,
                     request={
@@ -915,16 +928,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "selection_rule": rule,
                     },
                     output_path=job.job_dir,
+                    retry_interrupted=retry_operation_id is not None,
+                    result_id=job.job_id,
                 )
                 if reservation is None:
-                    return operation_job_out(operation)
+                    return operation_job_out(operation), operation
                 jobs[job.job_id] = job
         except BatchJobError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
         def _run() -> None:
             try:
-                store().start_operation(job.job_id)
+                store().start_operation(operation["operation_id"])
                 job.run()
             except Exception:  # noqa: BLE001 - state carries the error
                 pass
@@ -933,12 +948,68 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 terminal_error = job.error if terminal_state == "FAILED" else None
                 if terminal_state == "FAILED" and not terminal_error:
                     terminal_error = f"quality batch ended from nonterminal state {job.state}"
-                store().finish_operation(job.job_id, state=terminal_state, error=terminal_error)
+                store().finish_operation(
+                    operation["operation_id"],
+                    state=terminal_state,
+                    error=terminal_error,
+                )
                 store().finish_job(job.job_id, job.ended_at.isoformat() if job.ended_at else "", job.state)
 
         reservation.submit(_run)
         record_action(project_id, AuditEventType.RUN_STARTED, "QualityBatchJob", job.job_id, {"dataset_id": dataset_id, "samples": len(samples), "selection_rule": rule, "purpose_scope": purpose_scope})
-        return job_out(job, None)
+        return job_out(job, None), operation
+
+    @app.post("/api/projects/{project_id}/datasets/{dataset_id}/quality-batch", response_model=JobOut, status_code=202)
+    def start_batch(project_id: str, dataset_id: str, request: BatchRequest) -> JobOut:
+        response, _ = _start_batch(project_id, dataset_id, request)
+        return response
+
+    @app.post("/api/operations/{operation_id}/retry", status_code=202)
+    def retry_interrupted_operation(operation_id: str) -> JSONResponse:
+        requested = store().operation(operation_id)
+        if requested is None:
+            raise HTTPException(status_code=404, detail="operation is not recorded")
+        request_id = str(requested["request_id"])
+        latest = store().latest_operation_attempt(request_id)
+        if latest is None:
+            raise HTTPException(status_code=404, detail="operation request is not recorded")
+        if latest["state"] != "INTERRUPTED":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "only the latest INTERRUPTED attempt can be retried explicitly; "
+                    f"latest state is {latest['state']}"
+                ),
+            )
+        if latest["operation_kind"] != "QUALITY_BATCH":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "explicit beta retry currently supports QUALITY_BATCH operations only; "
+                    f"{latest['operation_kind']} requires a new operator request"
+                ),
+            )
+        payload = json.loads(latest["request_json"])
+        batch_request = BatchRequest.model_validate(
+            {
+                key: payload[key]
+                for key in ("selection", "chunks", "purpose_scope", "execution")
+            }
+        )
+        execution, admitted = _start_batch(
+            str(latest["project_id"]),
+            str(payload["dataset_id"]),
+            batch_request,
+            retry_operation_id=request_id,
+        )
+        return JSONResponse(
+            status_code=202,
+            content={
+                "operation": operation_out(admitted),
+                "result_id": execution.job_id,
+                "execution": execution.model_dump(mode="json"),
+            },
+        )
 
     @app.get("/api/jobs/{job_id}", response_model=JobOut)
     def job_status(job_id: str) -> JobOut:
@@ -948,8 +1019,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return job_out(job, None)
         row = store().job(job_id)
         if row is None:
-            operation = store().operation(job_id)
-            if operation is None or operation["operation_kind"] != "QUALITY_BATCH":
+            operation = store().latest_operation_for_result(job_id)
+            if (
+                operation is None
+                or operation["operation_kind"] != "QUALITY_BATCH"
+            ):
                 raise HTTPException(status_code=404, detail="job is not recorded")
             return operation_job_out(operation)
         return job_out(None, row)
@@ -971,12 +1045,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             with job_lock:
                 job = jobs.get(row["job_id"])
             items.append(job_out(job, row) if job is None else job_out(job, None))
-        recorded_ids = {row["job_id"] for row in rows}
-        items.extend(
-            operation_job_out(row)
-            for row in store().operations_for_project(project_id)
-            if row["operation_kind"] == "QUALITY_BATCH" and row["operation_id"] not in recorded_ids
-        )
+        projected_ids = {row["job_id"] for row in rows}
+        for row in store().operations_for_project(project_id):
+            result_id = row["result_id"]
+            if row["operation_kind"] != "QUALITY_BATCH" or result_id in projected_ids:
+                continue
+            items.append(operation_job_out(row))
+            projected_ids.add(result_id)
         return items
 
     @app.get("/api/jobs/{job_id}/distribution")
@@ -1138,6 +1213,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def operation_out(row: dict[str, Any]) -> dict[str, Any]:
         return {
             "operation_id": row["operation_id"],
+            "request_id": row["request_id"],
+            "attempt": row["attempt"],
+            "supersedes_operation_id": row["supersedes_operation_id"],
+            "result_id": row["result_id"],
             "operation_kind": row["operation_kind"],
             "project_id": row["project_id"],
             "state": row["state"],

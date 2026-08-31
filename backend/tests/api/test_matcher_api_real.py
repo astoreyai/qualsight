@@ -218,7 +218,7 @@ class RealMatcherApiTests(unittest.TestCase):
             self.assertAlmostEqual(point["error_rate"], sum(1 for _, score in retained if score < 0.8) / len(retained), places=12)
         # FMR-ERC is reported separately over the non-mated units, never pooled.
         self.assertEqual(erc["curves"]["FMR"]["comparison_units"], 5)
-        self.assertIn("metric registry v1.1.0", erc["derived_summaries"]["FNMR"]["note"])
+        self.assertIn("metric registry v1.2.0", erc["derived_summaries"]["FNMR"]["note"])
         unknown_policy = self.client.get(f"/api/matcher-runs/{leaf['run_id']}/erc", params={"quality_job_id": job_id, "policy": "pair.quality.nope"})
         self.assertEqual(unknown_policy.status_code, 422)
 
@@ -279,9 +279,37 @@ class RealMatcherApiTests(unittest.TestCase):
             self.assertEqual(self.client.get(row["links"]["left_quality"]).status_code, 200)
         # Five mated units cannot support a logistic model or credible bins; the analysis says so instead of printing precision.
         utility = status["utility"]["utility"]
+        self.assertEqual(
+            status["utility"]["sources"]["quality_input_stage"],
+            {
+                "stage_id": "REGISTERED_DATASET_SAMPLE_SOURCE_ARTIFACT_AS_QUALITY_ENGINE_INPUT",
+                "artifact_kind": "DATASET_SAMPLE_SOURCE_BYTES",
+                "matcher_preprocessing_relationships": [
+                    {
+                        "condition_id": leaf["condition_id"],
+                        "relationship": "PRECEDES_QUALSIGHT_EXECUTED_FACE_DETECTION_ALIGNMENT_AND_CROP",
+                    }
+                ],
+            },
+        )
         self.assertEqual(utility["association"]["FNMR"]["logistic_error_on_quality"]["status"], "UNSUPPORTED_BY_SAMPLE")
         self.assertTrue(all(not b["supported"] for b in utility["quality_conditioned"]["FNMR"]["bins"]))
         self.assertEqual(utility["uncertainty"]["replicates"], 200)
+        self.assertEqual(
+            utility["uncertainty"]["method"],
+            "PAIR_SUBJECT_MULTI_MEMBERSHIP_BOOTSTRAP_PERCENTILE",
+        )
+        self.assertEqual(
+            utility["uncertainty"]["sampling_unit"],
+            "SUBJECT_ID_IN_EITHER_PAIR_POSITION",
+        )
+
+        self.assertEqual(
+            utility["areas"]["FNMR"]["au_erc"]["uncertainty"]["subjects"], 4
+        )
+        self.assertEqual(
+            utility["areas"]["FMR"]["au_erc"]["uncertainty"]["subjects"], 8
+        )
         # Independent recomputation script over the recorded artifacts.
         row_directory = None
         for artifact in run["artifacts"]:
@@ -297,6 +325,143 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertTrue(again.json()["already_recorded"])
         listed = self.client.get(f"/api/projects/{self.project_id}/utility-analyses").json()
         self.assertIn(analysis_id, [item["analysis_id"] for item in listed])
+
+    def test_utility_recorded_threshold_preserves_scientific_support(self) -> None:
+        """A utility analysis must carry the recorded operating point's support boundary."""
+
+        job = self._quality_job()
+        leaf = self.status["leaves"][0]
+        body = {
+            "matcher_run_id": leaf["run_id"],
+            "quality_job_id": job["job_id"],
+            "pair_quality_policy": "pair.quality.min",
+            "quality_threshold": 40.0,
+            "bootstrap_replicates": 50,
+            "seed": 7,
+        }
+        started = self.client.post(f"/api/projects/{self.project_id}/utility-analyses", json=body)
+        self.assertEqual(started.status_code, 202, started.text)
+        analysis_id = started.json()["analysis_id"]
+        deadline = time.monotonic() + 300
+        while time.monotonic() < deadline:
+            status = self.client.get(f"/api/utility-analyses/{analysis_id}").json()
+            if status["state"] in {"COMPLETED", "FAILED"}:
+                break
+            time.sleep(0.5)
+        self.assertEqual(status["state"], "COMPLETED", status)
+        provenance = status["policy"]["thresholds"]["matcher"]["provenance"]
+        self.assertEqual(provenance["source"], "RECORDED_OPERATING_POINT")
+        self.assertEqual(provenance["evaluation_scope"], "DESCRIPTIVE_IN_SAMPLE")
+        self.assertEqual(
+            provenance["threshold_selection"],
+            "SELECTED_AND_EVALUATED_ON_THE_SAME_RECORDED_TRIALS",
+        )
+        self.assertEqual(provenance["scientific_support"]["state"], "NOT_SUPPORTED")
+        self.assertEqual(
+            provenance["scientific_support"]["claim_scope"],
+            "PROSPECTIVE_OR_OPERATIONAL_THRESHOLD_PERFORMANCE",
+        )
+        self.assertEqual(provenance["event_support"]["nonmated_trials"], 5)
+
+    def test_legacy_scientific_records_remain_readable_with_conservative_support_labels(self) -> None:
+        """Pre-1.2 real record shapes remain readable without gaining scientific support."""
+
+        job = self._quality_job()
+        leaf = self.status["leaves"][0]
+        store = self._run_store()
+        recorded = store.matcher_leaf(leaf["run_id"])
+        self.assertIsNotNone(recorded)
+        original_metrics_json = recorded["metrics_json"]
+        legacy_fixture = json.loads(
+            (
+                ROOT
+                / "backend"
+                / "tests"
+                / "fixtures"
+                / "real_legacy_scientific_record_subset_2026-08-17.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            legacy_fixture["provenance"]["kind"],
+            "REAL_HISTORICAL_QUALSIGHT_RECORD_SUBSET",
+        )
+        legacy_metrics = legacy_fixture["metrics"]
+        legacy_metrics_json = json.dumps(
+            legacy_metrics,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        with store._lock:
+            store._connection.execute(
+                "UPDATE matcher_leaves SET metrics_json = ? WHERE run_id = ?",
+                (legacy_metrics_json, leaf["run_id"]),
+            )
+
+        try:
+            started = self.client.post(
+                f"/api/projects/{self.project_id}/utility-analyses",
+                json={
+                    "matcher_run_id": leaf["run_id"],
+                    "quality_job_id": job["job_id"],
+                    "pair_quality_policy": "pair.quality.min",
+                    "quality_threshold": 40.0,
+                    "bootstrap_replicates": 50,
+                    "seed": 29,
+                },
+            )
+            self.assertEqual(started.status_code, 202, started.text)
+            analysis_id = started.json()["analysis_id"]
+            deadline = time.monotonic() + 300
+            while time.monotonic() < deadline:
+                status = self.client.get(f"/api/utility-analyses/{analysis_id}").json()
+                if status["state"] in {"COMPLETED", "FAILED"}:
+                    break
+                time.sleep(0.5)
+            self.assertEqual(status["state"], "COMPLETED", status)
+            threshold = status["policy"]["thresholds"]["matcher"]["provenance"]
+            self.assertEqual(threshold["evaluation_scope"], "DESCRIPTIVE_IN_SAMPLE")
+            self.assertEqual(threshold["scientific_support"]["state"], "NOT_SUPPORTED")
+
+            cross_started = self.client.post(
+                f"/api/projects/{self.project_id}/cross-matcher",
+                json={
+                    "matrix_id": self.matrix_id,
+                    "quality_job_id": job["job_id"],
+                    "bootstrap_replicates": 50,
+                    "seed": 31,
+                },
+            )
+            self.assertEqual(cross_started.status_code, 202, cross_started.text)
+            cross_id = cross_started.json()["analysis_id"]
+            cross_deadline = time.monotonic() + 600
+            while time.monotonic() < cross_deadline:
+                cross_status = self.client.get(f"/api/cross-matcher/{cross_id}").json()
+                if cross_status["state"] in {"COMPLETED", "FAILED"}:
+                    break
+                time.sleep(0.5)
+            self.assertEqual(cross_status["state"], "COMPLETED", cross_status)
+            legacy_thresholds = [
+                side["threshold_provenance"]
+                for contrast in cross_status["document"]["contrasts"]
+                for side in (contrast["a"], contrast["b"])
+                if side["run_id"] == leaf["run_id"]
+            ]
+            self.assertTrue(legacy_thresholds)
+            self.assertTrue(
+                all(
+                    provenance["evaluation_scope"] == "DESCRIPTIVE_IN_SAMPLE"
+                    and provenance["scientific_support"]["state"] == "NOT_SUPPORTED"
+                    for provenance in legacy_thresholds
+                )
+            )
+
+        finally:
+            with store._lock:
+                store._connection.execute(
+                    "UPDATE matcher_leaves SET metrics_json = ? WHERE run_id = ?",
+                    (original_metrics_json, leaf["run_id"]),
+                )
 
     def test_cross_matcher_contrasts_hold_identities_fixed_and_resolve_disagreements_to_pairs(self) -> None:
         """QS-E40–QS-E42 on the real fixture: all fixed-axis contrasts and pair-resolved evidence."""
@@ -323,6 +488,30 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertEqual(status["state"], "COMPLETED", status)
         document = status["document"]
         self.assertEqual(len(document["contrasts"]), 36)
+        self.assertEqual(
+            document["uncertainty"]["method"],
+            "PAIRED_PAIR_SUBJECT_MULTI_MEMBERSHIP_BOOTSTRAP_PERCENTILE",
+        )
+        self.assertEqual(
+            document["uncertainty"]["sampling_unit"],
+            "SUBJECT_ID_IN_EITHER_PAIR_POSITION_SHARED_BY_BOTH_RUNS",
+        )
+        self.assertEqual(
+            document["sources"]["quality_input_stage"],
+            {
+                "stage_id": "REGISTERED_DATASET_SAMPLE_SOURCE_ARTIFACT_AS_QUALITY_ENGINE_INPUT",
+                "artifact_kind": "DATASET_SAMPLE_SOURCE_BYTES",
+                "matcher_preprocessing_relationships": [
+                    {
+                        "condition_id": condition_id,
+                        "relationship": "PRECEDES_QUALSIGHT_EXECUTED_FACE_DETECTION_ALIGNMENT_AND_CROP",
+                    }
+                    for condition_id in sorted(
+                        {leaf["condition_id"] for leaf in self.status["leaves"]}
+                    )
+                ],
+            },
+        )
         kinds = [c["kind"] for c in document["contrasts"]]
         self.assertEqual(kinds.count("MATCHER_CONTRAST_FIXED_CONDITION"), 30)
         self.assertEqual(kinds.count("PREPROCESSING_CONTRAST_FIXED_MATCHER"), 6)
@@ -336,8 +525,28 @@ class RealMatcherApiTests(unittest.TestCase):
                 self.assertNotEqual(contrast["a"]["condition_id"], contrast["b"]["condition_id"])
             overlap = contrast["error_overlap"]["mated_false_non_match"]
             self.assertEqual(overlap["units"], overlap["NEITHER"] + overlap["A_ONLY"] + overlap["B_ONLY"] + overlap["BOTH"])
-            self.assertEqual(contrast["a"]["threshold_provenance"]["kind"], "MATCHER_THRESHOLD")
+            threshold_provenance = contrast["a"]["threshold_provenance"]
+            self.assertEqual(threshold_provenance["kind"], "MATCHER_THRESHOLD")
+            self.assertEqual(threshold_provenance["evaluation_scope"], "DESCRIPTIVE_IN_SAMPLE")
+            self.assertEqual(
+                threshold_provenance["threshold_selection"],
+                "SELECTED_AND_EVALUATED_ON_THE_SAME_RECORDED_TRIALS",
+            )
+            self.assertEqual(threshold_provenance["scientific_support"]["state"], "NOT_SUPPORTED")
+            self.assertEqual(
+                threshold_provenance["scientific_support"]["claim_scope"],
+                "PROSPECTIVE_OR_OPERATIONAL_THRESHOLD_PERFORMANCE",
+            )
+            self.assertEqual(threshold_provenance["event_support"]["nonmated_trials"], 5)
             self.assertIn(contrast["quality_matcher_interaction"]["status"], {"UNSUPPORTED_BY_SAMPLE", "ESTIMATED", "NOT_CONVERGED_OR_SEPARATED"})
+            self.assertEqual(
+                contrast["au_erc_differences"]["FNMR"]["au_erc"]["uncertainty"]["subjects"],
+                4,
+            )
+            self.assertEqual(
+                contrast["au_erc_differences"]["FMR"]["au_erc"]["uncertainty"]["subjects"],
+                8,
+            )
         # The analysis is a Run that binds every leaf's model bytes and the quality engine.
         run = self.client.get(status["summary"]["links"]["run"]).json()["run"]
         self.assertEqual(run["matcher"]["component_id"], "cross-matcher-set")
@@ -414,6 +623,20 @@ class RealMatcherApiTests(unittest.TestCase):
                 break
             time.sleep(0.5)
         self.assertEqual(status["state"], "COMPLETED", status)
+        caller_threshold = status["policy"]["thresholds"]["matcher"]["provenance"]
+        self.assertEqual(
+            caller_threshold["evaluation_scope"],
+            "DESCRIPTIVE_APPLICATION_TO_RECORDED_TRIALS",
+        )
+        self.assertEqual(
+            caller_threshold["threshold_selection"],
+            "CALLER_SUPPLIED_SELECTION_EVIDENCE_NOT_RECORDED",
+        )
+        self.assertEqual(
+            caller_threshold["scientific_support"]["state"], "NOT_SUPPORTED"
+        )
+        self.assertEqual(caller_threshold["event_support"]["nonmated_trials"], 5)
+        self.assertEqual(caller_threshold["event_support"]["observed_false_matches"], 0)
         # Figures: PNG/SVG/PDF/CSV + provenance sidecar; content-addressed; every series names its source Run.
         figures = {}
         for kind, params in (("det_overlay", {"matrix_id": self.matrix_id}), ("operating_points", {"matrix_id": self.matrix_id}), ("score_distributions", {"run_id": leaf["run_id"], "bins": 10}), ("erc_overlay", {"analysis_ids": [analysis_id]}), ("quality_conditioned_fnmr", {"analysis_id": analysis_id}), ("quality_histogram", {"job_id": job["job_id"], "bins": 10})):
@@ -469,10 +692,62 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertEqual(report.status_code, 201, report.text)
         body = report.json()
         self.assertEqual(body["images_embedded"], 0)
+        self.assertEqual(
+            body["provenance"]["metric_registry"],
+            {"id": "qualsight-core-metrics", "version": "1.2.0"},
+        )
+        self.assertEqual(
+            body["provenance"]["scientific_support"],
+            {
+                "overall_state": "NOT_SUPPORTED",
+                "auto_approved": False,
+                "basis": "RECORDED_RUN_AND_CLAIM_SPECIFIC_SCIENTIFIC_SUPPORT_STATES",
+            },
+        )
+        self.assertTrue(
+            body["provenance"]["runs"]
+            and all(
+                run["scientific_support"] == "NOT_ASSESSED"
+                for run in body["provenance"]["runs"]
+            )
+        )
         html_text = self.client.get(body["links"]["html"]).text
         self.assertIn("<svg", html_text)
         self.assertIn("MATCHER THRESHOLD", html_text)
+        self.assertIn("DESCRIPTIVE_IN_SAMPLE", html_text)
+        self.assertIn("PROSPECTIVE_OR_OPERATIONAL_THRESHOLD_PERFORMANCE", html_text)
         self.assertIn(leaf["run_id"], html_text)
+        self.assertIn("Scientific support", html_text)
+        self.assertIn("NOT_ASSESSED", html_text)
+        self.assertIn("metric registry v1.2.0", html_text)
+        self.assertIn(
+            "REGISTERED_DATASET_SAMPLE_SOURCE_ARTIFACT_AS_QUALITY_ENGINE_INPUT", html_text
+        )
+        report_content = self.client.get(body["links"]["json"]).json()
+        matcher_section = next(
+            section
+            for section in report_content["sections"]
+            if section["title"].startswith("Matcher Runs")
+        )
+        self.assertEqual(
+            matcher_section["content"]["columns"][-5:],
+            [
+                "EER evaluation scope",
+                "Threshold selection",
+                "Prospective / operational support",
+                "Claim scope",
+                "Run",
+            ],
+        )
+        for row in matcher_section["content"]["rows"]:
+            self.assertEqual(row[-5], "DESCRIPTIVE_IN_SAMPLE")
+            self.assertEqual(
+                row[-4], "SELECTED_AND_EVALUATED_ON_THE_SAME_RECORDED_TRIALS"
+            )
+            self.assertEqual(row[-3], "NOT_SUPPORTED")
+            self.assertEqual(
+                row[-2], "PROSPECTIVE_OR_OPERATIONAL_THRESHOLD_PERFORMANCE"
+            )
         pdf = self.client.get(body["links"]["pdf"])
         self.assertEqual(pdf.status_code, 200)
         self.assertTrue(pdf.content.startswith(b"%PDF"))
@@ -768,6 +1043,18 @@ class RealMatcherApiTests(unittest.TestCase):
             time.sleep(1)
         self.assertEqual(status["state"], "COMPLETED", status)
         metrics = status["metrics"]
+        self.assertEqual(
+            metrics["evaluation_scope"],
+            "EXPLORATORY_CUSTOM_LFW_IDENTIFICATION_PROTOCOL",
+        )
+        self.assertEqual(
+            metrics["scientific_support"],
+            {
+                "state": "NOT_SUPPORTED",
+                "claim_scope": "OPERATIONAL_OPEN_SET_IDENTIFICATION_PERFORMANCE",
+                "reason": "custom LFW gallery and probe construction is exploratory",
+            },
+        )
         self.assertEqual(metrics["definitions"]["fnir"], ["biometric.identification.fnir", "1.0.0"])
         self.assertEqual(metrics["definitions"]["cmc"], ["biometric.identification.cmc", "1.0.0"])
         self.assertEqual(metrics["counts"]["gallery_templates"] + metrics["counts"]["gallery_template_failures"], expected_gallery)

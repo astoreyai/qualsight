@@ -28,13 +28,14 @@ from ..domain.primitives import ArtifactIdentity as DomainArtifactIdentity, Cano
 from ..domain.run import CompletedRun, LogRecord, MetricObservation, RunStatus, ScientificSupportState
 from ..engines.ofiq.adapter import content_id
 from ..execution.cli_runtime import USABLE_RESOURCE_STATES
-from ..metrics.statistics import CONFIDENCE_LEVEL, clopper_pearson, cluster_bootstrap, logistic_regression_multi, roc_auc, spearman
+from ..metrics.statistics import CONFIDENCE_LEVEL, clopper_pearson, logistic_regression_multi, pair_subject_multi_membership_bootstrap, roc_auc, spearman
 from ..metrics.utility import ErcInputs, PAIR_QUALITY_POLICY_VERSION, POLICY_DEFINITIONS, PairQualityPolicy, _area_from_units, compute_erc, pair_quality
+from ..metrics.verification import operating_point_with_support
 from ..provenance import application_version, environment_identity, hardware_identity, repository_identity, sha256_bytes, sha256_file
-from .utility import _quality_values
+from .utility import _quality_values, quality_input_stage
 
 ANALYSIS_KIND = "CROSS_MATCHER"
-ANALYSIS_VERSION = "1.0.0"
+ANALYSIS_VERSION = "1.1.0"
 CONTRAST_KINDS = {"matcher": "MATCHER_CONTRAST_FIXED_CONDITION", "preprocessing": "PREPROCESSING_CONTRAST_FIXED_MATCHER"}
 CATEGORIES = ("NEITHER", "A_ONLY", "B_ONLY", "BOTH")
 
@@ -83,6 +84,7 @@ class LeafData:
     left_ids: list[str]
     right_ids: list[str]
     left_subjects: np.ndarray
+    right_subjects: np.ndarray
     subject_sampling_unit: str | None
     threshold: float
     threshold_provenance: dict[str, Any]
@@ -166,6 +168,7 @@ class CrossMatcherJob:
         point = next((p for p in metrics["by_policy"]["EXCLUDE_FAILED_TRIALS"]["operating_points"] if p["target_fmr"] == self.request.target_fmr and p.get("threshold") is not None), None)
         if point is None:
             raise CrossMatcherError(f"leaf {row['leaf_id']} has no recorded operating point at FMR {self.request.target_fmr}")
+        point = operating_point_with_support(self.request.target_fmr, point)
         subjects_recorded = all(
             record["left_subject_id"] is not None and record["right_subject_id"] is not None
             for record in records
@@ -178,13 +181,26 @@ class CrossMatcherJob:
             failure_kind=[r["failure"] for r in records],
             left_ids=[r["left_sample_id"] for r in records], right_ids=[r["right_sample_id"] for r in records],
             left_subjects=np.array([r["left_subject_id"] for r in records], dtype=object),
+            right_subjects=np.array([r["right_subject_id"] for r in records], dtype=object),
             subject_sampling_unit=(
-                "LEFT_SUBJECT_ID_SHARED_BY_BOTH_RUNS"
+                "SUBJECT_ID_IN_EITHER_PAIR_POSITION_SHARED_BY_BOTH_RUNS"
                 if subjects_recorded
                 else None
             ),
             threshold=float(point["threshold"]),
-            threshold_provenance={"source": "RECORDED_OPERATING_POINT", "kind": "MATCHER_THRESHOLD", "target_fmr": self.request.target_fmr, "failure_policy": "EXCLUDE_FAILED_TRIALS", "fmr_at_threshold": point["fmr"], "fnmr_at_threshold": point["fnmr"], "matcher_run_id": row["run_id"]},
+            threshold_provenance={
+                "source": "RECORDED_OPERATING_POINT",
+                "kind": "MATCHER_THRESHOLD",
+                "target_fmr": self.request.target_fmr,
+                "failure_policy": "EXCLUDE_FAILED_TRIALS",
+                "fmr_at_threshold": point["fmr"],
+                "fnmr_at_threshold": point["fnmr"],
+                "matcher_run_id": row["run_id"],
+                "evaluation_scope": point["evaluation_scope"],
+                "threshold_selection": point["threshold_selection"],
+                "event_support": point["event_support"],
+                "scientific_support": point["scientific_support"],
+            },
         )
 
     # -- contrasts --------------------------------------------------------------
@@ -223,6 +239,7 @@ class CrossMatcherJob:
                 "contrast_id": contrast_id, "contrast_kind": kind, "pair_id": a.pair_ids[index], "label": "MATED" if mated[index] else "NON_MATED",
                 "left_sample_id": a.left_ids[index], "right_sample_id": a.right_ids[index],
                 "left_subject_id": None if a.left_subjects[index] is None else str(a.left_subjects[index]),
+                "right_subject_id": None if a.right_subjects[index] is None else str(a.right_subjects[index]),
                 "score_a": None if not np.isfinite(a.scores[index]) else float(a.scores[index]), "score_b": None if not np.isfinite(b.scores[index]) else float(b.scores[index]),
                 "failure_a": a.failure_kind[index], "failure_b": b.failure_kind[index], "error_a": bool(error_a[index]), "error_b": bool(error_b[index]), "category": category,
                 "quality_left": None if not np.isfinite(quality_left[index]) else float(quality_left[index]), "quality_right": None if not np.isfinite(quality_right[index]) else float(quality_right[index]),
@@ -238,12 +255,19 @@ class CrossMatcherJob:
             q = quality[selection]
             ea = (a.scores[selection] < a.threshold) if error_kind == "FNMR" else (a.scores[selection] >= a.threshold)
             eb = (b.scores[selection] < b.threshold) if error_kind == "FNMR" else (b.scores[selection] >= b.threshold)
-            clusters = a.left_subjects[selection]
+            left_subjects = a.left_subjects[selection]
+            right_subjects = a.right_subjects[selection]
             for name, upper in (("au_erc", 1.0), ("partial_au_erc", request.partial_interval)):
                 value_a = _area_from_units(q, ea, upper)
                 value_b = _area_from_units(q, eb, upper)
                 boot = (
-                    cluster_bootstrap(clusters, lambda idx, ea=ea, eb=eb, q=q, upper=upper: (lambda x, y: None if x is None or y is None else x - y)(_area_from_units(q[idx], ea[idx], upper), _area_from_units(q[idx], eb[idx], upper)), replicates=request.bootstrap_replicates, seed=request.seed)
+                    pair_subject_multi_membership_bootstrap(
+                        left_subjects,
+                        right_subjects,
+                        lambda idx, ea=ea, eb=eb, q=q, upper=upper: (lambda x, y: None if x is None or y is None else x - y)(_area_from_units(q[idx], ea[idx], upper), _area_from_units(q[idx], eb[idx], upper)),
+                        replicates=request.bootstrap_replicates,
+                        seed=request.seed,
+                    )
                     if q.shape[0] and a.subject_sampling_unit is not None
                     else (
                         {
@@ -255,7 +279,7 @@ class CrossMatcherJob:
                     )
                 )
                 if boot is not None:
-                    boot["method"] = "PAIRED_CLUSTER_BOOTSTRAP_PERCENTILE"
+                    boot["method"] = "PAIRED_PAIR_SUBJECT_MULTI_MEMBERSHIP_BOOTSTRAP_PERCENTILE"
                     boot["sampling_unit"] = a.subject_sampling_unit
                 differences.setdefault(label, {})[name] = {"integration_domain": [0.0, upper], "a": value_a, "b": value_b, "difference_a_minus_b": None if value_a is None or value_b is None else value_a - value_b, "uncertainty": boot, "comparison_units": int(q.shape[0])}
         # Quality × matcher interaction on pooled mated units (both scored, with quality).
@@ -339,12 +363,12 @@ class CrossMatcherJob:
         document = {
             "analysis_id": self.analysis_id, "kind": ANALYSIS_KIND, "version": ANALYSIS_VERSION,
             "sources": {"matrix_id": request.matrix_id, "protocol_id": self.rows[0]["protocol_id"], "leaves": [{"run_id": r["run_id"], "leaf_id": r["leaf_id"], "matcher_id": r["matcher_id"], "condition_id": r["condition_id"], "comparisons_sha256": r["comparisons_sha256"], "matcher_registry_state": self.registry.raw_resource(r["matcher_id"])["state"]} for r in self.rows],
-                        "quality_job_id": request.quality_job_id, "quality_run_id": self.quality_job["run_id"], "quality_parquet_sha256": sha256_file(Path(self.quality_job["parquet_path"])), "quality_measure": request.quality_measure, "samples_measured": measured},
+                        "quality_job_id": request.quality_job_id, "quality_run_id": self.quality_job["run_id"], "quality_parquet_sha256": sha256_file(Path(self.quality_job["parquet_path"])), "quality_measure": request.quality_measure, "quality_input_stage": quality_input_stage([row["condition_id"] for row in self.rows]), "samples_measured": measured},
             "matcher_sets": self.sets,
             "pair_quality_policy": {"id": self.policy.value, "version": PAIR_QUALITY_POLICY_VERSION, "definition": POLICY_DEFINITIONS[self.policy]},
             "target_fmr": request.target_fmr, "partial_interval": request.partial_interval,
             "uncertainty": (
-                {"status": "ESTIMATED", "method": "PAIRED_CLUSTER_BOOTSTRAP_PERCENTILE", "sampling_unit": first.subject_sampling_unit, "replicates": request.bootstrap_replicates, "seed": request.seed, "confidence_level": CONFIDENCE_LEVEL}
+                {"status": "ESTIMATED", "method": "PAIRED_PAIR_SUBJECT_MULTI_MEMBERSHIP_BOOTSTRAP_PERCENTILE", "sampling_unit": first.subject_sampling_unit, "replicates": request.bootstrap_replicates, "seed": request.seed, "confidence_level": CONFIDENCE_LEVEL}
                 if first.subject_sampling_unit is not None
                 else {"status": "NOT_ASSESSED_IDENTITY_UNAVAILABLE", "method": "NOT_APPLICABLE_WITHOUT_RECORDED_SUBJECT_IDENTITIES", "sampling_unit": None, "replicates": 0, "requested_replicates": request.bootstrap_replicates, "seed": request.seed, "confidence_level": CONFIDENCE_LEVEL, "reason": "The protocol authority does not record subject identities."}
             ),
@@ -408,7 +432,7 @@ class CrossMatcherJob:
             operating_thresholds=ComponentBinding(state=ComponentState.CONFIGURED, component_id="per-run-recorded-operating-point", version="1.0.0", configuration_sha256=sha256_bytes(json.dumps({"target_fmr": request.target_fmr}, sort_keys=True).encode("utf-8"))),
             statistical_methods=ComponentBinding(state=ComponentState.CONFIGURED, component_id="qualsight.analysis.crossmatcher+metrics.statistics", version="1.0.0", configuration_sha256=sha256_bytes(json.dumps({"partial_interval": request.partial_interval, "replicates": request.bootstrap_replicates, "seed": request.seed}, sort_keys=True).encode("utf-8"))),
             confidence_interval_method=(
-                ComponentBinding(state=ComponentState.CONFIGURED, component_id="PAIRED_CLUSTER_BOOTSTRAP_PERCENTILE_95+CLOPPER_PEARSON_95+WALD", version="1.0.0")
+                ComponentBinding(state=ComponentState.CONFIGURED, component_id="PAIRED_PAIR_SUBJECT_MULTI_MEMBERSHIP_BOOTSTRAP_PERCENTILE_95+CLOPPER_PEARSON_95+WALD", version="1.0.0")
                 if uncertainty_estimated
                 else ComponentBinding(state=ComponentState.NOT_APPLICABLE, reason="Paired subject-cluster intervals were not assessed because the protocol records no subject identities.")
             ),

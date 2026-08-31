@@ -198,6 +198,45 @@ class RealMatcherMatrixTests(unittest.TestCase):
                 recomputed = compute_verification_metrics(ComparisonInputs(scores, mated, failed, folds))
                 self.assertEqual(recomputed["evidence_sha256"], metrics["evidence_sha256"])
                 self.assertEqual(policy["operating_points"][0]["target_fmr"], 0.1)
+                for point in policy["operating_points"]:
+                    self.assertEqual(point["evaluation_scope"], "DESCRIPTIVE_IN_SAMPLE")
+                    self.assertEqual(
+                        point["threshold_selection"],
+                        "SELECTED_AND_EVALUATED_ON_THE_SAME_RECORDED_TRIALS",
+                    )
+                    self.assertEqual(
+                        point["scientific_support"]["state"], "NOT_SUPPORTED"
+                    )
+                    self.assertEqual(
+                        point["scientific_support"]["claim_scope"],
+                        "PROSPECTIVE_OR_OPERATIONAL_THRESHOLD_PERFORMANCE",
+                    )
+                    self.assertEqual(
+                        point["event_support"]["nonmated_trials"],
+                        metrics["counts"]["nonmated_trials"],
+                    )
+                    self.assertEqual(
+                        point["event_support"]["observed_false_matches"],
+                        point["false_matches"],
+                    )
+                    self.assertEqual(
+                        point["event_support"]["rule"],
+                        "THRESHOLD_PRESENT_AND_AT_LEAST_FIVE_OBSERVED_FALSE_MATCHES",
+                    )
+                    self.assertEqual(
+                        point["event_support"]["minimum_observed_false_matches"],
+                        5,
+                    )
+                    self.assertEqual(
+                        point["event_support"]["supported"],
+                        point["threshold"] is not None
+                        and point["false_matches"] >= 5,
+                    )
+                    self.assertFalse(point["event_support"]["supported"])
+                    self.assertIn(
+                        "FEWER_THAN_FIVE_OBSERVED_FALSE_MATCH_EVENTS_AT_RECORDED_THRESHOLD",
+                        point["scientific_support"]["reasons"],
+                    )
                 # ROC/DET points carry the recorded thresholds and monotone error trade-off.
                 det = policy["det"]["points"]
                 self.assertTrue(all(0.0 <= p["fmr"] <= 1.0 and 0.0 <= p["fnmr"] <= 1.0 for p in det))

@@ -337,3 +337,76 @@ def cluster_bootstrap(cluster_ids: np.ndarray, statistic: Callable[[np.ndarray],
     else:
         result.update({"ci_lower": None, "ci_upper": None, "status": "UNSUPPORTED_BY_SAMPLE"})
     return result
+
+
+def pair_subject_multi_membership_bootstrap(
+    left_subject_ids: np.ndarray,
+    right_subject_ids: np.ndarray,
+    statistic: Callable[[np.ndarray], float | None],
+    *,
+    replicates: int,
+    seed: int,
+) -> dict[str, object]:
+    """Bootstrap pair units by every recorded subject membership.
+
+    Subjects are sampled with replacement. A same-subject pair receives that
+    subject's sampled multiplicity. A pair with two different subjects receives
+    the product of their sampled multiplicities, so either endpoint can remove
+    or replicate the pair. ``statistic`` receives the resulting repeated row
+    indices into the original pair-unit arrays.
+    """
+
+    if left_subject_ids.shape != right_subject_ids.shape:
+        raise ValueError("left and right subject arrays must have the same shape")
+    if left_subject_ids.ndim != 1:
+        raise ValueError("pair subject arrays must be one-dimensional")
+    if any(value is None for value in left_subject_ids.tolist() + right_subject_ids.tolist()):
+        raise ValueError("pair subject bootstrap requires both subject identities for every pair")
+    subjects, membership_indices = np.unique(
+        np.concatenate((left_subject_ids, right_subject_ids)), return_inverse=True
+    )
+    unit_count = left_subject_ids.shape[0]
+    left_index = membership_indices[:unit_count]
+    right_index = membership_indices[unit_count:]
+    same_subject = left_index == right_index
+    generator = np.random.default_rng(seed)
+    values: list[float] = []
+    undefined = 0
+    unit_indices = np.arange(unit_count, dtype=np.int64)
+    for _ in range(replicates):
+        draw = generator.integers(0, subjects.shape[0], size=subjects.shape[0])
+        subject_multiplicity = np.bincount(draw, minlength=subjects.shape[0])
+        multiplicity = subject_multiplicity[left_index] * subject_multiplicity[right_index]
+        multiplicity[same_subject] = subject_multiplicity[left_index[same_subject]]
+        indices = np.repeat(unit_indices, multiplicity)
+        value = statistic(indices)
+        if value is None or not math.isfinite(value):
+            undefined += 1
+        else:
+            values.append(float(value))
+    array = np.array(values, dtype=np.float64)
+    result: dict[str, object] = {
+        "method": "PAIR_SUBJECT_MULTI_MEMBERSHIP_BOOTSTRAP_PERCENTILE",
+        "version": METHODS_VERSION,
+        "sampling_unit": "SUBJECT_ID_IN_EITHER_PAIR_POSITION",
+        "subjects": int(subjects.shape[0]),
+        "pair_units": int(unit_count),
+        "same_subject_pair_units": int(np.sum(same_subject)),
+        "replicates": int(replicates),
+        "undefined_replicates": undefined,
+        "seed": int(seed),
+        "confidence_level": CONFIDENCE_LEVEL,
+    }
+    if array.shape[0] >= max(20, replicates // 2):
+        result.update(
+            {
+                "ci_lower": float(np.percentile(array, 2.5)),
+                "ci_upper": float(np.percentile(array, 97.5)),
+                "bootstrap_mean": float(np.mean(array)),
+                "bootstrap_sd": float(np.std(array, ddof=1)) if array.shape[0] > 1 else None,
+                "status": "ESTIMATED",
+            }
+        )
+    else:
+        result.update({"ci_lower": None, "ci_upper": None, "status": "UNSUPPORTED_BY_SAMPLE"})
+    return result

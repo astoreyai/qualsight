@@ -26,9 +26,12 @@ from matplotlib.backends.backend_pdf import PdfPages  # noqa: E402
 import matplotlib.image as mpimg  # noqa: E402
 
 from ..engines.ofiq.adapter import content_id  # noqa: E402
+from ..metrics.verification import operating_point_with_support  # noqa: E402
 from ..provenance import application_version, sha256_file  # noqa: E402
 
 REPORT_VERSION = "1.0.0"
+METRIC_REGISTRY_ID = "qualsight-core-metrics"
+METRIC_REGISTRY_VERSION = "1.2.0"
 IMAGE_POLICIES = ("EXCLUDE", "INCLUDE_PERMITTED")
 
 
@@ -46,6 +49,35 @@ def _pct(value: float | None, digits: int = 2) -> str:
 
 def _num(value: float | None, digits: int = 4) -> str:
     return "—" if value is None else f"{value:.{digits}f}"
+
+
+def aggregate_scientific_support(states: set[str]) -> str:
+    """Return the most restrictive recorded support state without auto-approval."""
+
+    precedence = ("BLOCKED", "NOT_SUPPORTED", "NOT_ASSESSED", "SUPPORTED")
+    unknown = states - set(precedence)
+    if unknown:
+        raise ReportError(f"unknown scientific support states: {sorted(unknown)}")
+    return next((state for state in precedence if state in states), "NOT_ASSESSED")
+
+
+def quality_input_stage_summary(sources: dict[str, Any]) -> tuple[str, str]:
+    """Summarize recorded stage evidence, conservatively labeling real legacy records."""
+
+    quality_stage = sources.get("quality_input_stage", {})
+    quality_stage_id = quality_stage.get(
+        "stage_id", "NOT_RECORDED_LEGACY_ARTIFACT"
+    )
+    relationships = quality_stage.get("matcher_preprocessing_relationships")
+    relationship = (
+        "; ".join(
+            f"{item['condition_id']}: {item['relationship']}"
+            for item in relationships
+        )
+        if relationships
+        else "NOT_RECORDED_LEGACY_ARTIFACT"
+    )
+    return str(quality_stage_id), relationship
 
 
 class ReportBuilder:
@@ -66,6 +98,7 @@ class ReportBuilder:
         self.run_ids: set[str] = set()
         self.model_hashes: dict[str, str] = {}
         self.dataset_hashes: dict[str, str] = {}
+        self.claim_support_records: dict[tuple[str, str, str], dict[str, str]] = {}
         self.figures: list[dict[str, Any]] = []
         self.images_embedded = 0
         self.images_withheld = 0
@@ -74,6 +107,19 @@ class ReportBuilder:
 
     def _add(self, title: str, kind: str, content: Any) -> None:
         self.sections.append({"title": title, "kind": kind, "content": content})
+
+    def _record_claim_support(self, support: object, *, basis: str) -> None:
+        if not isinstance(support, dict):
+            return
+        state = str(support.get("state", "NOT_ASSESSED"))
+        aggregate_scientific_support({state})
+        claim_scope = str(support.get("claim_scope", "CLAIM_SCOPE_NOT_RECORDED"))
+        key = (state, claim_scope, basis)
+        self.claim_support_records[key] = {
+            "state": state,
+            "claim_scope": claim_scope,
+            "basis": basis,
+        }
 
     def _dataset(self, dataset_id: str) -> None:
         dataset = self.store.dataset(dataset_id)
@@ -126,12 +172,50 @@ class ReportBuilder:
                     self.model_hashes[identity.path] = identity.sha256
             metrics = json.loads(leaf["metrics_json"])
             block = metrics["by_policy"]["EXCLUDE_FAILED_TRIALS"]
-            rows.append([leaf["leaf_id"], leaf["matcher_id"], leaf["condition_id"], str(leaf["comparison_count"]), str(leaf["scored_count"]), str(leaf["failed_count"]), _pct(block["eer"]["eer"]), _num(block["eer"]["threshold"], 6), leaf["run_id"]])
+            eer_scope = block["eer"].get("evaluation_scope", "DESCRIPTIVE_IN_SAMPLE")
+            threshold_selection = block.get(
+                "threshold_selection",
+                "SELECTED_AND_EVALUATED_ON_THE_SAME_RECORDED_TRIALS",
+            )
+            support = block.get(
+                "scientific_support",
+                {
+                    "state": "NOT_SUPPORTED",
+                    "claim_scope": "PROSPECTIVE_OR_OPERATIONAL_THRESHOLD_PERFORMANCE",
+                },
+            )
+            self._record_claim_support(
+                support,
+                basis=f"matcher-run:{leaf['run_id']}:aggregate-verification-metrics",
+            )
+            rows.append([leaf["leaf_id"], leaf["matcher_id"], leaf["condition_id"], str(leaf["comparison_count"]), str(leaf["scored_count"]), str(leaf["failed_count"]), _pct(block["eer"]["eer"]), _num(block["eer"]["threshold"], 6), eer_scope, threshold_selection, support["state"], support["claim_scope"], leaf["run_id"]])
             for point in block["operating_points"]:
                 if point.get("threshold") is not None:
-                    points_rows.append([leaf["leaf_id"], str(point["target_fmr"]), _num(point["threshold"], 6), _pct(point["fmr"], 3), _pct(point["fnmr"]), f"[{_pct(point['fnmr_ci95'][0])}, {_pct(point['fnmr_ci95'][1])}]", str(point["mated_trials_included"]), str(point["nonmated_trials_included"])])
-        self._add("Matcher Runs (each preprocessing condition reported separately)", "table", {"columns": ["Leaf", "Matcher", "Preprocessing condition", "Comparisons", "Scored", "Failed", "EER", "EER threshold", "Run"], "rows": rows})
-        self._add("Operating points (MATCHER THRESHOLD at target FMR; EXCLUDE_FAILED_TRIALS; Clopper–Pearson 95 %)", "table", {"columns": ["Leaf", "Target FMR", "Threshold", "FMR", "FNMR", "FNMR 95 % CI", "Mated trials", "Non-mated trials"], "rows": points_rows})
+                    point = operating_point_with_support(float(point["target_fmr"]), point)
+                    event_support = point["event_support"]
+                    self._record_claim_support(
+                        point["scientific_support"],
+                        basis=(
+                            f"matcher-run:{leaf['run_id']}:target-fmr:"
+                            f"{point['target_fmr']}"
+                        ),
+                    )
+                    points_rows.append([
+                        leaf["leaf_id"],
+                        str(point["target_fmr"]),
+                        _num(point["threshold"], 6),
+                        _pct(point["fmr"], 3),
+                        _pct(point["fnmr"]),
+                        f"[{_pct(point['fnmr_ci95'][0])}, {_pct(point['fnmr_ci95'][1])}]",
+                        str(point["mated_trials_included"]),
+                        str(point["nonmated_trials_included"]),
+                        point["evaluation_scope"],
+                        point["scientific_support"]["state"],
+                        point["scientific_support"]["claim_scope"],
+                        f"{'SUPPORTED' if event_support['supported'] else 'NOT_SUPPORTED'}; observed {event_support['observed_false_matches']}; minimum observed {event_support['minimum_observed_false_matches']}",
+                    ])
+        self._add("Matcher Runs (each preprocessing condition reported separately)", "table", {"columns": ["Leaf", "Matcher", "Preprocessing condition", "Comparisons", "Scored", "Failed", "EER", "EER threshold", "EER evaluation scope", "Threshold selection", "Prospective / operational support", "Claim scope", "Run"], "rows": rows})
+        self._add("Operating points (descriptive in-sample MATCHER THRESHOLD at target FMR; EXCLUDE_FAILED_TRIALS; Clopper–Pearson 95 %)", "table", {"columns": ["Leaf", "Target FMR", "Threshold", "FMR", "FNMR", "FNMR 95 % CI", "Mated trials", "Non-mated trials", "Evaluation scope", "Prospective / operational support", "Claim scope", "False-match event support"], "rows": points_rows})
 
     def _utility(self, analysis_ids: list[str]) -> None:
         rows = []
@@ -143,13 +227,26 @@ class ReportBuilder:
             self.run_ids.add(row["run_id"])
             summary = json.loads(row["summary_json"])
             document = json.loads((Path(row["directory"]) / "utility.json").read_text(encoding="utf-8"))
+            matcher_threshold = (
+                document.get("policy", {})
+                .get("thresholds", {})
+                .get("matcher", {})
+                .get("provenance", {})
+            )
+            self._record_claim_support(
+                matcher_threshold.get("scientific_support"),
+                basis=f"utility-analysis:{analysis_id}:matcher-threshold",
+            )
             areas = document["utility"]["areas"]["FNMR"]
-            rows.append([summary["leaf_id"], summary["quality_measure"], summary["pair_quality_policy"], _num(summary["matcher_threshold"], 6), str(summary["quality_threshold"]), _num(areas["au_erc"]["value"], 5), f"[{_num(areas['au_erc']['uncertainty'].get('ci_lower'), 5)}, {_num(areas['au_erc']['uncertainty'].get('ci_upper'), 5)}]", _num(areas["partial_au_erc"]["value"], 5), _pct(summary["fnmr_before"]), _pct(summary["fnmr_after"]), _pct(summary["retention_rate"], 1), str(summary["errors_prevented"]), str(summary["successful_comparisons_removed"]), row["run_id"]])
+            quality_stage_id, quality_stage_relationship = (
+                quality_input_stage_summary(document["sources"])
+            )
+            rows.append([summary["leaf_id"], summary["quality_measure"], quality_stage_id, quality_stage_relationship, summary["pair_quality_policy"], _num(summary["matcher_threshold"], 6), str(summary["quality_threshold"]), _num(areas["au_erc"]["value"], 5), f"[{_num(areas['au_erc']['uncertainty'].get('ci_lower'), 5)}, {_num(areas['au_erc']['uncertainty'].get('ci_upper'), 5)}]", _num(areas["partial_au_erc"]["value"], 5), _pct(summary["fnmr_before"]), _pct(summary["fnmr_after"]), _pct(summary["retention_rate"], 1), str(summary["errors_prevented"]), str(summary["successful_comparisons_removed"]), row["run_id"]])
             association = document["utility"]["association"]["FNMR"]
             prediction = document["utility"]["failure_prediction"]["FNMR"]
             logistic = association.get("logistic_error_on_quality", {})
             stats_rows.append([summary["leaf_id"], _num(association.get("spearman_quality_vs_score", {}).get("rho"), 3), _num(association.get("kendall_quality_vs_score", {}).get("tau"), 3), (f"{_num(logistic.get('odds_ratio_per_10_units'), 3)} [{_num(logistic.get('odds_ratio_per_10_units_ci', [None, None])[0], 3)}, {_num(logistic.get('odds_ratio_per_10_units_ci', [None, None])[1], 3)}]" if logistic.get("status") == "ESTIMATED" else logistic.get("status", "—")), _num(prediction.get("roc_auc"), 3), _num(prediction.get("pr_auc"), 3), f"{document['utility']['uncertainty']['method']} × {document['utility']['uncertainty']['replicates']} (seed {document['utility']['uncertainty']['seed']})"])
-        self._add("Quality → utility (metric registry v1.1.0; MATCHER THRESHOLD fixed; QUALITY POLICY THRESHOLD separate)", "table", {"columns": ["Leaf", "Measure", "Pair policy", "Matcher T", "Quality Q", "AU-ERC (FNMR)", "AU-ERC 95 % CI", "pAU-ERC 0–20 %", "FNMR before", "FNMR after", "Retained", "Errors prevented", "Good removed", "Analysis Run"], "rows": rows})
+        self._add(f"Quality → utility (metric registry v{METRIC_REGISTRY_VERSION}; MATCHER THRESHOLD fixed; QUALITY POLICY THRESHOLD separate)", "table", {"columns": ["Leaf", "Measure", "Quality input stage", "Relationship to matcher preprocessing", "Pair policy", "Matcher T", "Quality Q", "AU-ERC (FNMR)", "AU-ERC 95 % CI", "pAU-ERC 0–20 %", "FNMR before", "FNMR after", "Retained", "Errors prevented", "Good removed", "Analysis Run"], "rows": rows})
         self._add("Statistical methods and confidence intervals (utility)", "table", {"columns": ["Leaf", "Spearman ρ", "Kendall τ-b", "OR per 10 units [95 % Wald]", "ROC-AUC", "PR-AUC", "Uncertainty method"], "rows": stats_rows})
 
     def _cross(self, analysis_id: str) -> None:
@@ -158,6 +255,22 @@ class ReportBuilder:
             raise ReportError(f"cross-matcher analysis {analysis_id} is not recorded")
         self.run_ids.add(row["run_id"])
         summary = json.loads(row["summary_json"])
+        document = json.loads(
+            (Path(row["directory"]) / "crossmatcher.json").read_text(encoding="utf-8")
+        )
+        for contrast in document.get("contrasts", []):
+            for side_name in ("a", "b"):
+                provenance = contrast.get(side_name, {}).get(
+                    "threshold_provenance", {}
+                )
+                self._record_claim_support(
+                    provenance.get("scientific_support"),
+                    basis=(
+                        f"cross-matcher:{analysis_id}:"
+                        f"{contrast.get('contrast_id', 'unidentified-contrast')}:"
+                        f"side-{side_name}"
+                    ),
+                )
         rows = []
         for contrast in summary["contrasts"]:
             ci = contrast.get("au_erc_diff_fnmr_ci") or [None, None]
@@ -234,6 +347,38 @@ class ReportBuilder:
             rows_out.append({**{k: (v if not isinstance(v, float) else round(v, 6)) for k, v in pair.items()}, "images": images})
         self._add("Failure examples", "failures", {"source": source, "image_policy": self.image_policy, "pairs": rows_out})
 
+    def _scientific_support(self) -> None:
+        rows: list[list[str]] = []
+        for run_id in sorted(self.run_ids):
+            found = self.store.run(run_id)
+            if found is None:
+                continue
+            run, _ = found
+            rows.append(
+                [
+                    run_id,
+                    run.scientific_support.value,
+                    "RECORDED_COMPLETED_RUN_STATE",
+                ]
+            )
+        for record in self.claim_support_records.values():
+            rows.append(
+                [
+                    record["claim_scope"],
+                    record["state"],
+                    record["basis"],
+                ]
+            )
+        self._add(
+            "Scientific support",
+            "table",
+            {
+                "columns": ["Run or claim scope", "State", "Basis"],
+                "rows": rows,
+                "note": "QualSight reports recorded support states and does not infer or auto-approve scientific support.",
+            },
+        )
+
     def build(self) -> dict[str, Any]:
         spec = self.spec
         title = spec.get("title") or f"QualSight report · {self.project.name}"
@@ -262,6 +407,7 @@ class ReportBuilder:
             "Comparison units that share subjects are not independent; subject-cluster bootstrap intervals are reported where computed, and Wald intervals are approximations.",
         ])
         self._add("Limitations", "list", limitations)
+        self._scientific_support()
         provenance = self._provenance(title)
         self._add("Provenance", "provenance", provenance)
         report_id = content_id("report", self.project.project_id, json.dumps(spec, sort_keys=True), REPORT_VERSION, _now())
@@ -289,11 +435,18 @@ class ReportBuilder:
             if found is None:
                 continue
             run, evidence = found
-            runs.append({"run_id": run_id, "evidence_sha256": evidence, "experiment_id": run.experiment_id, "start_time": run.start_time.isoformat(), "application_version": run.application_version, "repository": run.repository.model_dump(mode="json"), "environment_manifest_sha256": run.environment.dependency_manifest.sha256, "matcher": run.matcher.component_id, "quality_engine": run.quality_engine.resource_id if run.quality_engine else None})
+            runs.append({"run_id": run_id, "evidence_sha256": evidence, "experiment_id": run.experiment_id, "start_time": run.start_time.isoformat(), "application_version": run.application_version, "repository": run.repository.model_dump(mode="json"), "environment_manifest_sha256": run.environment.dependency_manifest.sha256, "matcher": run.matcher.component_id, "quality_engine": run.quality_engine.resource_id if run.quality_engine else None, "scientific_support": run.scientific_support.value})
             for identity in run.model_hashes:
                 self.model_hashes[identity.path] = identity.sha256
             self.dataset_hashes.setdefault("run:" + run_id[-12:], run.dataset_hash)
+        support_states = {run["scientific_support"] for run in runs}
+        support_states.update(
+            record["state"] for record in self.claim_support_records.values()
+        )
+        overall_support = aggregate_scientific_support(support_states)
         return {"title": title, "project_id": self.project.project_id, "project_name": self.project.name, "generated_by": self.actor, "generated_at": _now(), "application_version": application_version(self.repository_root / "backend" / "pyproject.toml"),
+                "metric_registry": {"id": METRIC_REGISTRY_ID, "version": METRIC_REGISTRY_VERSION},
+                "scientific_support": {"overall_state": overall_support, "auto_approved": False, "basis": "RECORDED_RUN_AND_CLAIM_SPECIFIC_SCIENTIFIC_SUPPORT_STATES"},
                 "software_versions": {"matplotlib": matplotlib.__version__}, "runs": runs, "model_hashes": self.model_hashes, "dataset_hashes": self.dataset_hashes, "figures": [{"figure_id": f["figure_id"], "sha256": {n: i["sha256"] for n, i in f["provenance"]["files"].items()}} for f in self.figures],
                 "image_policy": self.image_policy, "images_embedded": self.images_embedded, "images_withheld": self.images_withheld}
 

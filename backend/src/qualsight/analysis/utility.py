@@ -34,12 +34,35 @@ from ..metrics.utility import (
     compute_utility_analysis,
     pair_quality,
 )
+from ..metrics.verification import operating_point_with_support
+from ..matchers.conditions import ConditionId, SCRFD_CONDITIONS
 from ..provenance import application_version, environment_identity, hardware_identity, repository_identity, sha256_bytes, sha256_file
 
 ANALYSIS_KIND = "QUALITY_UTILITY"
-ANALYSIS_VERSION = "1.0.1"  # 1.0.0 records used a tie-unsafe retention-matched cutoff for per-measure impact
+ANALYSIS_VERSION = "1.1.0"
 DEFAULT_MEASURE = "UnifiedQualityScore"
 DEFAULT_QUALITY_RANGE = (0.0, 100.0)  # OFIQ scalar quality components are 0–100 integers
+
+
+def quality_input_stage(condition_ids: list[str] | tuple[str, ...]) -> dict[str, object]:
+    """Record where OFIQ source bytes sit relative to each matcher preprocessing condition."""
+
+    relationships = []
+    for condition_id in sorted(set(condition_ids)):
+        if condition_id == ConditionId.PREALIGNED_ARCFACE112.value:
+            relationship = "SAME_PUBLISHER_PREALIGNED_IMAGE_DECODED_WITHOUT_FACE_DETECTION_REALIGNMENT_OR_CROP"
+        elif condition_id in {condition.value for condition in SCRFD_CONDITIONS}:
+            relationship = "PRECEDES_QUALSIGHT_EXECUTED_FACE_DETECTION_ALIGNMENT_AND_CROP"
+        else:
+            relationship = "MATCHER_INPUT_ARTIFACT_AND_PREPROCESSING_RELATIONSHIP_NOT_RECORDED"
+        relationships.append(
+            {"condition_id": condition_id, "relationship": relationship}
+        )
+    return {
+        "stage_id": "REGISTERED_DATASET_SAMPLE_SOURCE_ARTIFACT_AS_QUALITY_ENGINE_INPUT",
+        "artifact_kind": "DATASET_SAMPLE_SOURCE_BYTES",
+        "matcher_preprocessing_relationships": relationships,
+    }
 
 
 class UtilityAnalysisError(RuntimeError):
@@ -183,7 +206,7 @@ class UtilityAnalysisJob:
         subject_left = np.array([r["left_subject_id"] for r in rows], dtype=object)
         subject_right = np.array([r["right_subject_id"] for r in rows], dtype=object)
         uncertainty_sampling_unit = (
-            "LEFT_SUBJECT_ID_OF_THE_COMPARISON_UNIT"
+            "SUBJECT_ID_IN_EITHER_PAIR_POSITION"
             if subjects_recorded
             else None
         )
@@ -191,11 +214,46 @@ class UtilityAnalysisJob:
             point = next((p for p in self.metrics["by_policy"]["EXCLUDE_FAILED_TRIALS"]["operating_points"] if p["target_fmr"] == request.target_fmr and p.get("threshold") is not None), None)
             if point is None:
                 raise UtilityAnalysisError(f"no recorded operating point reaches target FMR {request.target_fmr}")
+            point = operating_point_with_support(request.target_fmr, point)
             threshold = float(point["threshold"])
-            provenance = {"source": "RECORDED_OPERATING_POINT", "kind": "MATCHER_THRESHOLD", "target_fmr": request.target_fmr, "failure_policy": "EXCLUDE_FAILED_TRIALS", "fmr_at_threshold": point["fmr"], "fnmr_at_threshold": point["fnmr"], "matcher_run_id": request.matcher_run_id}
+            provenance = {
+                "source": "RECORDED_OPERATING_POINT",
+                "kind": "MATCHER_THRESHOLD",
+                "target_fmr": request.target_fmr,
+                "failure_policy": "EXCLUDE_FAILED_TRIALS",
+                "fmr_at_threshold": point["fmr"],
+                "fnmr_at_threshold": point["fnmr"],
+                "matcher_run_id": request.matcher_run_id,
+                "evaluation_scope": point["evaluation_scope"],
+                "threshold_selection": point["threshold_selection"],
+                "event_support": point["event_support"],
+                "scientific_support": point["scientific_support"],
+            }
         else:
             threshold = float(request.matcher_threshold)
-            provenance = {"source": "CALLER_SUPPLIED", "kind": "MATCHER_THRESHOLD"}
+            usable_nonmated = (~mated) & (~failed) & np.isfinite(scores)
+            provenance = {
+                "source": "CALLER_SUPPLIED",
+                "kind": "MATCHER_THRESHOLD",
+                "evaluation_scope": "DESCRIPTIVE_APPLICATION_TO_RECORDED_TRIALS",
+                "threshold_selection": "CALLER_SUPPLIED_SELECTION_EVIDENCE_NOT_RECORDED",
+                "event_support": {
+                    "rule": "NO_TARGET_FMR_SELECTION_EVIDENCE_RECORDED",
+                    "nonmated_trials": int(np.sum(usable_nonmated)),
+                    "observed_false_matches": int(
+                        np.sum(scores[usable_nonmated] >= threshold)
+                    ),
+                    "supported": False,
+                },
+                "scientific_support": {
+                    "state": "NOT_SUPPORTED",
+                    "claim_scope": "PROSPECTIVE_OR_OPERATIONAL_THRESHOLD_PERFORMANCE",
+                    "reasons": [
+                        "CALLER_SUPPLIED_THRESHOLD_SELECTION_EVIDENCE_NOT_RECORDED",
+                        "DESCRIPTIVE_APPLICATION_TO_RECORDED_TRIALS_ONLY",
+                    ],
+                },
+            }
         pq_values = pair_quality(q_left, q_right, self.policy)
         usable_mated = (~failed) & np.isfinite(scores) & np.isfinite(pq_values) & mated
         if request.quality_threshold is None:
@@ -265,6 +323,7 @@ class UtilityAnalysisJob:
             "sources": {
                 "matcher_run_id": request.matcher_run_id, "matcher_leaf_id": self.leaf["leaf_id"], "matcher_id": self.leaf["matcher_id"], "condition_id": self.leaf["condition_id"], "comparisons_sha256": self.leaf["comparisons_sha256"],
                 "quality_job_id": request.quality_job_id, "quality_run_id": self.quality_job["run_id"], "quality_parquet_sha256": sha256_file(Path(self.quality_job["parquet_path"])), "quality_measure": request.quality_measure, "quality_measure_column": f"{request.quality_measure}.scalar",
+                "quality_input_stage": quality_input_stage([self.leaf["condition_id"]]),
                 "samples_measured": measured, "samples_with_measure_value": len(quality),
             },
             "pair_quality_policy": {"id": self.policy.value, "version": PAIR_QUALITY_POLICY_VERSION, "definition": POLICY_DEFINITIONS[self.policy]},
@@ -338,7 +397,7 @@ class UtilityAnalysisJob:
             operating_thresholds=ComponentBinding(state=ComponentState.CONFIGURED, component_id="qualsight.metrics.policy", version="1.0.0", configuration_sha256=sha256_bytes(json.dumps({"matcher_threshold": threshold, "quality_threshold": quality_threshold, "pair_quality_policy": self.policy.value}, sort_keys=True).encode("utf-8"))),
             statistical_methods=ComponentBinding(state=ComponentState.CONFIGURED, component_id="qualsight.metrics.utility+statistics", version="1.0.0", configuration_sha256=sha256_bytes(json.dumps({"partial_interval": request.partial_interval, "replicates": request.bootstrap_replicates, "seed": request.seed}, sort_keys=True).encode("utf-8"))),
             confidence_interval_method=(
-                ComponentBinding(state=ComponentState.CONFIGURED, component_id="CLUSTER_BOOTSTRAP_PERCENTILE_95+CLOPPER_PEARSON_95", version="1.0.0")
+                ComponentBinding(state=ComponentState.CONFIGURED, component_id="PAIR_SUBJECT_MULTI_MEMBERSHIP_BOOTSTRAP_PERCENTILE_95+CLOPPER_PEARSON_95", version="1.0.0")
                 if uncertainty_estimated
                 else ComponentBinding(state=ComponentState.NOT_APPLICABLE, reason="Subject-cluster intervals were not assessed because the protocol records no subject identities; point rates retain exact binomial intervals where applicable.")
             ),

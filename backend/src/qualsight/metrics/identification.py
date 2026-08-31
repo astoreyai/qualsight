@@ -31,6 +31,7 @@ TARGET_FPIRS = (0.1, 0.01, 0.001)
 FAILURE_POLICIES = ("EXCLUDE_FAILED_TRIALS", "FAILURES_AS_MISS")
 SCORE_DIRECTION = "HIGHER_IS_MORE_SIMILAR"
 THRESHOLD_EQUALITY_RULE = "RETURN_WHEN_SCORE_GE_THRESHOLD"
+EVALUATION_SCOPE = "EXPLORATORY_CUSTOM_LFW_IDENTIFICATION_PROTOCOL"
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +55,12 @@ def compute_identification_metrics(records: list[SearchRecord], *, gallery_size:
     non_mated = [r for r in records if r.kind == "NON_MATED"]
     result: dict[str, Any] = {
         "definitions": {name: list(value) for name, value in DEFINITIONS.items()},
+        "evaluation_scope": EVALUATION_SCOPE,
+        "scientific_support": {
+            "state": "NOT_SUPPORTED",
+            "claim_scope": "OPERATIONAL_OPEN_SET_IDENTIFICATION_PERFORMANCE",
+            "reason": "custom LFW gallery and probe construction is exploratory",
+        },
         "score_direction": SCORE_DIRECTION, "threshold_equality_rule": THRESHOLD_EQUALITY_RULE, "candidate_list_length": rank_depth,
         "counts": {"gallery_size": gallery_size, "gallery_templates": gallery_size - gallery_template_failures, "gallery_template_failures": gallery_template_failures,
                    "mated_searches": len(mated), "nonmated_searches": len(non_mated), "mated_probe_template_failures": sum(1 for r in mated if r.failed), "nonmated_probe_template_failures": sum(1 for r in non_mated if r.failed),
