@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 
@@ -144,6 +146,34 @@ class ResourceRegistryTests(unittest.TestCase):
                 del os.environ[variable]
             else:
                 os.environ[variable] = previous
+
+    def test_staged_validator_uses_explicit_root_for_owner_review_evidence(self) -> None:
+        variable = "QUALSIGHT_REPOSITORY_ROOT"
+        previous = os.environ.get(variable)
+        with tempfile.TemporaryDirectory() as directory:
+            staged_scripts = Path(directory) / "committed-stage" / "scripts"
+            staged_scripts.mkdir(parents=True)
+            staged_validator = staged_scripts / "validate_resource_registry.py"
+            shutil.copy2(ROOT / "scripts" / staged_validator.name, staged_validator)
+            spec = importlib.util.spec_from_file_location(
+                "staged_validate_resource_registry",
+                staged_validator,
+            )
+            self.assertIsNotNone(spec)
+            self.assertIsNotNone(spec.loader)
+            module = importlib.util.module_from_spec(spec)
+            os.environ[variable] = str(ROOT.resolve())
+            try:
+                spec.loader.exec_module(module)
+                summary = module.validate_registry_file(REGISTRY_PATH)
+            finally:
+                if previous is None:
+                    del os.environ[variable]
+                else:
+                    os.environ[variable] = previous
+        self.assertEqual(summary["resources"], 13)
+        self.assertEqual(summary["artifacts"], 205)
+        self.assertEqual(summary["checks"], 18)
 
     def test_ofiq_runtime_records_exact_configured_model_closure(self) -> None:
         runtime = self.resources["ofiq-v1-1-0-build-runtime"]

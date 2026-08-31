@@ -3613,7 +3613,7 @@ def _validate_ofiq_v112_onnxruntime_static_preflight(
         _fail(candidate_location, "ONNX preflight root is not receipt-bound")
     expected_static_authorization = _absolute_path(
         str(
-            Path(__file__).resolve().parents[1]
+            _repository_root()
             / "resources"
             / "authorizations"
             / "qualsight-onnxruntime-static-review-2026-08-14.json"
