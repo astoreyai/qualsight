@@ -712,14 +712,14 @@ class ReleaseMetadataTests(unittest.TestCase):
         arguments = list(offline.argv)
         self.assertEqual(
             arguments[arguments.index("--repository-root") + 1],
-            str(stage.resolve()),
+            str(ROOT.resolve()),
         )
         self.assertEqual(
             arguments[arguments.index("--console-index") + 1],
             str((console_dist / "index.html").resolve()),
         )
         environment = dict(offline.environment)
-        self.assertEqual(environment["QUALSIGHT_REPOSITORY_ROOT"], str(stage.resolve()))
+        self.assertEqual(environment["QUALSIGHT_REPOSITORY_ROOT"], str(ROOT.resolve()))
 
     def test_sbom_is_derived_from_real_locks_and_is_deterministic(self) -> None:
         module = _load_script("generate_release_sbom")

@@ -44,10 +44,6 @@ def gate_definitions(
         ("PYTHONPATH", f"{root / 'backend' / 'src'}:{root}"),
         *deployment_environment,
     )
-    staged_backend_environment = (
-        ("PYTHONPATH", f"{root / 'backend' / 'src'}:{root}"),
-        ("QUALSIGHT_REPOSITORY_ROOT", str(root)),
-    )
     validators = (
         (
             "resource-registry",
@@ -194,14 +190,14 @@ def gate_definitions(
                 "--source-root",
                 str(root),
                 "--repository-root",
-                str(root),
+                str(deployment_root),
                 "--console-index",
                 str(root / "frontend" / "dist" / "index.html"),
                 "--python",
                 python,
             ),
             3600,
-            staged_backend_environment,
+            backend_environment,
         ),
     )
 
