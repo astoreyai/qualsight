@@ -24,9 +24,9 @@ owner authorization permits local noncommercial research acquisition but never r
 acquisition of the identity-labeled LFW tree remains blocked; the three author-published, pair-only
 verification protocols are downloadable and carry no fabricated identity labels.
 
-**Status:** 0.1.0-beta.1 — the 41-node beta capability graph is accepted end to end on real data
-(`docs/BETA_ACCEPTANCE.md`); post-beta cycle C25 added 1:N identification, controlled transformations,
-and a container execution adapter.
+**Status:** 0.1.0-beta.1 — the 41-node controlled-workstation beta capability graph is accepted end to
+end on real data (`docs/BETA_ACCEPTANCE.md`). Later local research work implemented 1:N identification,
+controlled transformations, and a container execution adapter, but those extensions remain outside the 0.1.0 beta acceptance scope and grant no DHS transition or deployment authority.
 
 ## Start here
 
@@ -66,3 +66,6 @@ high-confidence credential indicators. See `resources/authorizations/` and
 `backend/` (Python 3.11 control plane, engines, matchers, metrics, analyses, reporting, security),
 `frontend/` (Vite/React PWA console), `scripts/` (installation, gates, validators, verifiers),
 `tests/` and `backend/tests/` (real-data tests only), `docs/`, `metrics/`, `resources/`, `atg/`.
+
+The complete release-authority split between controlled beta requirements and DHS transition-only
+controls is frozen in `REQUIREMENTS.md`. Remote API connectors remain unadmitted.

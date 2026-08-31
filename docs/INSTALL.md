@@ -17,8 +17,11 @@ SHA-256 before use. Scientific execution does not download dependencies implicit
 * Python 3.11 with [`uv`](https://docs.astral.sh/uv/) 0.9 on `PATH`; the project-pinned
   `pip-audit` 2.10.0 is installed into `.venv` by the frozen development group; Node 20 with pnpm 10
   (`/usr/bin/node` — a newer Node in `~/.local/bin` must not shadow it; the scripts prepend `/usr/bin`).
-* GCC 12 and CMake for the one-time OFIQ v1.1.2 build (Conan 2.18 is installed as a `uv` tool by
-  `scripts/ofiq_v112_build.sh`; no `sudo`).
+* The already registered OFIQ v1.1.2 native runtime, validated by its recorded artifact hashes. No
+  reviewed Conan lockfile exists in this repository or the existing build evidence, so
+  `scripts/ofiq_v112_build.sh` stops unconditionally before acquisition, mutation, tool installation,
+  or dependency resolution. An operator-supplied path does not establish review authority. A fresh
+  native build remains externally blocked until its exact Conan closure is registered and reviewed.
 * The registered inputs at their registry paths (`resources/resource-registry.json`), acquired by the
   owner under the recorded use decisions and never bundled with QualSight: the LFW funneled release
   and its official pair lists, the AdaFace IR-101 / ElasticFace-Arc R100 / MagFace IResNet-100 /
@@ -37,9 +40,15 @@ deployment-local registry artifacts to be present. A fresh clone elsewhere is ex
 registry validation; that refusal is an integrity control, not a successful portable installation.
 
 `install.sh` performs, in order: toolchain check → `uv sync --frozen` (backend wheels by lock hash)
-→ `pnpm install --frozen-lockfile` and the console build → OFIQ v1.1.2 build if the registered
-runtime does not already validate → `qualsight setup` (pinned upstream matcher sources into the data
-directory) → registry, metric-registry, and governance validation. It stops at the first failure.
+→ `pnpm install --frozen-lockfile` and the console build → byte-validation of the registered OFIQ
+v1.1.2 runtime, with an explicit stop if that runtime is absent or drifted → metric-registry and ATG
+governance validation. It stops at the first failure. It does not download matcher, detector, or dataset
+add-ons and does not require optional add-ons that are irrelevant to installation of the core runtime.
+
+Add-on downloads are explicit operator actions after installation. The console's **System → Add-ons**
+view is the normal surface; `qualsight setup` is the equivalent explicit CLI acquisition action for the
+pinned upstream matcher sources. Either route retains the resource registry's hash, size, rights, and
+no-clobber checks.
 
 The console's **System → Add-ons** view can install any of the six exact registered checkpoints into
 `QUALSIGHT_DATA_DIR/checkpoints/`. Each action either imports already verified owner-held bytes or
@@ -63,9 +72,13 @@ the current registry contract.
 `bash scripts/release.sh` accepts only a clean committed tree, extracts that commit to a private staging
 directory, performs frozen all-group Python and integrity-checked pnpm installs there, rebuilds the console
 from those committed bytes,
-and creates source and console archives plus a deterministic CycloneDX 1.5 SBOM with the real uv/pnpm
-runtime and release-toolchain dependency edges, an artifact integrity manifest, the commit/tree IDs, and
-SHA-256 checksums. SBOM, vulnerability, and manifest inputs are read from that immutable staged tree.
+and creates source and console archives plus a deterministic CycloneDX 1.5 inventory. The inventory
+contains real uv/pnpm dependency edges and installed-package declared-license evidence, registry-only
+scientific and native resource metadata, explicit rights/admission states, and an explicit marker for
+blocked native resolution. It does not claim that external resource bytes or a complete host/native OS
+package inventory are bundled. The release also records every command and exit code in the complete
+13-step beta gate, an artifact integrity manifest, the commit/tree IDs, and SHA-256 checksums. SBOM,
+gate, vulnerability, and manifest inputs are read from that immutable staged tree.
 A nonblocking release lock and one atomic no-clobber directory rename publish the complete set beneath
 `dist/qualsight-<version>/`; an existing versioned directory is never overwritten. The source archive is
 derived from the exact commit but excludes the internal session/ATG records, machine-specific performance
@@ -107,7 +120,7 @@ guard counted zero attempts. Its last real run is recorded in `atg/evidence/2026
 ## Tests
 
 ```sh
-python3 -m unittest discover -s tests -q                                              # governance, registries, protocol authority
+.venv/bin/python -m unittest discover -s tests -q                                     # governance, registries, protocol authority
 env PYTHONPATH=src:.. ~/.local/bin/uv run --directory backend --frozen --offline python -m unittest discover -s tests -q   # backend (real engines; ~5 min)
 cd frontend && PATH=/usr/bin:$PATH pnpm exec tsc --noEmit -p tsconfig.json && pnpm run build
 ```

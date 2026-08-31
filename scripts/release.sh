@@ -35,16 +35,20 @@ uv sync --frozen --all-groups --directory "$BUILD_ROOT/backend"
 RELEASE_PYTHON="${BUILD_ROOT}/.venv/bin/python"
 pnpm --dir "$BUILD_ROOT" run verify:toolchain
 pnpm --dir "$BUILD_ROOT" install --frozen-lockfile
-pnpm --dir "$BUILD_ROOT" run build:frontend
 SET="${STAGE}/${NAME}"
 mkdir "$SET"
 SOURCE_ARCHIVE="${SET}/${NAME}-src.tar.gz"
 CONSOLE_ARCHIVE="${SET}/${NAME}-console-dist.tar.gz"
 SBOM="${SET}/${NAME}-SBOM.cdx.json"
 VULNERABILITIES="${SET}/${NAME}-VULNERABILITY-AUDIT.json"
+BETA_GATE="${SET}/${NAME}-BETA-GATE.json"
 MANIFEST="${SET}/${NAME}-RELEASE.json"
 CHECKSUMS="${SET}/${NAME}-SHA256SUMS"
 COMMIT_FILE="${SET}/${NAME}-COMMIT"
+"$RELEASE_PYTHON" "$BUILD_ROOT/scripts/run_release_beta_gate.py" \
+  --root "$BUILD_ROOT" --deployment-root "$ROOT" \
+  --output "$BETA_GATE" --python "$RELEASE_PYTHON" \
+  --commit "$COMMIT" --tree "$TREE"
 "$RELEASE_PYTHON" "$BUILD_ROOT/scripts/create_release_source_archive.py" \
   --root "$ROOT" --output "$SOURCE_ARCHIVE" --commit "$COMMIT" --prefix "$NAME" \
   --policy "$BUILD_ROOT/resources/security/release-package-policy-v1.json"
@@ -56,10 +60,11 @@ tar --sort=name --mtime="@$(git show -s --format=%ct "$COMMIT")" --owner=0 --gro
   --root "$BUILD_ROOT" --output "$VULNERABILITIES"
 "$RELEASE_PYTHON" "$BUILD_ROOT/scripts/generate_release_manifest.py" \
   --root "$BUILD_ROOT" --output "$MANIFEST" --version "$VERSION" --commit "$COMMIT" --tree "$TREE" \
-  "$SOURCE_ARCHIVE" "$CONSOLE_ARCHIVE" "$SBOM" "$VULNERABILITIES"
+  "$SOURCE_ARCHIVE" "$CONSOLE_ARCHIVE" "$SBOM" "$VULNERABILITIES" "$BETA_GATE"
 printf '%s\n' "$COMMIT" > "$COMMIT_FILE"
 (cd "$SET" && sha256sum "$(basename "$SOURCE_ARCHIVE")" "$(basename "$CONSOLE_ARCHIVE")" \
-  "$(basename "$SBOM")" "$(basename "$VULNERABILITIES")" "$(basename "$MANIFEST")" "$(basename "$COMMIT_FILE")" > "$(basename "$CHECKSUMS")")
+  "$(basename "$SBOM")" "$(basename "$VULNERABILITIES")" "$(basename "$BETA_GATE")" \
+  "$(basename "$MANIFEST")" "$(basename "$COMMIT_FILE")" > "$(basename "$CHECKSUMS")")
 mv -T -n "$SET" "$FINAL_DIR"
 if [ -e "$SET" ] || [ ! -d "$FINAL_DIR" ]; then
   echo "release refused: atomic no-clobber publication failed for ${FINAL_DIR}" >&2

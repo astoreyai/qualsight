@@ -57,7 +57,7 @@ hashes), matcher and preprocessing (`matcher`, `matcher_preprocessing`, `model_h
 | Users (single-user; optional local account) | single-user attribution done (QS-H71); optional local-account mode not built (documented as optional) |
 | Data (import, manifests, identity mappings, pair definitions) | done — LFW import, protocol freeze, subset fixture, derived sets |
 | Quality (OFIQ adapter, single image, batch, distributions) | done |
-| Matchers (score import; approved local matchers) | done — six matchers, three representation-compatible preprocessing profiles; external score import |
+| Matchers (score import; approved local matchers) | done — beta-required AdaFace, ElasticFace, and TransFace-S under both frozen SCRFD preprocessing conditions; external score import. MagFace, TopoFR, TransFace-B, and publisher-prealigned research paths are catalogued extensions outside QS-H74. |
 | Verification (FMR/FNMR/ROC/DET/EER/operating points) | done |
 | FIQA (ERC, AU-ERC, quality-conditioned, quality-error modelling) | done |
 | Cross-matcher (overlays, failure overlap, utility differences) | done |
@@ -81,7 +81,8 @@ three downloadable pair-only protocols), three representation-compatible preproc
 controlled transforms, and no admitted remote connection. All checkpoint and pair-dataset transfers are
 explicit setup actions with exact source, size, SHA-256, no-clobber promotion, and durable receipts; scientific
 execution remains offline. The release builder emits committed-tree source/console archives, a real uv/pnpm
-CycloneDX graph, a lock-bound vulnerability audit, checksums, and a unified manifest. It still refuses to call
+and governed-resource CycloneDX inventory, a complete recorded 13-step beta gate, a lock-bound vulnerability
+audit, checksums, and a unified manifest. It still refuses to call
 the result a portable installer because identity-labeled LFW, SCRFD, native OFIQ, and 199 deployment-specific
 registry paths remain external prerequisites.
 
@@ -104,17 +105,19 @@ Python inspection cannot prove the absence of every equivalent dynamic-execution
 production-authorized claim.
 
 The complete backend discovery baseline was 149/149 passing in 898.650 seconds with two explicit
-large-network skips. The final discovery on the closure tree ran 166/166 in 1,411.657 seconds with the
-same two skips. The 17 additional tests cover bounded admission, streaming upload rejection, durable
-operation recovery, process leasing, image-header preflight, exact blockwise identification, checkpoint
-and dataset integrity, the corrected representation-compatible matcher matrix contracts, and independent
-SQLite snapshot/lease enforcement.
+large-network skips. The current controlled-beta closure ran 184/184 in 1,555.557 seconds with the same
+two skips. The 35 additional tests cover bounded admission, streaming upload rejection, durable
+request/attempt/result recovery, process leasing, atomic no-clobber backup publication and restore,
+image-header preflight, exact blockwise identification, checkpoint and dataset integrity, scientific-claim
+support boundaries, subject multi-membership resampling, corrected matcher-matrix contracts, and
+independent SQLite snapshot/lease enforcement.
 
-## Post-beta (Phase 6) status
+## Research extensions outside QS-H74 beta acceptance
 
-1:N identification, controlled degradation, container execution accepted (cycle C25); demographic
-analysis, PAD, capture clients, SSO, commercial SDKs, and non-face modalities are BLOCKED_BY_OWNER_INPUT
-with the exact input each needs (ATG_PLAN.md, post-beta branch).
+1:N identification, controlled degradation, and container execution were implemented and locally
+validated after terminal beta acceptance in cycle C25. They remain outside QS-H74 beta acceptance and
+do not change the `0.1.0-beta.1` release authority. Demographic analysis, PAD, capture clients, SSO,
+commercial SDKs, and non-face modalities remain transition-only and are not admitted by this beta.
 
 ## Known limitations carried into the beta
 

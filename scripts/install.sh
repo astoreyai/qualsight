@@ -2,14 +2,13 @@
 # QualSight reference-workstation installation from pinned resources (PRD §§46–48; QS-H72).
 #
 # Installation may use the network for dependency wheels bound by uv.lock,
-# packages bound by pnpm-lock.yaml, the OFIQ v1.1.2 tag/model archives, and
-# hash-pinned matcher architecture sources. Scientific jobs then run without
-# network access. Checkpoints and pair datasets are separate explicit System
-# actions and are never downloaded implicitly by this script.
+# packages bound by pnpm-lock.yaml. Scientific jobs then run without network
+# access. Checkpoints, matcher sources, and pair datasets are separate explicit
+# System actions and are never downloaded implicitly by this script.
 #
 # Preconditions on the controlled workstation (checked below): Linux x86_64,
-# Python 3.11, uv, Node 20 + pnpm 10, GCC 12 toolchain for the OFIQ build,
-# and every deployment-local path recorded by resources/resource-registry.json.
+# Python 3.11, uv, Node 20 + pnpm 10, the admitted OFIQ runtime, and every
+# deployment-local path required by the selected local workflows.
 # This script is not a relocatable cold-start installer: the registry deliberately
 # binds controlled scientific inputs and runtimes to absolute paths and hashes.
 set -euo pipefail
@@ -39,15 +38,10 @@ pnpm install --frozen-lockfile
 pnpm --dir frontend run build
 
 step "OFIQ v1.1.2 runtime (skipped when the registered runtime already validates)"
-if ! "$UV" run --directory backend --frozen --offline python ../scripts/validate_resource_registry.py ../resources/resource-registry.json >/dev/null 2>&1; then
+if ! bash scripts/ofiq_v112_build.sh --validate-existing --registry resources/resource-registry.json; then
+  echo "registered OFIQ runtime validation failed; the native rebuild remains blocked without a reviewed Conan lock" >&2
   bash scripts/ofiq_v112_build.sh
 fi
-
-step "pinned upstream matcher sources (setup-time acquisition into the data directory)"
-env PYTHONPATH="$ROOT/backend/src:$ROOT" "$UV" run --directory backend --frozen --offline python -m qualsight.cli setup
-
-step "registry validation (every registered artifact hash)"
-"$UV" run --directory backend --frozen --offline python ../scripts/validate_resource_registry.py ../resources/resource-registry.json
 
 step "governance validation"
 python3 scripts/validate_metric_registry.py metrics/metric-registry.json

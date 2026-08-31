@@ -2,6 +2,21 @@
 
 ## Unreleased (Plan D/E — DHS demo readiness, decisions 30–31)
 
+* Controlled-beta closure now separates beta-required capabilities from deferred research extensions
+  and DHS transition controls. The committed release gate requires exactly AdaFace IR101,
+  ElasticFace Arc R100, and TransFace-S under both frozen SCRFD preprocessing conditions, records all
+  nine cross-matcher contrasts, proves ownership of its offline listener, and derives required SBOM
+  resource edges from that same admitted set.
+* Durable operation requests now retain separate attempt and result identities across retry and restart,
+  so internal retry attempts cannot appear as phantom project jobs. The local operator can create,
+  verify, and restore an integrity-bound offline backup while the data-directory lease excludes live
+  mutation.
+* Scientific outputs now distinguish descriptive in-sample thresholds from independently supported
+  claims, require observed false-match evidence before supporting an operating point, use subject-aware
+  resampling for multi-membership comparisons, and propagate claim-specific `NOT_SUPPORTED` status into
+  reports. Legacy report compatibility is exercised from a provenance-labelled subset of the real
+  2026-08-17 SQLite record rather than a manufactured record.
+
 * Closed add-on catalog: the console and `GET /api/addons` now enumerate six real matcher
   drivers, the registered identity-labelled LFW dataset, three author-published pair datasets,
   three swappable matcher-preprocessing profiles, and seven

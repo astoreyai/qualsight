@@ -66,7 +66,7 @@ AUTHORITY_FILES = {
     "requirements-0.2": {
         "path": "REQUIREMENTS.md",
         "version": "0.2",
-        "sha256": "dc728cab65fed1786996c1fea9f6c36779bc89b75544f47c09dfa55756373beb",
+        "sha256": "90e34be2362d172c47de7b97f92e2ba41cffe0b2a0e045667569a1b836e91d23",
     },
 }
 ALLOWED_DOMAINS = {

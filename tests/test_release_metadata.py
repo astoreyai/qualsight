@@ -7,6 +7,8 @@ import io
 import json
 import os
 import shutil
+import signal
+import socket
 import sqlite3
 import stat
 import subprocess
@@ -408,6 +410,191 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn(("loose-envify", "1.4.0"), installed)
         self.assertGreater(len(node_rows), 300)
 
+    def test_published_release_boundary_separates_beta_from_dhs_transition(self) -> None:
+        requirements = (ROOT / "REQUIREMENTS.md").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        acceptance = (ROOT / "docs" / "BETA_ACCEPTANCE.md").read_text(
+            encoding="utf-8"
+        )
+        threat_model = (ROOT / "docs" / "THREAT_MODEL.md").read_text(
+            encoding="utf-8"
+        )
+        install = (ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
+
+        self.assertIn("## Controlled beta release boundary", requirements)
+        self.assertIn("## DHS transition-only controls", requirements)
+        self.assertIn("outside the 0.1.0 beta acceptance scope", readme)
+        self.assertIn("outside QS-H74 beta acceptance", acceptance)
+        self.assertNotIn("post-beta cycle C25 added", readme)
+        self.assertIn("loopback HTTP server", threat_model)
+        self.assertIn(
+            "Python socket guard does not provide OS-level egress control",
+            threat_model,
+        )
+        self.assertIn(".venv/bin/python -m unittest discover -s tests -q", install)
+        self.assertNotIn("python3 -m unittest discover -s tests -q", install)
+        self.assertIn("Remote API connectors remain unadmitted", requirements)
+        self.assertIn("verified local offline backup and no-clobber restore", requirements)
+        self.assertIn("operational continuity with defined RTO/RPO", requirements)
+        self.assertNotIn("managed encryption, backup/recovery, incident response", requirements)
+
+    def test_ofiq_build_pins_real_archive_identity_and_stops_without_a_governed_conan_lock(self) -> None:
+        build_script = (ROOT / "scripts" / "ofiq_v112_build.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "IMAGES_SHA=11aaebeb180810e0b2b42a5dafb356938c92ddf01592411d1d8f219988448399",
+            build_script,
+        )
+        self.assertIn("IMAGES_SIZE=374153032", build_script)
+        self.assertNotIn("QUALSIGHT_OFIQ_IMAGES_SHA", build_script)
+        self.assertIn("No Conan lockfile is recorded", build_script)
+        self.assertNotIn("CONAN_LOCK=${QUALSIGHT_OFIQ_CONAN_LOCK", build_script)
+        self.assertNotIn("conan install", build_script)
+        self.assertNotIn("--build missing", build_script)
+        self.assertNotIn("uv tool install", build_script)
+
+    def test_release_executes_and_packages_the_complete_staged_beta_gate(self) -> None:
+        gate_path = ROOT / "scripts" / "run_release_beta_gate.py"
+        self.assertTrue(gate_path.is_file())
+        gate = _load_script("run_release_beta_gate")
+        definitions = gate.gate_definitions(ROOT, sys.executable)
+        self.assertEqual(
+            [definition.name for definition in definitions],
+            [
+                "root-tests",
+                "backend-tests",
+                "frontend-toolchain",
+                "frontend-build",
+                "dependency-audit",
+                "resource-registry",
+                "metric-registry",
+                "lfw-protocol",
+                "lfw-protocol-authority",
+                "scrfd-release-provenance",
+                "shared-crop-lineage",
+                "atg-governance",
+                "offline-workflow",
+            ],
+        )
+        definitions_by_name = {
+            definition.name: definition for definition in definitions
+        }
+        for validator_name in (
+            "resource-registry",
+            "metric-registry",
+            "lfw-protocol",
+            "lfw-protocol-authority",
+            "scrfd-release-provenance",
+            "shared-crop-lineage",
+            "atg-governance",
+        ):
+            self.assertEqual(
+                definitions_by_name[validator_name].argv[1],
+                "-m",
+                validator_name,
+            )
+        offline_argv = definitions_by_name["offline-workflow"].argv
+        self.assertIn("--source-root", offline_argv)
+        self.assertIn("--repository-root", offline_argv)
+        self.assertIn("--python", offline_argv)
+        offline_module = _load_script("offline_gate")
+        self.assertEqual(
+            offline_module.BETA_REQUIRED_LEAVES,
+            (
+                "QS-C22.AS",
+                "QS-C22.AN",
+                "QS-C22.ES",
+                "QS-C22.EN",
+                "QS-C22.TS",
+                "QS-C22.TN",
+            ),
+        )
+        release_script = (ROOT / "scripts" / "release.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("run_release_beta_gate.py", release_script)
+        self.assertIn("-BETA-GATE.json", release_script)
+        self.assertIn('"$BETA_GATE"', release_script)
+        self.assertIn('--deployment-root "$ROOT"', release_script)
+
+    def test_offline_gate_requires_its_launched_process_to_own_the_listener(self) -> None:
+        module = _load_script("offline_gate")
+        host = "127.0.0.1"
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind((host, 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            with self.assertRaisesRegex(RuntimeError, "already has a listener"):
+                module._assert_endpoint_available(host, port)
+
+            unrelated = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(5)"],
+                start_new_session=True,
+            )
+            try:
+                with self.assertRaisesRegex(TimeoutError, "not owned"):
+                    module._wait_for_owned_listener(
+                        unrelated,
+                        host,
+                        port,
+                        timeout=0.2,
+                    )
+            finally:
+                os.killpg(os.getpgid(unrelated.pid), signal.SIGTERM)
+                unrelated.wait(timeout=5)
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
+            reservation.bind((host, 0))
+            port = reservation.getsockname()[1]
+        server = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "http.server",
+                str(port),
+                "--bind",
+                host,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            module._wait_for_owned_listener(server, host, port, timeout=5)
+        finally:
+            os.killpg(os.getpgid(server.pid), signal.SIGTERM)
+            server.wait(timeout=5)
+
+    def test_offline_release_gate_serves_and_hashes_the_staged_console(self) -> None:
+        gate = _load_script("run_release_beta_gate")
+        with tempfile.TemporaryDirectory() as temporary:
+            stage = Path(temporary) / "committed-stage"
+            console_dist = stage / "frontend" / "dist"
+            console_dist.parent.mkdir(parents=True)
+            shutil.copytree(ROOT / "frontend" / "dist", console_dist)
+            definitions = gate.gate_definitions(
+                stage,
+                sys.executable,
+                deployment_root=ROOT,
+            )
+        offline = next(
+            definition
+            for definition in definitions
+            if definition.name == "offline-workflow"
+        )
+        arguments = list(offline.argv)
+        self.assertEqual(
+            arguments[arguments.index("--repository-root") + 1],
+            str(stage.resolve()),
+        )
+        self.assertEqual(
+            arguments[arguments.index("--console-index") + 1],
+            str((console_dist / "index.html").resolve()),
+        )
+        environment = dict(offline.environment)
+        self.assertEqual(environment["QUALSIGHT_REPOSITORY_ROOT"], str(stage.resolve()))
+
     def test_sbom_is_derived_from_real_locks_and_is_deterministic(self) -> None:
         module = _load_script("generate_release_sbom")
         first = module.build_sbom(ROOT)
@@ -449,6 +636,147 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(set(dependency_graph), known_references)
         self.assertTrue(
             all(target in known_references for targets in dependency_graph.values() for target in targets)
+        )
+
+        resource_components = {
+            component["name"]: component
+            for component in first["components"]
+            if any(
+                property_["name"] == "qualsight:ecosystem"
+                and property_["value"] == "governed-scientific-resource"
+                for property_ in component.get("properties", [])
+            )
+        }
+        registry = json.loads(
+            (ROOT / "resources" / "resource-registry.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(len(resource_components), len(registry["resources"]))
+        self.assertIn("ofiq-v1-1-2-linux-runtime", resource_components)
+        self.assertIn("lfw-funneled-local-candidate", resource_components)
+        self.assertIn("transface-s-glint360k-local-candidate", resource_components)
+        transface_properties = {
+            row["name"]: row["value"]
+            for row in resource_components[
+                "transface-s-glint360k-local-candidate"
+            ]["properties"]
+        }
+        self.assertEqual(
+            transface_properties["qualsight:third-party-rights-status"],
+            "NO_LICENSE_FOUND",
+        )
+        self.assertEqual(transface_properties["qualsight:bundled"], "false")
+        self.assertEqual(
+            transface_properties["qualsight:distribution-class"],
+            "runtime-downloadable-resource-manifest",
+        )
+        magface_properties = {
+            row["name"]: row["value"]
+            for row in resource_components[
+                "magface-iresnet100-ms1mv2-local-candidate"
+            ]["properties"]
+        }
+        self.assertEqual(
+            magface_properties["qualsight:distribution-class"],
+            "runtime-downloadable-resource-manifest",
+        )
+        blocked_native_properties = {
+            row["name"]: row["value"]
+            for row in resource_components[
+                "ofiq-v1-1-2-cmake-runtime-candidate"
+            ]["properties"]
+        }
+        self.assertEqual(
+            blocked_native_properties["qualsight:distribution-class"],
+            "externally-blocked-native-resolution",
+        )
+        ofiq_runtime = resource_components["ofiq-v1-1-2-linux-runtime"]
+        self.assertEqual(ofiq_runtime["scope"], "required")
+        deferred_matchers = {
+            resource_components[name]["bom-ref"]
+            for name in (
+                "magface-iresnet100-ms1mv2-local-candidate",
+                "topofr-r100-glint360k-local-candidate",
+                "transface-b-glint360k-local-candidate",
+            )
+        }
+        application_ref = first["metadata"]["component"]["bom-ref"]
+        self.assertTrue(
+            deferred_matchers.isdisjoint(dependency_graph[application_ref])
+        )
+        fastapi = components[("python", "fastapi", "0.141.1")]
+        self.assertTrue(fastapi["licenses"])
+        self.assertEqual(
+            next(
+                row["value"]
+                for row in fastapi["properties"]
+                if row["name"] == "qualsight:license-evidence"
+            ),
+            "docs/DEPENDENCY_AUDIT.md",
+        )
+        for runtime_name in ("react", "react-dom", "scheduler", "loose-envify"):
+            runtime_component = next(
+                component
+                for component in frontend
+                if component["name"] == runtime_name
+            )
+            runtime_properties = {
+                row["name"]: row["value"]
+                for row in runtime_component["properties"]
+            }
+            self.assertEqual(runtime_properties["qualsight:bundled"], "true")
+            self.assertEqual(
+                runtime_properties["qualsight:distribution-class"],
+                "frontend-runtime-bundled-into-console-assets",
+            )
+        for build_name in ("vite", "typescript", "@vitejs/plugin-react"):
+            build_component = next(
+                component
+                for component in frontend
+                if component["name"] == build_name
+            )
+            build_properties = {
+                row["name"]: row["value"]
+                for row in build_component["properties"]
+            }
+            self.assertEqual(build_properties["qualsight:bundled"], "false")
+            self.assertEqual(
+                build_properties["qualsight:distribution-class"],
+                "frontend-build-package-not-distributed-as-package",
+            )
+
+    def test_install_validates_only_the_real_registered_ofiq_runtime(self) -> None:
+        completed = subprocess.run(
+            [
+                "bash",
+                str(ROOT / "scripts" / "ofiq_v112_build.sh"),
+                "--validate-existing",
+                "--registry",
+                str(ROOT / "resources" / "resource-registry.json"),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn("OFIQ_RUNTIME_VALID", completed.stdout)
+
+        install_script = (ROOT / "scripts" / "install.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("ofiq_v112_build.sh --validate-existing", install_script)
+        self.assertNotIn("validate_resource_registry.py", install_script)
+        self.assertNotIn("qualsight.cli setup", install_script)
+        self.assertNotIn("the OFIQ v1.1.2 tag/model archives", install_script)
+        self.assertNotIn("GCC 12 toolchain for the OFIQ build", install_script)
+        install_document = (ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
+        self.assertNotIn("→ `qualsight setup`", install_document)
+        self.assertIn(
+            "Add-on downloads are explicit operator actions after installation",
+            install_document,
         )
 
     def test_manifest_hashes_real_staged_files_and_refuses_overwrite(self) -> None:

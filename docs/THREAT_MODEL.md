@@ -1,8 +1,9 @@
 # QualSight threat model and local data controls
 
 Scope: a single researcher's controlled workstation holding face images and derived biometric data
-(quality measures, embeddings, comparison scores). QualSight is a local tool; it has no accounts, no
-server, and no cloud component.
+(quality measures, embeddings, comparison scores). QualSight is a local tool with no accounts or cloud
+component. It runs a loopback HTTP server for its browser console and API, but exposes no remote or
+shared service.
 
 ## Assets
 
@@ -36,6 +37,13 @@ server, and no cloud component.
 | Generated report, figure-provenance, or embedding bytes are altered after recording | Report HTML, PDF, JSON, report provenance, and figure-provenance downloads verify the originally recorded file-byte SHA-256 rather than trusting the current path or parsed object. The response is copied from a no-follow file descriptor to a private snapshot, verifies that same open inode before and after the copy, and streams only that snapshot. Legacy figure rows are accepted only when their stored canonical-object hash matches the parsed object and the current bytes match the deterministic renderer output. Embedding inventory re-hashes recorded artifacts and returns `MISSING`, `DRIFTED`, or `INVALID_FORMAT` without parsing untrusted drifted bytes. | backend tests `test_figures_dashboards_reports_exports_and_reproduction_bundles_on_the_real_fixture` and `test_project_embedding_inventory_rehashes_recorded_artifacts` |
 | Restricted images reaching outputs | Report images are embedded only under `image_policy=INCLUDE_PERMITTED` and only for PUBLIC/PRIVATE datasets; RESTRICTED sources are never embedded and RESTRICTED records are refused by the exporters; bundles carry paths and hashes only. | report/export code paths and tests |
 
+The Python socket guard does not provide OS-level egress control. It intercepts sockets created by the
+QualSight Python process and records refused attempts, but it cannot constrain a native executable or
+child process that opens its own socket. The controlled beta therefore admits only reviewed, hash-bound
+local executables and container work with `--network none`; host firewall and operating-system egress
+policy remain deployment responsibilities. This limitation prevents the Python guard from being used as
+evidence of DHS network containment.
+
 ## Out of scope
 
 Multi-user access control, disk encryption, physical access, and OS hardening are the workstation's
@@ -45,8 +53,9 @@ Release archives are integrity-addressed, not publisher-signed. The release buil
 trees and existing destinations, extracts the exact commit into private staging, performs a frozen
 all-group Python install and a frozen frontend install, rebuilds the console there, derives the SBOM,
 vulnerability evidence, and artifact manifest only from that staged tree, and publishes the complete
-versioned directory under one release lock with an atomic no-clobber rename. The CycloneDX graph includes
-uv/pnpm runtime and build-tool edges; SHA-256 checksums bind every emitted file. These controls detect accidental or malicious
+versioned directory under one release lock with an atomic no-clobber rename. The CycloneDX inventory
+separates lock-resolved packages, external governed resources, and blocked native resolution; SHA-256
+checksums bind every emitted file. These controls detect accidental or malicious
 byte changes only when the verifier obtains the checksum file through a trusted channel; they do not
 provide signer identity or nonrepudiation. The package remains bound to a controlled single-user
 workstation because the scientific registry contains deployment-local absolute paths.

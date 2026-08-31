@@ -147,6 +147,38 @@ The beta terminal node QS-H74 may accept only after these phase gates are ACCEPT
 
 Conditional requirements are added to the applicable phase gate only when activated. Deferred and post-beta requirements cannot silently enter QS-H74.
 
+## Controlled beta release boundary
+
+The `0.1.0-beta.1` release authority is limited to one trusted researcher operating one
+Clarkson-controlled workstation. The beta-required controls are the accepted QS-A10 through QS-H74
+gates, the exact committed dependency locks and resource registry, loopback-only service binding,
+single-process data-directory ownership, private managed storage, explicit and hash-verified add-on
+acquisition, immutable scientific provenance, application-level verified purge,
+verified local offline backup and no-clobber restore, and the complete staged release gate recorded by
+`scripts/run_release_beta_gate.py`.
+
+The release is unsigned, nonportable, not authorized for production or shared multi-user operation, and
+does not include biometric data, model checkpoints, native runtimes, or operational databases. Its
+Python socket guard detects and refuses non-loopback socket use by the Python process; it is not an
+operating-system egress control for native executables or child processes. Remote API connectors remain unadmitted. The implemented 1:N, controlled-transformation, and container research extensions remain
+outside QS-H74 beta acceptance even though their code and local validation are present in the repository.
+
+## DHS transition-only controls
+
+The following controls are outside the controlled beta and cannot be inferred from QS-H74 acceptance:
+
+1. a DHS mission sponsor, approved mission need, CONOPS, operational users, and measurable mission exit criteria;
+2. named organizational decision authorities, lifecycle ownership, and separation of duties;
+3. privacy, civil-rights, records-management, data-retention, and approved biometric-data-flow decisions;
+4. a selected security baseline, independent control assessment, authorization decision, and continuous monitoring;
+5. authenticated multi-user access, host egress enforcement, managed encryption, operational continuity with defined RTO/RPO, incident response, and decommissioning;
+6. resolved acquisition and redistribution rights for every dataset, checkpoint, native dependency, and model;
+7. a portable, signed distribution with an authenticated trust channel and independently operated installation; and
+8. independent DHS operator usability and mission-population performance evaluation.
+
+These are transition kill conditions, not incomplete beta implementations. No document, test, SBOM,
+checksum, project-owner receipt, or local scientific result in this repository satisfies them.
+
 ## Change control
 
 Changing a requirement requires one patch that:
