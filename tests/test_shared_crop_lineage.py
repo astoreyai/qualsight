@@ -189,6 +189,7 @@ class SharedCropLineageTests(unittest.TestCase):
                 "datetime",
                 "hashlib",
                 "json",
+                "os",
                 "pathlib",
                 "typing",
             }

@@ -52,12 +52,12 @@ def gate_definitions(
         (
             "resource-registry",
             "scripts.validate_resource_registry",
-            ("resources/resource-registry.json",),
+            (str(deployment_root / "resources" / "resource-registry.json"),),
         ),
         (
             "metric-registry",
             "scripts.validate_metric_registry",
-            ("metrics/metric-registry.json",),
+            (str(deployment_root / "metrics" / "metric-registry.json"),),
         ),
         (
             "lfw-protocol",
@@ -65,38 +65,63 @@ def gate_definitions(
             (
                 "verify",
                 "--registry",
-                "resources/resource-registry.json",
+                str(deployment_root / "resources" / "resource-registry.json"),
                 "--manifest",
-                "resources/manifests/lfw-local-pairs-v1.jsonl",
+                str(
+                    deployment_root
+                    / "resources"
+                    / "manifests"
+                    / "lfw-local-pairs-v1.jsonl"
+                ),
             ),
         ),
         (
             "lfw-protocol-authority",
             "scripts.validate_lfw_protocol_authority",
             (
-                "resources/manifests/lfw-official-protocol-authority-v1.json",
+                str(
+                    deployment_root
+                    / "resources"
+                    / "manifests"
+                    / "lfw-official-protocol-authority-v1.json"
+                ),
                 "--registry",
-                "resources/resource-registry.json",
+                str(deployment_root / "resources" / "resource-registry.json"),
                 "--pairs",
-                "resources/manifests/lfw-local-pairs-v1.jsonl",
+                str(
+                    deployment_root
+                    / "resources"
+                    / "manifests"
+                    / "lfw-local-pairs-v1.jsonl"
+                ),
             ),
         ),
         (
             "scrfd-release-provenance",
             "scripts.validate_scrfd_release_provenance",
             (
-                "resources/manifests/insightface-buffalo-l-release-provenance-v1.json",
+                str(
+                    deployment_root
+                    / "resources"
+                    / "manifests"
+                    / "insightface-buffalo-l-release-provenance-v1.json"
+                ),
                 "--registry",
-                "resources/resource-registry.json",
+                str(deployment_root / "resources" / "resource-registry.json"),
             ),
         ),
         (
             "shared-crop-lineage",
             "scripts.validate_shared_crop_lineage",
             (
-                "resources/manifests/lfw-full-v1-shared-crop-lineage-reconciliation.json",
+                str(
+                    deployment_root
+                    / "resources"
+                    / "manifests"
+                    / "lfw-full-v1-shared-crop-lineage-reconciliation.json"
+                ),
                 "--registry",
-                "resources/resource-registry.json",
+                str(deployment_root / "resources" / "resource-registry.json"),
             ),
         ),
         ("atg-governance", "scripts.validate_atg_documents", ()),

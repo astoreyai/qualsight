@@ -556,6 +556,22 @@ class ReleaseMetadataTests(unittest.TestCase):
                 ],
                 str(ROOT.resolve()),
             )
+        split_lfw_argv = split_definitions_by_name["lfw-protocol"].argv
+        self.assertEqual(
+            split_lfw_argv[split_lfw_argv.index("--registry") + 1],
+            str((ROOT / "resources" / "resource-registry.json").resolve()),
+        )
+        self.assertEqual(
+            split_lfw_argv[split_lfw_argv.index("--manifest") + 1],
+            str(
+                (
+                    ROOT
+                    / "resources"
+                    / "manifests"
+                    / "lfw-local-pairs-v1.jsonl"
+                ).resolve()
+            ),
+        )
         offline_argv = definitions_by_name["offline-workflow"].argv
         self.assertIn("--source-root", offline_argv)
         self.assertIn("--repository-root", offline_argv)
@@ -587,6 +603,37 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("-BETA-GATE.json", release_script)
         self.assertIn('"$BETA_GATE"', release_script)
         self.assertIn('--deployment-root "$ROOT"', release_script)
+
+    def test_staged_evidence_validators_use_the_controlled_repository_root(self) -> None:
+        variable = "QUALSIGHT_REPOSITORY_ROOT"
+        previous = os.environ.get(variable)
+        validator_names = (
+            "validate_lfw_protocol_authority",
+            "validate_scrfd_release_provenance",
+            "validate_shared_crop_lineage",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            staged_scripts = Path(temporary) / "committed-stage" / "scripts"
+            staged_scripts.mkdir(parents=True)
+            os.environ[variable] = str(ROOT.resolve())
+            try:
+                for name in validator_names:
+                    staged_path = staged_scripts / f"{name}.py"
+                    shutil.copy2(ROOT / "scripts" / staged_path.name, staged_path)
+                    spec = importlib.util.spec_from_file_location(
+                        f"staged_{name}",
+                        staged_path,
+                    )
+                    self.assertIsNotNone(spec)
+                    self.assertIsNotNone(spec.loader)
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    self.assertEqual(module.PROJECT_ROOT, ROOT.resolve())
+            finally:
+                if previous is None:
+                    del os.environ[variable]
+                else:
+                    os.environ[variable] = previous
 
     def test_offline_gate_requires_its_launched_process_to_own_the_listener(self) -> None:
         module = _load_script("offline_gate")

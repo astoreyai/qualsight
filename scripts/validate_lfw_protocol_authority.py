@@ -12,7 +12,17 @@ import sys
 from typing import Any
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+def _project_root() -> Path:
+    configured = os.environ.get("QUALSIGHT_REPOSITORY_ROOT")
+    if configured is None:
+        return Path(__file__).resolve().parents[1]
+    root = Path(configured).resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError("QUALSIGHT_REPOSITORY_ROOT must resolve to a directory")
+    return root
+
+
+PROJECT_ROOT = _project_root()
 AUTHORITY_PATH = (
     PROJECT_ROOT
     / "resources"
