@@ -46,7 +46,9 @@
 * The committed-tree beta gate now preserves the supplied virtual-environment interpreter entrypoint;
   resolving its symlink previously launched Debian system Python and failed before the staged root gate
   could load the release-pinned Pydantic version. Backend discovery now also fixes `backend/` as its
-  top-level directory so the root test package cannot shadow the real backend fixture package.
+  top-level directory so the root test package cannot shadow the real backend fixture package. The live
+  offline workflow preserves that same entrypoint and installs the three beta matchers' pinned architecture
+  sources through the real add-on API before executing its six-leaf matrix.
 * Add-on readiness is revalidated from live bytes: checkpoint cache identity includes inode/ctime as well
   as size/mtime, and the LFW card verifies its archive, manifest, exact tree membership, every image hash,
   and the registered tree digest before advertising `READY_TO_IMPORT`.

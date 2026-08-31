@@ -42,6 +42,11 @@ BETA_REQUIRED_LEAVES = (
     "QS-C22.TS",
     "QS-C22.TN",
 )
+BETA_REQUIRED_MATCHERS = (
+    "adaface-ir101-local-candidate",
+    "elasticface-arc-r100-local-candidate",
+    "transface-s-glint360k-local-candidate",
+)
 
 
 def _assert_endpoint_available(host: str, port: int) -> None:
@@ -125,7 +130,9 @@ def _http(method: str, path: str, body: dict | None = None, timeout: float = 600
             content_type = response.headers.get("content-type", "")
             return response.status, (json.loads(raw) if "json" in content_type else raw)
     except urllib.error.HTTPError as error:
-        return error.code, error.read().decode("utf-8", "replace")
+        raw = error.read().decode("utf-8", "replace")
+        content_type = error.headers.get("content-type", "")
+        return error.code, (json.loads(raw) if "json" in content_type else raw)
 
 
 def _wait(path: str, timeout: float) -> None:
@@ -151,6 +158,26 @@ def _poll(path: str, done: callable, timeout: float) -> object:
     raise TimeoutError(path)
 
 
+def _server_command(python: Path | None) -> list[str]:
+    if python is None:
+        return [
+            UV,
+            "run",
+            "--frozen",
+            "--offline",
+            "--directory",
+            "backend",
+            "python",
+            "-m",
+            "qualsight.cli",
+            "serve",
+        ]
+    interpreter = python.absolute()
+    if not interpreter.is_file():
+        raise ValueError(f"offline gate interpreter is not a regular file: {interpreter}")
+    return [str(interpreter), "-m", "qualsight.cli", "serve"]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--observation", type=Path, required=True)
@@ -170,11 +197,7 @@ def main() -> int:
     env = dict(os.environ)
     env.update({"QUALSIGHT_REPOSITORY_ROOT": str(repository_root), "QUALSIGHT_DATA_DIR": str(args.data_dir), "QUALSIGHT_NETWORK_GUARD": "1", "PYTHONPATH": f"{source_root / 'backend' / 'src'}:{source_root}",
                 "QUALSIGHT_INPUT_RESOURCE_IDS": "ofiq-r-01-conformance-input,lfw-funneled-local-candidate"})
-    server_command = (
-        [str(args.python.resolve(strict=True)), "-m", "qualsight.cli", "serve"]
-        if args.python is not None
-        else [UV, "run", "--frozen", "--offline", "--directory", "backend", "python", "-m", "qualsight.cli", "serve"]
-    )
+    server_command = _server_command(args.python)
     observation: dict = {"kind": "QUALSIGHT_OFFLINE_GATE", "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "steps": [], "data_dir": str(args.data_dir)}
     ok = True
     server: subprocess.Popen[bytes] | None = None
@@ -222,6 +245,31 @@ def main() -> int:
         step("protocol-frozen", status in (200, 201), protocol_id=protocol.get("protocol_id"), pairs=protocol.get("pair_count"))
         status, external = _http("POST", f"/api/projects/{project_id}/protocols/{protocol['protocol_id']}/import-external-scores", {"resource_id": "external-scores-lfw-view2-insightface-buffalo-l"})
         step("external-scores-imported", status == 201 and external.get("provenance_marker") == "EXTERNALLY_COMPUTED", leaf_id=external.get("leaf_id"), run_id=external.get("run_id"), scored=external.get("scored_count"), failed=external.get("failed_count"), eer=(external.get("eer") or {}).get("EXCLUDE_FAILED_TRIALS", {}).get("eer"), mapping=external.get("mapping"))
+        for matcher_id in BETA_REQUIRED_MATCHERS:
+            status, source_pull = _http(
+                "POST",
+                f"/api/matcher-assets/{matcher_id}/pull-sources",
+                {},
+            )
+            asset = source_pull.get("asset", {})
+            source_states = {
+                source["key"]: source["state"]
+                for source in asset.get("architecture_sources", [])
+            }
+            pulled = status == 200 and source_states and all(
+                state == "VERIFIED" for state in source_states.values()
+            )
+            step(
+                "matcher-sources-pulled",
+                bool(pulled),
+                matcher_id=matcher_id,
+                source_states=source_states,
+                detail=source_pull.get("detail"),
+            )
+            if not pulled:
+                raise RuntimeError(
+                    f"matcher source pull failed for {matcher_id}: {source_pull}"
+                )
         beta_leaves = ",".join(BETA_REQUIRED_LEAVES)
         status, matrix = _http("POST", f"/api/projects/{project_id}/protocols/{protocol['protocol_id']}/matrix?fixture_pairs_only=true&leaves={beta_leaves}", {})
         step("matrix-started", status == 202, matrix_id=matrix.get("matrix_id"))

@@ -525,6 +525,14 @@ class ReleaseMetadataTests(unittest.TestCase):
                 "QS-C22.TN",
             ),
         )
+        self.assertEqual(
+            offline_module.BETA_REQUIRED_MATCHERS,
+            (
+                "adaface-ir101-local-candidate",
+                "elasticface-arc-r100-local-candidate",
+                "transface-s-glint360k-local-candidate",
+            ),
+        )
         release_script = (ROOT / "scripts" / "release.sh").read_text(
             encoding="utf-8"
         )
@@ -580,6 +588,15 @@ class ReleaseMetadataTests(unittest.TestCase):
         finally:
             os.killpg(os.getpgid(server.pid), signal.SIGTERM)
             server.wait(timeout=5)
+
+    def test_offline_gate_preserves_controlled_venv_entrypoint(self) -> None:
+        module = _load_script("offline_gate")
+        venv_entrypoint = Path(sys.executable)
+        self.assertTrue(venv_entrypoint.is_symlink())
+        self.assertEqual(
+            module._server_command(venv_entrypoint)[0],
+            str(venv_entrypoint.absolute()),
+        )
 
     def test_offline_release_gate_serves_and_hashes_the_staged_console(self) -> None:
         gate = _load_script("run_release_beta_gate")
