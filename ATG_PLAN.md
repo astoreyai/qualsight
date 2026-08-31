@@ -2,7 +2,7 @@
 
 **Graph version:** v1.6  
 **Date:** August 17, 2026  
-**State:** The beta DAG is complete — every whole capability QS-A00 through QS-H74 (41 nodes; Phase 2 under owner decision 28, QS-C21 under decision 29) is accepted; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-D31.R0, and QS-H74.RELEASE.R0 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 remains blocked on a real external score artifact and is parked as a direct predecessor of QS-H74; QS-H74 (beta end-to-end acceptance) executed the section-57 chain offline on 2026-08-18; only the post-beta branch remains outside the DAG  
+**State:** The beta DAG is complete — every whole capability QS-A00 through QS-H74 (41 nodes; Phase 2 under owner decision 28, QS-C21 under decision 29) is accepted; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-D31.R0, and QS-H74.RELEASE.R1 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 remains blocked on a real external score artifact and is parked as a direct predecessor of QS-H74; QS-H74 (beta end-to-end acceptance) executed the section-57 chain offline on 2026-08-18; only the post-beta branch remains outside the DAG
 **Loop controller:** [ATG_LOOP.md](./ATG_LOOP.md)  
 **Canonical product requirements:** [PRD.md](./PRD.md)  
 **Evidence-only companion:** [PLAN.md](./PLAN.md)
@@ -712,7 +712,8 @@ env PYTHONPATH=src:.. /home/aaron/.local/bin/uv run --directory backend --frozen
 **Safe gate**
 
 ~~~sh
-bash scripts/ofiq_v112_build.sh
+bash scripts/ofiq_v112_build.sh --validate-lock
+bash scripts/ofiq_v112_build.sh --validate-existing --registry resources/resource-registry.json
 /home/aaron/.local/bin/uv run --frozen --offline python scripts/validate_resource_registry.py resources/resource-registry.json
 ~~~
 
@@ -1143,7 +1144,23 @@ python3 scripts/observe_console.py --screenshot-dir <outside the repository> --o
 **Acceptance:** the Phase-7 "demonstration script; beta release" items (PRD §56) are shipped: `docs/BETA_ACCEPTANCE.md` maps every §57 step and §58 field to recorded evidence and states the §55 scope status; `README.md` and `CHANGELOG.md` describe the release; versions are 0.1.0b1 (backend, recorded as `application_version` in future Runs) and 0.1.0-beta.1 (workspace/console); `scripts/demo.sh` executes the user guide verbatim on the fixture and starts the console; `scripts/release.sh` builds the source and console-dist archives with SHA-256 sums (no dataset/model/runtime/derived bytes); the console carries the PRD §44 primary navigation and a System panel (engine, registry, resources, actor, guard). Observation 10 records the navigation links and resource rows on the real console. The annotated git tag `v0.1.0-beta.1` marks the release commit (local; no remote is configured).
 **State:** ACCEPTED as evidence child (cycle 2026-08-18-C26).
 
-Historical accepted events QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, and QS-A06.R1M retain their exact recorded counts and hashes in `atg/ledger.jsonl`; current refinements supersede them for reuse without rewriting history. The active accepted evidence set is `{QS-A00, QS-A01, QS-A02, QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03, QS-A03.R1, QS-A04, QS-A04.R1, QS-A04.R2, QS-A05, QS-A06, QS-A06.R1O, QS-A06.R2, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B12.LFW.FULL, QS-B13, QS-B14, QS-C20, QS-C22, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D31.R0, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43, QS-F50, QS-F51, QS-F52, QS-F53, QS-F54, QS-H70, QS-H71, QS-H72, QS-H73, QS-C21, QS-H74, QS-H74.RELEASE.R0}`. Twenty whole capabilities participate in coarse dependency readiness; none is dependency-ready while QS-C21 lacks its real input.
+### QS-H74.RELEASE.R1 — Beta release 0.1.0-beta.2 (current evidence child)
+
+**Safe gate:** validate the committed OFIQ lock and exact upstream recipe; rebuild OFIQ v1.1.2 from
+the governed source and three verified archives; require all 787 upstream conformance cases, runtime
+linkage, and the real `r-01-frontal.png` smoke to pass; then run `bash scripts/release.sh` from the clean
+release commit and verify both the new no-clobber package and the unchanged beta-1 package identity.
+
+**Acceptance:** versions are 0.1.0b2 (backend) and 0.1.0-beta.2 (workspace/console). The package ships
+the Conan 2.18.1 lock, GCC 12 profile, exact 15-node dependency closure, validator, and build script,
+but no model, conformance-image, native-runtime, checkpoint, embedding, database, or recorded-result
+bytes. Missing governed archives and locked packages are downloadable as explicit build inputs; every
+byte and resolved dependency is verified before compilation. The controlled single-user workstation
+and DHS transition boundaries are unchanged.
+
+**State:** ACCEPTED after the append-only release record and committed-tree package gate pass.
+
+Historical accepted events QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, and QS-A06.R1M retain their exact recorded counts and hashes in `atg/ledger.jsonl`; current refinements supersede them for reuse without rewriting history. The active accepted evidence set is `{QS-A00, QS-A01, QS-A02, QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03, QS-A03.R1, QS-A04, QS-A04.R1, QS-A04.R2, QS-A05, QS-A06, QS-A06.R1O, QS-A06.R2, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B12.LFW.FULL, QS-B13, QS-B14, QS-C20, QS-C22, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D31.R0, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43, QS-F50, QS-F51, QS-F52, QS-F53, QS-F54, QS-H70, QS-H71, QS-H72, QS-H73, QS-C21, QS-H74, QS-H74.RELEASE.R1}`. Twenty whole capabilities participate in coarse dependency readiness; none is dependency-ready while QS-C21 lacks its real input.
 
 ## Dependency-ready parallel groups
 

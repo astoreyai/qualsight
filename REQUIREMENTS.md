@@ -149,13 +149,16 @@ Conditional requirements are added to the applicable phase gate only when activa
 
 ## Controlled beta release boundary
 
-The `0.1.0-beta.1` release authority is limited to one trusted researcher operating one
+The `0.1.0-beta.2` release authority is limited to one trusted researcher operating one
 Clarkson-controlled workstation. The beta-required controls are the accepted QS-A10 through QS-H74
 gates, the exact committed dependency locks and resource registry, loopback-only service binding,
 single-process data-directory ownership, private managed storage, explicit and hash-verified add-on
 acquisition, immutable scientific provenance, application-level verified purge,
 verified local offline backup and no-clobber restore, and the complete staged release gate recorded by
-`scripts/run_release_beta_gate.py`.
+`scripts/run_release_beta_gate.py`. The OFIQ native rebuild path is governed by an exact Conan 2.18.1
+lock/profile/closure and verifies downloaded archives, the resolved package graph, 787 upstream
+conformance cases, dynamic linkage, and a real-image smoke result. Model, conformance-image, and native
+runtime bytes remain external and are not release payloads.
 
 The release is unsigned, nonportable, not authorized for production or shared multi-user operation, and
 does not include biometric data, model checkpoints, native runtimes, or operational databases. Its

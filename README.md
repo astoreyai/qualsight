@@ -24,7 +24,7 @@ owner authorization permits local noncommercial research acquisition but never r
 acquisition of the identity-labeled LFW tree remains blocked; the three author-published, pair-only
 verification protocols are downloadable and carry no fabricated identity labels.
 
-**Status:** 0.1.0-beta.1 — the 41-node controlled-workstation beta capability graph is accepted end to
+**Status:** 0.1.0-beta.2 — the 41-node controlled-workstation beta capability graph is accepted end to
 end on real data (`docs/BETA_ACCEPTANCE.md`). Later local research work implemented 1:N identification,
 controlled transformations, and a container execution adapter, but those extensions remain outside the 0.1.0 beta acceptance scope and grant no DHS transition or deployment authority.
 
@@ -36,6 +36,9 @@ controlled transformations, and a container execution adapter, but those extensi
   in the guide is executed verbatim by `scripts/docs_workflow_gate.py`).
 * Methods and limitations: `docs/SCIENTIFIC_METHODS.md`. Threat model and local data controls: `docs/THREAT_MODEL.md`.
 * Demonstration: `bash scripts/demo.sh` runs the whole workflow on the registered subset fixture and starts the console.
+* OFIQ native rebuild: `scripts/ofiq_v112_build.sh --help` uses the committed Conan 2.18.1 lock/profile,
+  downloads missing upstream archives and locked packages when allowed, and verifies every archive,
+  dependency, conformance result, linked library, and real-image smoke output before writing a receipt.
 * Governance: `ATG_PLAN.md` / `ATG_LOOP.md` (capability graph and controller), `atg/ledger.jsonl`
   (append-only evidence ledger), `PRD.md`, `REQUIREMENTS.md`, `metrics/metric-registry.json`,
   `resources/resource-registry.json`.

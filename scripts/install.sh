@@ -39,8 +39,11 @@ pnpm --dir frontend run build
 
 step "OFIQ v1.1.2 runtime (skipped when the registered runtime already validates)"
 if ! bash scripts/ofiq_v112_build.sh --validate-existing --registry resources/resource-registry.json; then
-  echo "registered OFIQ runtime validation failed; the native rebuild remains blocked without a reviewed Conan lock" >&2
-  bash scripts/ofiq_v112_build.sh
+  echo "registered OFIQ runtime validation failed" >&2
+  echo "the source package includes the reviewed Conan lock/profile/closure and an online/offline builder" >&2
+  echo "run bash scripts/ofiq_v112_build.sh --help, then invoke it with --build-root set to a new absolute external directory" >&2
+  echo "then review and repin the deployment-local runtime registry before rerunning installation" >&2
+  exit 4
 fi
 
 step "governance validation"

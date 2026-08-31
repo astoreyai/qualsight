@@ -22,7 +22,7 @@ class ATGDocumentTests(unittest.TestCase):
         self.assertEqual(summary["blocked_refinement_parents"], 0)
         self.assertEqual(summary["ledger_state_claims"], 69)
         self.assertEqual(summary["historical_prefix_records"], 113)
-        self.assertEqual(summary["current_output_hashes"], 90)
+        self.assertEqual(summary["current_output_hashes"], 94)
         self.assertEqual(summary["matcher_transforms"], 3)
         self.assertEqual(summary["preprocessing_conditions"], 2)
         self.assertEqual(summary["matcher_condition_leaves"], 6)

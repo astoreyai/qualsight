@@ -1,0 +1,129 @@
+{
+  "schema_version": "1.0.0",
+  "receipt_type": "OFIQ_V1_1_2_CONAN_CLOSURE",
+  "source": {
+    "remote": "https://github.com/BSI-OFIQ/OFIQ-Project.git",
+    "tag": "v1.1.2",
+    "commit": "d589ca27896a472446abc9eca8b62947ee47db19",
+    "recipe_relative_path": "conan/conanfile.txt",
+    "recipe_sha256": "6a978392c799868f1ae301ebc9451cf1ed868fc99c6d48c4843452427b0c1e36",
+    "recipe_size_bytes": 495
+  },
+  "toolchain": {
+    "conan_version": "2.18.1",
+    "cmake_minimum_version": "3.26",
+    "compiler": "gcc",
+    "compiler_major_version": "12",
+    "cpp_standard": "17",
+    "platform": "linux-x86_64"
+  },
+  "lock": {
+    "relative_path": "resources/locks/ofiq-v1.1.2-conan.lock",
+    "sha256": "dbd7711b13d7f2c09b35a27e6b44a677d1958aaa7aed6e815df1b0fd8cea82d1",
+    "size_bytes": 1251,
+    "format_version": "0.5"
+  },
+  "profile": {
+    "relative_path": "resources/profiles/ofiq-v1.1.2-gcc12-release.profile",
+    "sha256": "f2801b992f08220a4eaa8f7847dd8c1d676a19e9cde34c6311417500540bdfb8",
+    "size_bytes": 229
+  },
+  "generation": {
+    "network_policy": "no-remote",
+    "binary_policy": "never-build",
+    "serialization": "Conan 2.18.1 output with one terminal LF",
+    "command": "conan lock create conan/conanfile.txt --profile:host=resources/profiles/ofiq-v1.1.2-gcc12-release.profile --profile:build=resources/profiles/ofiq-v1.1.2-gcc12-release.profile --no-remote --build=never"
+  },
+  "dependencies": [
+    {
+      "ref": "nasm/2.15.05#f7d6a6f3b14f583e001d9ae84e8cd152",
+      "context": "build",
+      "package_id": "3593751651824fb813502c69c971267624ced41a",
+      "observed_package_revision": "dbbf94ad852c7d78fed4e7c0388ef8e0"
+    },
+    {
+      "ref": "protobuf/3.21.12#71082ee8644b02bed9c0087a10c12cf8",
+      "context": "build",
+      "package_id": "b08ed8a5bbfd55dea4dadcc029af9fa0a61923cd",
+      "observed_package_revision": "b0fde7a5bc8bd84be6ec5eac2f428c47"
+    },
+    {
+      "ref": "zlib/1.3.1#cac0f6daea041b0ccf42934163defb20",
+      "context": "build",
+      "package_id": "5bc851010eb7b707e5cb2e24cb8ccf0f27989fa9",
+      "observed_package_revision": "8371e7e5b3037e43c7a8a3590ca125e4"
+    },
+    {
+      "ref": "eigen/3.4.0#e7256a460e38f651ab0aa5246f94cf6a",
+      "context": "host",
+      "package_id": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+      "observed_package_revision": "b2e7c2d86c5d1dbefc534889aa72e12c"
+    },
+    {
+      "ref": "gtest/1.14.0#f8f0757a574a8dd747d16af62d6eb1b7",
+      "context": "host",
+      "package_id": "47ceca0bbc804285c1e34b98dc230d8c8f79be62",
+      "observed_package_revision": "6ce11cb288eb473e77cdfedb21ab1d16"
+    },
+    {
+      "ref": "gzip-hpp/0.1.0#66d76e34c845dfd97ceaab8542a150f8",
+      "context": "host",
+      "package_id": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+      "observed_package_revision": "8ada5d13e99587f705968edb5f412b1b"
+    },
+    {
+      "ref": "libjpeg-turbo/3.0.2#69c02ef9bf2c05beee5aa7bec3ccd3a0",
+      "context": "host",
+      "package_id": "d2e72191ccb6e9b0f230fc5a5590dd3e000f5e17",
+      "observed_package_revision": "9942196fc9397d66c1d3a98cec71261d"
+    },
+    {
+      "ref": "libpng/1.6.54#b3ee4845d09981511d04205c52d78de1",
+      "context": "host",
+      "package_id": "515d92ae8a0c6d05e032e2564cafcce378d9dc6e",
+      "observed_package_revision": "844e3cb43d0a4a908cf57f5c2a0bf316"
+    },
+    {
+      "ref": "magic_enum/0.8.1#3b9beda28d0024dc5791a8ec06d73ef7",
+      "context": "host",
+      "package_id": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+      "observed_package_revision": "cc4a696121e83e06967f3c495ee8122d"
+    },
+    {
+      "ref": "opencv/4.5.5#70f455c3089a8022503f43284f66920e",
+      "context": "host",
+      "package_id": "44aa7c7a66ca31659d3f8070d8a9a5378d8ac251",
+      "observed_package_revision": "3b9f9bc87b37ad09c7dd2eb902a19aad"
+    },
+    {
+      "ref": "openjpeg/2.5.2#6f7b733e151d1bbf5ed05cbabb846828",
+      "context": "host",
+      "package_id": "5bc851010eb7b707e5cb2e24cb8ccf0f27989fa9",
+      "observed_package_revision": "5d8f591fad5c5d45c8c013a22eb05fae"
+    },
+    {
+      "ref": "protobuf/3.21.12#71082ee8644b02bed9c0087a10c12cf8",
+      "context": "host",
+      "package_id": "b08ed8a5bbfd55dea4dadcc029af9fa0a61923cd",
+      "observed_package_revision": "b0fde7a5bc8bd84be6ec5eac2f428c47"
+    },
+    {
+      "ref": "taocpp-json/1.0.0-beta.13#e76d0755f4defb452686bde7bbafd350",
+      "context": "host",
+      "package_id": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+      "observed_package_revision": "86a67e5b265060c8c91343db5198bc82"
+    },
+    {
+      "ref": "taocpp-pegtl/3.2.7#4fce7afbf9f9e5c686c38d8deef7cdc8",
+      "context": "host",
+      "package_id": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+      "observed_package_revision": "6e51780c75b577aa0844220a73c663b0"
+    },
+    {
+      "ref": "zlib/1.3.1#cac0f6daea041b0ccf42934163defb20",
+      "context": "host",
+      "package_id": "5bc851010eb7b707e5cb2e24cb8ccf0f27989fa9",
+      "observed_package_revision": "8371e7e5b3037e43c7a8a3590ca125e4"
+    }
+  ]
+}

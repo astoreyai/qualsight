@@ -1,6 +1,6 @@
 [project]
 name = "qualsight-backend"
-version = "0.1.0b1"
+version = "0.1.0b2"
 requires-python = "==3.11.*"
 dependencies = [
     "duckdb==1.5.5",

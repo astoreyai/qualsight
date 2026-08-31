@@ -438,7 +438,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("operational continuity with defined RTO/RPO", requirements)
         self.assertNotIn("managed encryption, backup/recovery, incident response", requirements)
 
-    def test_ofiq_build_pins_real_archive_identity_and_stops_without_a_governed_conan_lock(self) -> None:
+    def test_ofiq_build_pins_and_validates_the_governed_conan_closure(self) -> None:
         build_script = (ROOT / "scripts" / "ofiq_v112_build.sh").read_text(
             encoding="utf-8"
         )
@@ -448,11 +448,38 @@ class ReleaseMetadataTests(unittest.TestCase):
         )
         self.assertIn("IMAGES_SIZE=374153032", build_script)
         self.assertNotIn("QUALSIGHT_OFIQ_IMAGES_SHA", build_script)
-        self.assertIn("No Conan lockfile is recorded", build_script)
-        self.assertNotIn("CONAN_LOCK=${QUALSIGHT_OFIQ_CONAN_LOCK", build_script)
-        self.assertNotIn("conan install", build_script)
-        self.assertNotIn("--build missing", build_script)
+        self.assertIn("resources/locks/ofiq-v1.1.2-conan.lock", build_script)
+        self.assertIn("--lockfile \"$CONAN_LOCK\"", build_script)
+        self.assertIn("--no-remote --build=never", build_script)
+        self.assertIn("--build=missing", build_script)
+        self.assertIn("curl --proto '=https' --tlsv1.2", build_script)
+        self.assertIn("JOBS=4", build_script)
+        self.assertIn('NATIVE_BUILD="$SOURCE/build/build_linux"', build_script)
+        self.assertIn('ctest --test-dir "$NATIVE_BUILD" --parallel "$JOBS"', build_script)
+        self.assertIn("100% tests passed, 0 tests failed out of 787", build_script)
+        self.assertIn('"$ARCHIVES/OFIQ-Models.zip"', build_script)
+        self.assertIn('"$LOGS/ldd.log"', build_script)
+        self.assertIn('"dynamic_linkage": identity(ldd_log)', build_script)
         self.assertNotIn("uv tool install", build_script)
+
+        manifest_path = (
+            ROOT / "resources" / "manifests" / "ofiq-v1.1.2-conan-closure-v1.json"
+        )
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["source"]["commit"], "d589ca27896a472446abc9eca8b62947ee47db19")
+        self.assertEqual(manifest["toolchain"]["conan_version"], "2.18.1")
+        self.assertEqual(len(manifest["dependencies"]), 15)
+        self.assertTrue(all("#" in item["ref"] for item in manifest["dependencies"]))
+
+        validation = subprocess.run(
+            [str(ROOT / "scripts" / "ofiq_v112_build.sh"), "--validate-lock"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(validation.returncode, 0, validation.stdout + validation.stderr)
+        self.assertIn("OFIQ_CONAN_CLOSURE_VALID dependencies=15", validation.stdout)
 
     def test_release_executes_and_packages_the_complete_staged_beta_gate(self) -> None:
         gate_path = ROOT / "scripts" / "run_release_beta_gate.py"
@@ -658,10 +685,42 @@ class ReleaseMetadataTests(unittest.TestCase):
         vite_ref = components[("javascript", "vite", "7.3.6")]["bom-ref"]
         esbuild_ref = components[("javascript", "esbuild", "0.28.2")]["bom-ref"]
         pip_audit_ref = components[("python", "pip-audit", "2.10.0")]["bom-ref"]
-        build_ref = components[("build", "QualSight release toolchain", "0.1.0b1")]["bom-ref"]
+        build_ref = components[("build", "QualSight release toolchain", "0.1.0b2")]["bom-ref"]
         self.assertIn(pydantic_ref, dependency_graph[fastapi_ref])
         self.assertIn(esbuild_ref, dependency_graph[vite_ref])
         self.assertIn(pip_audit_ref, dependency_graph[build_ref])
+        conan_components = [
+            component
+            for component in first["components"]
+            if component["properties"][0]["value"] == "conan"
+        ]
+        self.assertEqual(len(conan_components), 15)
+        conan_contexts = [
+            next(
+                row["value"]
+                for row in component["properties"]
+                if row["name"] == "qualsight:conan-context"
+            )
+            for component in conan_components
+        ]
+        self.assertEqual(conan_contexts.count("build"), 3)
+        self.assertEqual(conan_contexts.count("host"), 12)
+        self.assertEqual(
+            {component["bom-ref"] for component in conan_components},
+            {reference for reference in dependency_graph[build_ref] if reference.startswith("pkg:conan/")},
+        )
+        self.assertTrue(all(component["scope"] == "optional" for component in conan_components))
+        self.assertTrue(
+            all(
+                next(
+                    row["value"]
+                    for row in component["properties"]
+                    if row["name"] == "qualsight:bundled"
+                )
+                == "false"
+                for component in conan_components
+            )
+        )
         application_ref = first["metadata"]["component"]["bom-ref"]
         self.assertLess(len(dependency_graph[application_ref]), len(first["components"]))
         known_references = {application_ref, *(component["bom-ref"] for component in first["components"])}
@@ -800,6 +859,9 @@ class ReleaseMetadataTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("ofiq_v112_build.sh --validate-existing", install_script)
+        self.assertIn("includes the reviewed Conan lock/profile/closure", install_script)
+        self.assertIn("--build-root set to a new absolute external directory", install_script)
+        self.assertNotIn("remains blocked without a reviewed Conan lock", install_script)
         self.assertNotIn("validate_resource_registry.py", install_script)
         self.assertNotIn("qualsight.cli setup", install_script)
         self.assertNotIn("the OFIQ v1.1.2 tag/model archives", install_script)
@@ -827,7 +889,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             module.write_manifest(
                 root=ROOT,
                 output=output,
-                version="0.1.0b1",
+                version="0.1.0b2",
                 commit="8abdf3eac6bdf91e5a347fe3e50bab172c83f052",
                 tree=expected_tree,
                 artifacts=artifacts,
@@ -858,7 +920,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 module.write_manifest(
                     root=ROOT,
                     output=output,
-                    version="0.1.0b1",
+                    version="0.1.0b2",
                     commit="8abdf3eac6bdf91e5a347fe3e50bab172c83f052",
                     tree=expected_tree,
                     artifacts=artifacts,

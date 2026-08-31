@@ -431,6 +431,84 @@ def _dependency_closure(
     return closure
 
 
+def _conan_closure(
+    root: Path,
+    manifest_path: Path,
+) -> tuple[list[dict[str, object]], set[str]]:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("receipt_type") != "OFIQ_V1_1_2_CONAN_CLOSURE":
+        raise ValueError("unsupported OFIQ Conan closure manifest")
+    for key in ("lock", "profile"):
+        record = manifest.get(key)
+        if not isinstance(record, dict):
+            raise ValueError(f"OFIQ Conan closure has no {key} identity")
+        relative_path = record.get("relative_path")
+        if not isinstance(relative_path, str):
+            raise ValueError(f"OFIQ Conan closure {key} path is invalid")
+        path = (root / relative_path).resolve(strict=True)
+        if not path.is_relative_to(root):
+            raise ValueError(f"OFIQ Conan closure {key} path escapes the repository")
+        if path.stat().st_size != record.get("size_bytes") or _sha256(path) != record.get("sha256"):
+            raise ValueError(f"OFIQ Conan closure {key} identity does not match the repository")
+
+    dependencies = manifest.get("dependencies")
+    if not isinstance(dependencies, list) or not dependencies:
+        raise ValueError("OFIQ Conan closure has no dependencies")
+    components: list[dict[str, object]] = []
+    references: set[str] = set()
+    for dependency in dependencies:
+        if not isinstance(dependency, dict):
+            raise ValueError("OFIQ Conan closure dependency is not an object")
+        match = re.fullmatch(
+            r"(?P<name>[^/]+)/(?P<version>[^#]+)#(?P<revision>[0-9a-f]{32})",
+            str(dependency.get("ref", "")),
+        )
+        context = dependency.get("context")
+        package_id = dependency.get("package_id")
+        package_revision = dependency.get("observed_package_revision")
+        if (
+            match is None
+            or context not in {"build", "host"}
+            or re.fullmatch(r"[0-9a-f]{40}", str(package_id)) is None
+            or re.fullmatch(r"[0-9a-f]{32}", str(package_revision)) is None
+        ):
+            raise ValueError("OFIQ Conan closure dependency identity is invalid")
+        name = match.group("name")
+        version = match.group("version")
+        recipe_revision = match.group("revision")
+        reference = (
+            f"pkg:conan/{quote(name, safe='')}@{quote(version, safe='')}"
+            f"?context={context}&package_id={package_id}"
+            f"&prev={package_revision}&rrev={recipe_revision}"
+        )
+        if reference in references:
+            raise ValueError(f"OFIQ Conan closure contains a duplicate dependency: {reference}")
+        references.add(reference)
+        components.append(
+            {
+                "type": "library",
+                "scope": "optional",
+                "bom-ref": reference,
+                "name": name,
+                "version": version,
+                "purl": reference,
+                "properties": [
+                    {"name": "qualsight:ecosystem", "value": "conan"},
+                    {"name": "qualsight:conan-context", "value": str(context)},
+                    {"name": "qualsight:conan-package-id", "value": str(package_id)},
+                    {"name": "qualsight:conan-recipe-revision", "value": recipe_revision},
+                    {"name": "qualsight:conan-package-revision", "value": str(package_revision)},
+                    {
+                        "name": "qualsight:distribution-class",
+                        "value": "governed-native-build-dependency-not-bundled",
+                    },
+                    {"name": "qualsight:bundled", "value": "false"},
+                ],
+            }
+        )
+    return components, references
+
+
 def build_sbom(root: Path, commit_timestamp: str | None = None) -> dict[str, object]:
     root = root.resolve(strict=True)
     uv_lock = root / "uv.lock"
@@ -439,6 +517,9 @@ def build_sbom(root: Path, commit_timestamp: str | None = None) -> dict[str, obj
     resource_registry = root / "resources" / "resource-registry.json"
     checkpoint_acquisition = (
         root / "resources" / "manifests" / "matcher-checkpoint-acquisition-v1.json"
+    )
+    conan_closure = (
+        root / "resources" / "manifests" / "ofiq-v1.1.2-conan-closure-v1.json"
     )
     backend_document = tomllib.loads(
         (root / "backend" / "pyproject.toml").read_text(encoding="utf-8")
@@ -469,6 +550,7 @@ def build_sbom(root: Path, commit_timestamp: str | None = None) -> dict[str, obj
         resource_registry,
         checkpoint_acquisition,
     )
+    conan_components, conan_refs = _conan_closure(root, conan_closure)
     build_ref = f"pkg:generic/qualsight-release-toolchain@{quote(backend_project['version'])}"
     build_component = {
         "type": "application",
@@ -485,7 +567,7 @@ def build_sbom(root: Path, commit_timestamp: str | None = None) -> dict[str, obj
             },
         ],
     }
-    components = package_components + resource_components + [build_component]
+    components = package_components + resource_components + conan_components + [build_component]
     references = [str(component["bom-ref"]) for component in components]
     if len(references) != len(set(references)):
         raise ValueError("dependency locks produced duplicate CycloneDX component references")
@@ -497,12 +579,13 @@ def build_sbom(root: Path, commit_timestamp: str | None = None) -> dict[str, obj
                 dependency_audit.read_bytes(),
                 resource_registry.read_bytes(),
                 checkpoint_acquisition.read_bytes(),
+                conan_closure.read_bytes(),
             )
         )
     ).hexdigest()
     application_ref = f"pkg:pypi/{backend_project['name']}@{backend_project['version']}"
     application_dependencies: set[str] = {build_ref, *admitted_resource_refs}
-    build_dependencies: set[str] = set()
+    build_dependencies: set[str] = set(conan_refs)
     for requirement in backend_project["dependencies"]:
         match = re.match(r"[A-Za-z0-9_.-]+", requirement)
         if match is None:
@@ -530,6 +613,7 @@ def build_sbom(root: Path, commit_timestamp: str | None = None) -> dict[str, obj
         **python_graph,
         **javascript_graph,
         **{str(component["bom-ref"]): set() for component in resource_components},
+        **{str(component["bom-ref"]): set() for component in conan_components},
         build_ref: build_dependencies,
     }
     return {
@@ -564,12 +648,16 @@ def build_sbom(root: Path, commit_timestamp: str | None = None) -> dict[str, obj
                         "value": _sha256(checkpoint_acquisition),
                     },
                     {
+                        "name": "qualsight:ofiq-conan-closure-manifest-sha256",
+                        "value": _sha256(conan_closure),
+                    },
+                    {
                         "name": "qualsight:dependency-graph",
-                        "value": "uv and pnpm lock edges plus admitted external resource references; pnpm peer variants unioned by package and version",
+                        "value": "uv and pnpm lock edges, governed OFIQ Conan closure members, and admitted external resource references; pnpm peer variants unioned by package and version",
                     },
                     {
                         "name": "qualsight:inventory-boundary",
-                        "value": "package locks and governed resource manifests; no resource bytes, native OS package closure, or host inventory bundled",
+                        "value": "package locks and governed resource/native-build manifests; no resource bytes, native OS package closure, or host inventory bundled",
                     },
                 ],
             },

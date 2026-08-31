@@ -1,4 +1,4 @@
-# QualSight 0.1.0-beta.1 — beta acceptance record
+# QualSight 0.1.0-beta.2 — beta acceptance record
 
 Every row below names the evidence that closes it. Identifiers are content hashes recorded in the
 append-only `atg/ledger.jsonl` and in the persistent store on the reference workstation;
@@ -112,11 +112,20 @@ image-header preflight, exact blockwise identification, checkpoint and dataset i
 support boundaries, subject multi-membership resampling, corrected matcher-matrix contracts, and
 independent SQLite snapshot/lease enforcement.
 
+## 2026-08-31 beta-2 release evidence
+
+The native OFIQ v1.1.2 rebuild path now consumes the committed Conan 2.18.1 lock, GCC 12 release
+profile, and exact 15-node host/build closure. A clean offline rebuild from the governed source commit
+and three hash-verified upstream archives passed 787/787 upstream conformance cases, resolved every
+runtime library, executed the registered `r-01-frontal.png` input, and wrote a hashed build receipt.
+The builder also supports verified HTTPS acquisition for missing archives and locked Conan packages;
+it does not bundle or redistribute the model and conformance payloads.
+
 ## Research extensions outside QS-H74 beta acceptance
 
 1:N identification, controlled degradation, and container execution were implemented and locally
 validated after terminal beta acceptance in cycle C25. They remain outside QS-H74 beta acceptance and
-do not change the `0.1.0-beta.1` release authority. Demographic analysis, PAD, capture clients, SSO,
+do not change the `0.1.0-beta.2` release authority. Demographic analysis, PAD, capture clients, SSO,
 commercial SDKs, and non-face modalities remain transition-only and are not admitted by this beta.
 
 ## Known limitations carried into the beta

@@ -1,0 +1,12 @@
+[settings]
+arch=x86_64
+build_type=Release
+compiler=gcc
+compiler.libcxx=libstdc++11
+compiler.version=12
+compiler.cppstd=17
+os=Linux
+[options]
+[conf]
+tools.system.package_manager:mode=report
+tools.system.package_manager:sudo=False

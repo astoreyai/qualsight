@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased (Plan D/E — DHS demo readiness, decisions 30–31)
+## 0.1.0-beta.2 — 2026-08-31
+
+* OFIQ v1.1.2 can now be rebuilt through a committed Conan 2.18.1 lock, GCC 12 profile, and exact
+  15-node host/build dependency closure. The builder verifies the three upstream archive identities,
+  supports governed online acquisition or fully offline cached resolution, runs all 787 upstream
+  conformance cases, checks dynamic linkage, executes a real conformance image, and writes a hashed
+  receipt. Restricted model and image payloads remain external and are never packaged.
 
 * Controlled-beta closure now separates beta-required capabilities from deferred research extensions
   and DHS transition controls. The committed release gate requires exactly AdaFace IR101,

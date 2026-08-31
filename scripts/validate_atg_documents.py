@@ -125,7 +125,7 @@ CURRENT_ACCEPTED_CHILDREN = {
     "QS-C22.CROP.R0",
     "QS-C22.MATRIX.LFW",
     "QS-D31.R0",
-    "QS-H74.RELEASE.R0",
+    "QS-H74.RELEASE.R1",
 }
 SUPERSEDED_HISTORICAL_CHILDREN = {
     "QS-A02.R0",
@@ -699,7 +699,15 @@ def _validate_current_output_hashes(records: list[dict[str, Any]]) -> int:
         / "tests/test_scrfd_release_provenance.py",
         "resources/authorizations/qualsight-owner-use-permission-granted-2026-08-17.json": PROJECT_ROOT
         / "resources/authorizations/qualsight-owner-use-permission-granted-2026-08-17.json",
+        "resources/locks/ofiq-v1.1.2-conan.lock": PROJECT_ROOT
+        / "resources/locks/ofiq-v1.1.2-conan.lock",
+        "resources/profiles/ofiq-v1.1.2-gcc12-release.profile": PROJECT_ROOT
+        / "resources/profiles/ofiq-v1.1.2-gcc12-release.profile",
+        "resources/manifests/ofiq-v1.1.2-conan-closure-v1.json": PROJECT_ROOT
+        / "resources/manifests/ofiq-v1.1.2-conan-closure-v1.json",
         "scripts/ofiq_v112_build.sh": PROJECT_ROOT / "scripts/ofiq_v112_build.sh",
+        "scripts/validate_ofiq_conan_closure.py": PROJECT_ROOT
+        / "scripts/validate_ofiq_conan_closure.py",
         "scripts/repin_registry_identity.py": PROJECT_ROOT / "scripts/repin_registry_identity.py",
         "scripts/observe_console.py": PROJECT_ROOT / "scripts/observe_console.py",
         "scripts/append_ledger_record.py": PROJECT_ROOT / "scripts/append_ledger_record.py",
