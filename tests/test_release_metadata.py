@@ -946,8 +946,15 @@ class ReleaseMetadataTests(unittest.TestCase):
             directory = Path(temporary)
             artifacts = [ROOT / "uv.lock", ROOT / "pnpm-lock.yaml"]
             output = directory / "manifest.json"
+            expected_commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
             expected_tree = subprocess.run(
-                ["git", "rev-parse", "8abdf3eac6bdf91e5a347fe3e50bab172c83f052^{tree}"],
+                ["git", "rev-parse", f"{expected_commit}^{{tree}}"],
                 cwd=ROOT,
                 check=True,
                 capture_output=True,
@@ -957,7 +964,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 root=ROOT,
                 output=output,
                 version="0.1.0b2",
-                commit="8abdf3eac6bdf91e5a347fe3e50bab172c83f052",
+                commit=expected_commit,
                 tree=expected_tree,
                 artifacts=artifacts,
             )
@@ -988,7 +995,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                     root=ROOT,
                     output=output,
                     version="0.1.0b2",
-                    commit="8abdf3eac6bdf91e5a347fe3e50bab172c83f052",
+                    commit=expected_commit,
                     tree=expected_tree,
                     artifacts=artifacts,
                 )
