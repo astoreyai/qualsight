@@ -2,7 +2,7 @@
 
 **Graph version:** v1.6  
 **Date:** August 17, 2026  
-**State:** The beta DAG is complete — every whole capability QS-A00 through QS-H74 (41 nodes; Phase 2 under owner decision 28, QS-C21 under decision 29) is accepted; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-D31.R0, and QS-H74.RELEASE.R1 are accepted; refinement parent QS-A02.LFW is accepted; QS-C21 remains blocked on a real external score artifact and is parked as a direct predecessor of QS-H74; QS-H74 (beta end-to-end acceptance) executed the section-57 chain offline on 2026-08-18; only the post-beta branch remains outside the DAG
+**State:** The beta DAG is complete — every whole capability QS-A00 through QS-H74 (41 nodes; Phase 2 under owner decision 28, QS-C21 under decision 29) is accepted; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-D31.R0, and QS-H74.RELEASE.R1 are accepted; refinement parent QS-A02.LFW is accepted; QS-H74 (beta end-to-end acceptance) executed the section-57 chain offline on 2026-08-18; only the post-beta branch remains outside the DAG
 **Loop controller:** [ATG_LOOP.md](./ATG_LOOP.md)  
 **Canonical product requirements:** [PRD.md](./PRD.md)  
 **Evidence-only companion:** [PLAN.md](./PLAN.md)
@@ -54,7 +54,7 @@ This is the live dependency graph for developing QualSight. Coarse capability no
 | PLAN.md | dc6afaf12fc824709569500717170c2cc40cf32e97a49f7ae238d16f66bbe699 | 2026-08-13 17:06:54.918284036 -0500 |
 | REQUIREMENTS.md | dc728cab65fed1786996c1fea9f6c36779bc89b75544f47c09dfa55756373beb | 2026-08-14 10:44:15.153204121 -0500 |
 
-The root was confirmed as NOT_A_GIT_WORKTREE before these graph documents were created. An authorized initialization command created an empty Git repository on branch main at 2026-08-13 18:09:11 -0500. HEAD remains unborn and no files are staged or committed.
+Historical initialization snapshot: the root was confirmed as NOT_A_GIT_WORKTREE before these graph documents were created. An authorized command created an empty Git repository on branch main at 2026-08-13 18:09:11 -0500. That initial unborn-HEAD state is retained here as history; the current repository has committed release history through `v0.1.0-beta.2`.
 
 ### Installed toolchain
 
@@ -74,7 +74,7 @@ The root was confirmed as NOT_A_GIT_WORKTREE before these graph documents were c
 
 These versions are observed environment facts, not permanent minimum-version requirements.
 
-### Accepted project toolchain controls
+### Initial accepted project toolchain controls
 
 | Artifact | SHA-256 |
 |---|---|
@@ -90,7 +90,9 @@ These versions are observed environment facts, not permanent minimum-version req
 | frontend/package.json | 0935645a8e0524225309f0381680e90ac808823ef6c6f5f94b683b598c7c79cc |
 | pnpm-lock.yaml | 07553cc9f135c78d1f5679ca0365f61a8a788dcd1a8b1aed23c1e91cade121f8 |
 
-The Python workspace uses one uv lock, requires uv 0.9.26, disables Python downloads, and keeps the uv cache at `.cache/uv`. QS-A03 introduced `pydantic==2.13.4` for strict immutable domain validation; QS-A08 added the PRD §45 control plane `fastapi==0.141.1` and `uvicorn==0.52.3` (transitively `starlette==1.6.0`, `h11==0.16.0`, `idna==3.18`) plus the dev-only `httpx==0.28.1` used by the in-process test client; QS-B12/QS-B13 added the PRD §47 Parquet/analytics dependencies `pyarrow==25.0.1` and `duckdb==1.5.5`; QS-C22 added the frozen matcher runtime closure `torch==2.10.0` (cu128 wheel with its NVIDIA runtime libraries), `timm==1.0.28` (with `torchvision==0.25.0`), `onnxruntime==1.28.0`, `opencv-python-headless==5.0.0.93`, and `numpy==2.4.6`. The pnpm workspace uses one lock, requires pnpm 10.28.0, enforces Node 20.20.x and strict engines, keeps its store at `.cache/pnpm-store`, and approves only the `esbuild` build script; QS-A09 added the console dependencies `react==18.3.1`, `react-dom==18.3.1`, `vite==5.4.11`, `@vitejs/plugin-react==4.3.4`, `typescript==5.6.3`, `vite-plugin-pwa==0.21.1`, `workbox-window==7.3.0`, `@types/react==18.3.12`, and `@types/react-dom==18.3.1`. The accepted Node 20.20.2 is `/usr/bin/node`; since 2026-08-17 10:45 a `~/.local/bin/node` symlink to a v26.7.0 install created by an unrelated workflow shadows it, so QualSight Node commands run with `/usr/bin` first on `PATH` (the toolchain gate `pnpm run verify:toolchain` proves 20.20.2/10.28.0). The direct pnpm 10.28.0 executable is the accepted invocation.
+This table and the dependency versions below are the initial acceptance snapshot, not current file identities. Current dependency authority is `uv.lock`, `pnpm-lock.yaml`, the package manifests, and `docs/DEPENDENCY_AUDIT.md`.
+
+The Python workspace uses one uv lock, requires uv 0.9.26, disables Python downloads, and keeps the uv cache at `.cache/uv`. QS-A03 introduced `pydantic==2.13.4` for strict immutable domain validation; QS-A08 added the PRD §45 control plane `fastapi==0.141.1` and `uvicorn==0.52.3` (transitively `starlette==1.6.0`, `h11==0.16.0`, `idna==3.18`) plus the dev-only `httpx==0.28.1` used by the in-process test client; QS-B12/QS-B13 added the PRD §47 Parquet/analytics dependencies `pyarrow==25.0.1` and `duckdb==1.5.5`; QS-C22 added the frozen matcher runtime closure `torch==2.10.0` (cu128 wheel with its NVIDIA runtime libraries), `timm==1.0.28` (with `torchvision==0.25.0`), `onnxruntime==1.28.0`, `opencv-python-headless==5.0.0.93`, and `numpy==2.4.6`. The initial pnpm workspace used one lock, Node 20.20.x and strict engines, with `esbuild` as the only approved build script; QS-A09 initially added `react==18.3.1`, `react-dom==18.3.1`, `vite==5.4.11`, `@vitejs/plugin-react==4.3.4`, `typescript==5.6.3`, `vite-plugin-pwa==0.21.1`, `workbox-window==7.3.0`, `@types/react==18.3.12`, and `@types/react-dom==18.3.1`. The accepted Node 20.20.2 is `/usr/bin/node`; QualSight Node commands run with `/usr/bin` first on `PATH`, and the toolchain gate proves the selected versions.
 
 ### Initial real conformance resource
 
@@ -467,7 +469,7 @@ Loop E ran three cycles. Cycle 1 (C28/C30): built Y85-Y87 and Z90-Z93 answers to
 | QS-S96 | API surface audit: loopback-only bind asserted at startup, uniform error shapes, no filesystem echo for unadmitted paths, purge-scope correctness on owner-supplied inputs | audit script extends `audit_local_data_controls.py`; tests for each property | QS-Y80 | ACCEPTED (C31 — path echo in operator-facing errors reviewed and accepted: loopback, single attributed user, operator-supplied paths only) |
 | QS-S97 | Concurrency audit: SQLite WAL + busy-timeout under parallel writers, concurrent job submission races, append-only invariants under contention; stress test with real fixture data | stress test (threads × real requests) green; invariant checks after the storm | none | ACCEPTED (C31 — real fix: thread-local snapshot reader connections; readers previously shared the writer's connection and could observe uncommitted transactions) |
 | QS-S98 | Measured performance pass: record baselines (batch throughput, embed cache hit path, hot API latencies, bundle size), then optimize only what a recorded number justifies; re-measure and report the delta | before/after numbers in the ledger record; no optimization without its baseline | none | ACCEPTED (C31 — baselines recorded in docs/PERFORMANCE_BASELINES.md; no optimization currently justified by a measured number) |
-| QS-S99 | Dependency and supply-chain audit: uv.lock + pnpm lockfile inventory, license table, known-CVE review from local advisory data only (offline), pinned-hash verification | audit report committed; every runtime dependency has a recorded license and pin | none | ACCEPTED (C31 — docs/DEPENDENCY_AUDIT.md: 66 backend + 9 console packages, 0 undeclared licenses, 0 lock mismatches) |
+| QS-S99 | Dependency and supply-chain audit: uv.lock + pnpm lockfile inventory, license table, known-CVE review from local advisory data only (offline), pinned-hash verification | audit report committed; every runtime dependency has a recorded license and pin | none | ACCEPTED (C31; current `docs/DEPENDENCY_AUDIT.md`: 89 Python + 351 JavaScript packages, 0 undeclared licenses, 0 lock mismatches) |
 
 Loop F ran two cycles. Cycle 1 (C31): S95 adversarial admission tests (oversize before decode, decode-bomb guard, hostile filename containment, same-path-different-bytes conflict, symlink refusal), S96 audit extensions (owner-supplied controls verified in code and on disk, loopback-bind sweep), S97 real race fixed (reader threads shared the writer's SQLite connection and could observe uncommitted transactions; now thread-local snapshot readers, proven by an 8-thread reader storm over the real 13k import plus concurrent identical/distinct upload races), S98 measured baselines (no optimization justified by a recorded number), S99 dependency/license audit. Cycle 2: re-sweep of the five dimensions found no new finding. **Loop F closed (decision 31 termination rule).**
 
@@ -1160,13 +1162,13 @@ and DHS transition boundaries are unchanged.
 
 **State:** ACCEPTED after the append-only release record and committed-tree package gate pass.
 
-Historical accepted events QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, and QS-A06.R1M retain their exact recorded counts and hashes in `atg/ledger.jsonl`; current refinements supersede them for reuse without rewriting history. The active accepted evidence set is `{QS-A00, QS-A01, QS-A02, QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03, QS-A03.R1, QS-A04, QS-A04.R1, QS-A04.R2, QS-A05, QS-A06, QS-A06.R1O, QS-A06.R2, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B12.LFW.FULL, QS-B13, QS-B14, QS-C20, QS-C22, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D31.R0, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43, QS-F50, QS-F51, QS-F52, QS-F53, QS-F54, QS-H70, QS-H71, QS-H72, QS-H73, QS-C21, QS-H74, QS-H74.RELEASE.R1}`. Twenty whole capabilities participate in coarse dependency readiness; none is dependency-ready while QS-C21 lacks its real input.
+Historical accepted events QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, and QS-A06.R1M retain their exact recorded counts and hashes in `atg/ledger.jsonl`; current refinements supersede them for reuse without rewriting history. The active accepted evidence set is `{QS-A00, QS-A01, QS-A02, QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03, QS-A03.R1, QS-A04, QS-A04.R1, QS-A04.R2, QS-A05, QS-A06, QS-A06.R1O, QS-A06.R2, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B12.LFW.FULL, QS-B13, QS-B14, QS-C20, QS-C22, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D31.R0, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43, QS-F50, QS-F51, QS-F52, QS-F53, QS-F54, QS-H70, QS-H71, QS-H72, QS-H73, QS-C21, QS-H74, QS-H74.RELEASE.R1}`. No beta whole capability remains dependency-ready because the beta DAG is closed.
 
 ## Dependency-ready parallel groups
 
 At the capability level:
 
-- at present: no beta whole capability remains; the post-beta branch (outside the DAG) is the only future work; QS-C21 stays parked on a registered real external score artifact (owner input) and blocks only QS-H74;
+- at present: no beta whole capability remains; the post-beta branch (outside the DAG) is the only future work;
 - in Phase 5: QS-F51, QS-F52, and QS-F53 may proceed in parallel after their predecessors;
 - in Phase 7: QS-H70, QS-H71, QS-H72, and QS-H73 may proceed in parallel when file ownership is disjoint.
 
@@ -1218,7 +1220,9 @@ Acceptance requires:
 - the six matcher-condition Runs use the same ordered real sample IDs, subject IDs, and pair manifest, preserving null scores for explicit failures;
 - the final runtime observation uses the real pipeline without a substitute path.
 
-## Pre-execution thought experiment
+## Historical pre-execution thought experiment
+
+This snapshot predates matcher, imported-score, utility, cross-matcher, reporting, packaging, and routed-console execution. It is retained as historical planning evidence and was superseded by the accepted QS-H74 and QS-H74.RELEASE.R1 results above.
 
 | Check | Result |
 |---|---|
@@ -1230,7 +1234,7 @@ Acceptance requires:
 | Loop interface | Pass: each cycle consumes a frozen ready batch and produces accepted evidence or one explicit non-success state |
 | Constraint compliance | Pass: only registered real data and complete production paths are permitted; no commercial SDK dependency, cloud runtime, or unauthorized outward action is required |
 
-Known limitation: the accepted evidence children prove only their stated predicates; the console is a single-page workbench rather than the full PRD §44 navigation, the matcher matrix runs in one process without chunked progress persistence, and no imported-score, utility, cross-matcher, reporting, or packaging path has executed. ATG_LOOP.md prevents blocked capabilities from entering a cycle until refinement supplies literal actions, registered real inputs, and complete Definition-of-Ready evidence.
+Historical limitation at this snapshot: the accepted evidence children proved only their stated predicates; the console was a single-page workbench rather than the full PRD §44 navigation, the matcher matrix ran in one process without chunked progress persistence, and imported-score, utility, cross-matcher, reporting, and packaging paths had not executed. These limits were superseded by the accepted current evidence above.
 
 ## Level history
 
@@ -1238,7 +1242,7 @@ Known limitation: the accepted evidence children prove only their stated predica
 - **L0:** one product graph from canonical requirements to accepted beta;
 - **L1:** Phase 0 → 1 → 2 → 3 → 4 → 5 → 7 → beta, with Phase 6 post-beta;
 - **L2:** 41-node, 85-edge acyclic capability graph QS-A00 through QS-H74 (v1.6: QS-C21 rewired to feed QS-H74 directly by decision 28); post-beta nodes remain outside the beta DAG;
-- **L3 current frontier:** all 41 beta whole capabilities accepted (QS-A00 through QS-H74; Phase 2 under decision 28, QS-C21 under decision 29) with current accepted evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0; QS-C21 and QS-C25 blocked; superseded resource/domain/execution slices remain in the append-only ledger;
+- **L3 current frontier:** all 41 beta whole capabilities accepted (QS-A00 through QS-H74; Phase 2 under decision 28, QS-C21 under decision 29) with current accepted evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0; superseded resource/domain/execution slices remain in the append-only ledger;
 - **future L3 refinements:** created one ready capability at a time by the bounded controller, preserving its L2 input/output interface.
 
 Only the minimal historical subgraph is replaced when a leaf fails. Accepted nodes and their evidence remain frozen.

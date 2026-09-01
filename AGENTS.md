@@ -1,4 +1,4 @@
-## Imported Claude Cowork project instructions
+## Repository context instructions
 
 <!-- graft:start -->
 ## Graft — repo context graph

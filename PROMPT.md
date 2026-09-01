@@ -18,7 +18,7 @@ Close every locally implementable correctness, containment, recovery, and measur
 
 ## Never touch
 
-- User-owned unrelated changes: `claude-skills`, `.claude/`, `.ignore`, and `.mcp.json`.
+- User-owned unrelated agent/tool configuration changes, including `.ignore` and `.mcp.json`.
 - Registered biometric bytes, model checkpoints, dataset images, historical ATG ledger lines, or accepted external rights statements.
 - Scientific matcher identities, preprocessing definitions, score direction, thresholds, protocols, metrics, or numerical tolerances unless a real-data equivalence test first proves the change.
 - Remote deployment, biometric egress, authentication-provider selection, controlled DHS data, or redistribution rights; those require external authority and remain explicit blocks.

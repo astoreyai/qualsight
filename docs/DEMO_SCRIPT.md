@@ -13,7 +13,7 @@ are shown as associations, never causes."*
 
 | Minute | Route | What to do | What it shows |
 |---|---|---|---|
-| 0–1 | `#/system` | Engine badge: OFIQ v1.1.2, registry state, 10 registered resources, attributed operator, network guard. | Controlled environment: registered runtime, offline, single attributed user. |
+| 0–1 | `#/system` | Engine badge: OFIQ v1.1.2, registry state, 13 registered resources, attributed operator, network guard. | Controlled environment: registered runtime, offline, single attributed user. |
 | 1–3 | `#/assess` | **LIVE** — ask the evaluator for a photo (USB/phone transfer to the workstation), *Assess your own photo*. UQS + 28 ISO/IEC 29794-5 measures appear in ~4 s with a Run link. | Bring-your-own-image works; decision-30 provenance (OWNER_SUPPLIED, hashed, purgeable) is stated on screen. |
 | 3–5 | `#/assess` | On the registered sample: *Show face detection (matcher pipeline)* then *Show OFIQ landmarks (ADNet-98)*. Point at the two labels. | The two geometry sources are distinct and labelled — SCRFD five points feed the matchers; ADNet-98 feeds the quality measures. |
 | 5–7 | `#/data` | **LIVE** — import a small evaluator directory (subject = folder name), run the quality batch on it. Show the distribution and drill into one sample. | Bring-your-own-dataset: identity-labelled import, real engine batch, per-sample drilldown. |

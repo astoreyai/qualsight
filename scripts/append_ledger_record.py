@@ -14,13 +14,14 @@ Usage:
 The record JSON must contain: cycle_id, iteration_index, node_id,
 historical_ancestor_id, action, exit_code, baseline, final, guard, progress,
 status, error_classification, minimal_repair_subgraph, runtime_observation,
-unresolved_external_blocks, rollback. Optional: operator (default "Claude"),
+unresolved_external_blocks, rollback. Optional: operator (default local OS user),
 timestamp (default now, ISO-8601 with offset).
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
 import hashlib
 import json
 from pathlib import Path
@@ -70,7 +71,7 @@ def _git_state() -> tuple[str | None, dict[str, object]]:
         "head": commit or "UNBORN_NO_COMMITS",
         "staged": [line for line in lines if line[:1] not in {" ", "?"}],
         "untracked_project_files": any(line.startswith("??") for line in lines),
-        "unrelated_claude_skills": "UNTOUCHED",
+        "unrelated_agent_skills": "UNTOUCHED",
     }
 
 
@@ -99,7 +100,7 @@ def main() -> int:
         "node_id": record["node_id"],
         "historical_ancestor_id": record["historical_ancestor_id"],
         "timestamp": record.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "operator": record.get("operator", "Claude"),
+        "operator": record.get("operator", f"local-user:{getpass.getuser()}"),
         "input_hashes": {"atg/ledger.jsonl": _sha256(LEDGER), **{p: _sha256(ROOT / p) for p in args.input}},
         "action": record["action"],
         "output_artifacts": {p: _sha256(ROOT / p) for p in args.output},

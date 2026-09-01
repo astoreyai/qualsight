@@ -17,11 +17,12 @@ SHA-256 before use. Scientific execution does not download dependencies implicit
 * Python 3.11 with [`uv`](https://docs.astral.sh/uv/) 0.9 on `PATH`; the project-pinned
   `pip-audit` 2.10.0 is installed into `.venv` by the frozen development group; Node 20 with pnpm 10
   (`/usr/bin/node` — a newer Node in `~/.local/bin` must not shadow it; the scripts prepend `/usr/bin`).
-* The already registered OFIQ v1.1.2 native runtime, validated by its recorded artifact hashes. No
-  reviewed Conan lockfile exists in this repository or the existing build evidence, so
-  `scripts/ofiq_v112_build.sh` stops unconditionally before acquisition, mutation, tool installation,
-  or dependency resolution. An operator-supplied path does not establish review authority. A fresh
-  native build remains externally blocked until its exact Conan closure is registered and reviewed.
+* The already registered OFIQ v1.1.2 native runtime, validated by its recorded artifact hashes. The
+  repository now carries the reviewed Conan 2.18.1 lock, GCC 12 release profile, exact 15-node
+  dependency closure, and upstream archive identities used by `scripts/ofiq_v112_build.sh`. The
+  builder can resolve from a verified local cache without network access or acquire only the exact
+  governed archives and locked packages when network access is explicitly allowed. A rebuild at a
+  different deployment path still requires review and registry repinning before execution.
 * The registered inputs at their registry paths (`resources/resource-registry.json`), acquired by the
   owner under the recorded use decisions and never bundled with QualSight: the LFW funneled release
   and its official pair lists, the AdaFace IR-101 / ElasticFace-Arc R100 / MagFace IResNet-100 /

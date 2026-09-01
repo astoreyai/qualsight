@@ -137,12 +137,13 @@ changes a global preprocessing setting. Advanced 1:N and degradation analyses us
 for their single matcher/profile selection. Controlled degradation operators are separate: they
 create an explicitly derived dataset and do not silently replace matcher preprocessing.
 
-The CLI exposes the same per-Run product through repeatable `--matcher` and `--preprocessing` flags;
-omitting both preserves the full six-by-two matrix used by the canonical gate below.
+The CLI exposes the same per-Run product through repeatable `--matcher` and `--preprocessing` flags.
+The canonical source-image gate names both compatible SCRFD profiles explicitly so the separate
+publisher-prealigned pass-through cannot be selected for source images.
 
 ```sh gate
 PROTOCOL_ID=$($QS freeze-lfw-protocol --project-id "$PROJECT_ID" --dataset-id "$DATASET_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin)["protocol_id"])')
-$QS matrix --project-id "$PROJECT_ID" --protocol-id "$PROTOCOL_ID" --fixture-pairs-only > "$WORK/matrix.json"
+$QS matrix --project-id "$PROJECT_ID" --protocol-id "$PROTOCOL_ID" --fixture-pairs-only --preprocessing SCRFD10G_ADAPTIVE_LARGEST_ARCFACE112_JPEG95_V1 --preprocessing SCRFD10G_640_HIGHEST_CONFIDENCE_ARCFACE112_INMEMORY_V1 > "$WORK/matrix.json"
 MATRIX_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["matrix_id"])' "$WORK/matrix.json")
 AS_RUN=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(l["run_id"] for l in d["leaves"] if l["leaf"]=="QS-C22.AS"))' "$WORK/matrix.json")
 echo "$MATRIX_ID $AS_RUN"
