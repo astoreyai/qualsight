@@ -30,6 +30,18 @@ UV = "/home/aaron/.local/bin/uv"
 BLOCK_RE = re.compile(r"```sh gate\n(.*?)```", re.DOTALL)
 
 
+def _controlled_repository_root() -> Path:
+    configured = os.environ.get("QUALSIGHT_REPOSITORY_ROOT")
+    if configured is None:
+        return ROOT
+    repository_root = Path(configured).resolve(strict=True)
+    if not repository_root.is_dir():
+        raise ValueError(
+            "QUALSIGHT_REPOSITORY_ROOT must resolve to a directory"
+        )
+    return repository_root
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--observation", type=Path, required=True)
@@ -40,6 +52,7 @@ def main() -> int:
     if not blocks:
         print("no `sh gate` blocks in the user guide", file=sys.stderr)
         return 2
+    repository_root = _controlled_repository_root()
     registry = json.loads((ROOT / "resources" / "resource-registry.json").read_text(encoding="utf-8"))
     r01 = next(a["path"] for e in registry["resources"] if e["resource_id"] == "ofiq-r-01-conformance-input" for a in e["artifacts"] if a["role"] == "DATA")
     data_dir = Path(tempfile.mkdtemp(prefix="qualsight-docs-gate-"))
@@ -48,7 +61,7 @@ def main() -> int:
     script = "set -euo pipefail\n" + "\n".join(f"# --- USER_GUIDE.md block {index + 1}\n{block}" for index, block in enumerate(blocks)) + "\n"
     script_path = work / "user_guide_gate.sh"
     script_path.write_text(script, encoding="utf-8")
-    env = {**os.environ, "QUALSIGHT_ROOT": str(ROOT), "UV": UV, "WORK": str(work), "OFIQ_R01_IMAGE": r01, "QUALSIGHT_DATA_DIR": str(data_dir), "QUALSIGHT_REPOSITORY_ROOT": str(ROOT)}
+    env = {**os.environ, "QUALSIGHT_ROOT": str(ROOT), "UV": UV, "WORK": str(work), "OFIQ_R01_IMAGE": r01, "QUALSIGHT_DATA_DIR": str(data_dir), "QUALSIGHT_REPOSITORY_ROOT": str(repository_root)}
     started = time.time()
     result = subprocess.run(["bash", str(script_path)], cwd=str(ROOT), env=env, capture_output=True, text=True, check=False)
     observation = {

@@ -123,8 +123,12 @@ If a beta gate returns nonzero, the terminal distinguishes passed, failed, and n
 first failed gate using only its exit code plus stdout/stderr byte counts and SHA-256 digests. Before the
 disposable release stage is removed, `release.sh` retains that same path-normalized gate record as a mode-0600
 file beneath a unique mode-0700 `dist/.release-failures/qualsight-<version>.<commit>.*` directory. Captured
-stdout/stderr text, biometric inputs, embeddings, checkpoints, and temporary working records are not retained.
-These private diagnostics are not release artifacts and are never copied into the versioned package directory.
+stdout/stderr is limited to the final 4,000 characters, with controlled roots replaced by stable labels and
+remaining absolute home, mount, or temporary paths removed. Biometric inputs, embeddings, checkpoints, and
+temporary working records are not retained. These private diagnostics are not release artifacts and are never
+copied into the versioned package directory. When a committed stage executes the user guide, the gate preserves
+the caller's validated `QUALSIGHT_REPOSITORY_ROOT`; it does not reinterpret deployment-bound authorization paths
+relative to the disposable stage.
 
 ## Start and verify offline operation
 

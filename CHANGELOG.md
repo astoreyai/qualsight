@@ -64,8 +64,11 @@
   validation use the reviewed `node` selected on `PATH` and fail preflight before dependency mutation
   when its identity differs; they no longer force the retired Node 20 system binary.
 * A failed release now reports passed, failed, and not-run gate counts plus the first failed gate, and retains
-  the path-normalized gate record privately outside the disposable stage with 0700/0600 permissions. Raw
-  command output is still excluded, and failure diagnostics never enter the versioned release package.
+  the path-normalized gate record privately outside the disposable stage with 0700/0600 permissions. A bounded
+  final output tail is retained only after controlled paths are labelled and remaining private absolute paths
+  are removed; failure diagnostics never enter the versioned release package. The staged documentation gate now
+  preserves the controlled deployment repository root instead of rebasing deployment authorization paths onto
+  its disposable Git-archive root.
 * Upstream matcher architecture acquisition is now an explicit `qualsight setup` step. The offline
   gate imports only exact manifest-verified cached sources into its fresh private data directory, sets
   the setup network scope to disabled, and requires zero authorized or refused external connections.

@@ -1750,10 +1750,16 @@ class ReleaseMetadataTests(unittest.TestCase):
         gate_script = (ROOT / "scripts" / "run_release_beta_gate.py").read_text(
             encoding="utf-8"
         )
+        gate_module = _load_script("run_release_beta_gate")
+        self.assertIs(gate_module.sys, sys)
         self.assertIn("passed={passed} failed={int(failed is not None)} not_run={not_run}", gate_script)
         self.assertIn('f"name={failed[\'name\']} exit={failed[\'exit_code\']} "', gate_script)
-        self.assertNotIn("stdout_tail", gate_script)
-        self.assertNotIn("stderr_tail", gate_script)
+        self.assertNotIn('result["stdout_tail"]', gate_script)
+        self.assertNotIn('result["stderr_tail"]', gate_script)
+        self.assertIn('result["failure_evidence"]', gate_script)
+        self.assertIn('"redacted_stdout_tail"', gate_script)
+        self.assertIn('"redacted_stderr_tail"', gate_script)
+        self.assertIn("MAX_FAILURE_TAIL_CHARACTERS = 4_000", gate_script)
 
     def test_release_gate_refuses_pass_if_deployment_changes_during_a_gate(
         self,
@@ -1925,6 +1931,37 @@ class ReleaseMetadataTests(unittest.TestCase):
                     module = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(module)
                     self.assertEqual(module.PROJECT_ROOT, ROOT.resolve())
+            finally:
+                if previous is None:
+                    del os.environ[variable]
+                else:
+                    os.environ[variable] = previous
+
+    def test_staged_documentation_gate_preserves_controlled_repository_root(
+        self,
+    ) -> None:
+        variable = "QUALSIGHT_REPOSITORY_ROOT"
+        previous = os.environ.get(variable)
+        with tempfile.TemporaryDirectory() as temporary:
+            staged_scripts = Path(temporary) / "committed-stage" / "scripts"
+            staged_scripts.mkdir(parents=True)
+            staged_path = staged_scripts / "docs_workflow_gate.py"
+            shutil.copy2(ROOT / "scripts" / staged_path.name, staged_path)
+            os.environ[variable] = str(ROOT.resolve())
+            try:
+                spec = importlib.util.spec_from_file_location(
+                    "staged_docs_workflow_gate",
+                    staged_path,
+                )
+                self.assertIsNotNone(spec)
+                self.assertIsNotNone(spec.loader)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                self.assertNotEqual(module.ROOT, ROOT.resolve())
+                self.assertEqual(
+                    module._controlled_repository_root(),
+                    ROOT.resolve(),
+                )
             finally:
                 if previous is None:
                     del os.environ[variable]

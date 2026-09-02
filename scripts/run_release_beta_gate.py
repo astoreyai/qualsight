@@ -7,8 +7,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from typing import NamedTuple
 
@@ -23,6 +25,10 @@ BETA3_BROWSER_VALIDATORS = (
     "validate_upload_working_sample",
     "validate_utility_overlay",
     "observe_console",
+)
+MAX_FAILURE_TAIL_CHARACTERS = 4_000
+PRIVATE_ABSOLUTE_PATH = re.compile(
+    r"(?<![A-Za-z0-9])/(?:home|mnt|tmp)/[^\s\"'<>]*"
 )
 
 
@@ -294,6 +300,72 @@ def _is_sha256(value: object) -> bool:
     )
 
 
+def _redact_failure_text(
+    value: str,
+    *,
+    root: Path,
+    deployment_root: Path,
+    temporary: Path,
+) -> str:
+    redacted = value
+    replacements = (
+        (str(root), "<COMMITTED_STAGE>"),
+        (str(deployment_root), "<CONTROLLED_DEPLOYMENT>"),
+        (str(temporary), "<GATE_WORK>"),
+        (str(Path.home()), "<OPERATOR_HOME>"),
+    )
+    for private_path, label in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
+        redacted = redacted.replace(private_path, label)
+    redacted = PRIVATE_ABSOLUTE_PATH.sub("<PRIVATE_PATH>", redacted)
+    return redacted[-MAX_FAILURE_TAIL_CHARACTERS:]
+
+
+def _failure_evidence_summary(
+    gate_name: str,
+    evidence_body: bytes,
+    *,
+    root: Path,
+    deployment_root: Path,
+    temporary: Path,
+) -> dict[str, object]:
+    summary: dict[str, object] = {
+        "bytes": len(evidence_body),
+        "sha256": _sha256_bytes(evidence_body),
+    }
+    try:
+        evidence = json.loads(evidence_body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return summary
+    if not isinstance(evidence, dict):
+        return summary
+    if gate_name == "documentation-workflow":
+        for key in (
+            "kind",
+            "guide",
+            "guide_sha256",
+            "script_sha256",
+            "blocks",
+            "exit_code",
+            "seconds",
+            "started_at",
+        ):
+            if key in evidence:
+                summary[key] = evidence[key]
+        for source_key, output_key in (
+            ("stdout_tail", "redacted_stdout_tail"),
+            ("stderr_tail", "redacted_stderr_tail"),
+        ):
+            value = evidence.get(source_key)
+            if isinstance(value, str):
+                summary[output_key] = _redact_failure_text(
+                    value,
+                    root=root,
+                    deployment_root=deployment_root,
+                    temporary=temporary,
+                )
+    return summary
+
+
 def _validate_gate_evidence(
     gate_name: str,
     evidence_body: bytes,
@@ -526,6 +598,7 @@ def run_beta_gate(
                     "stderr_sha256": _sha256_bytes(completed.stderr),
             }
             if gate.evidence_path is not None:
+                evidence_body: bytes | None = None
                 try:
                     evidence_body = gate.evidence_path.read_bytes()
                     result["evidence"] = _validate_gate_evidence(
@@ -535,6 +608,14 @@ def run_beta_gate(
                     )
                 except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
                     result["evidence_error"] = str(error)
+                    if evidence_body is not None:
+                        result["failure_evidence"] = _failure_evidence_summary(
+                            gate.name,
+                            evidence_body,
+                            root=root,
+                            deployment_root=deployment_root,
+                            temporary=temporary,
+                        )
                     result["exit_code"] = 1
             results.append(result)
             if result["exit_code"] != 0:
