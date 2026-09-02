@@ -63,6 +63,9 @@
 * The exact reviewed Node runtime is now 26.7.0 with pnpm 10.28.0. Install, release, and browser
   validation use the reviewed `node` selected on `PATH` and fail preflight before dependency mutation
   when its identity differs; they no longer force the retired Node 20 system binary.
+* A failed release now reports passed, failed, and not-run gate counts plus the first failed gate, and retains
+  the path-normalized gate record privately outside the disposable stage with 0700/0600 permissions. Raw
+  command output is still excluded, and failure diagnostics never enter the versioned release package.
 * Upstream matcher architecture acquisition is now an explicit `qualsight setup` step. The offline
   gate imports only exact manifest-verified cached sources into its fresh private data directory, sets
   the setup network scope to disabled, and requires zero authorized or refused external connections.

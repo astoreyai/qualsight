@@ -51,10 +51,19 @@ BETA_GATE="${SET}/${NAME}-BETA-GATE.json"
 MANIFEST="${SET}/${NAME}-RELEASE.json"
 CHECKSUMS="${SET}/${NAME}-SHA256SUMS"
 COMMIT_FILE="${SET}/${NAME}-COMMIT"
-"$RELEASE_PYTHON" "$BUILD_ROOT/scripts/run_release_beta_gate.py" \
+if ! "$RELEASE_PYTHON" "$BUILD_ROOT/scripts/run_release_beta_gate.py" \
   --root "$BUILD_ROOT" --deployment-root "$ROOT" \
   --output "$BETA_GATE" --python "$RELEASE_PYTHON" \
-  --commit "$COMMIT" --tree "$TREE"
+  --commit "$COMMIT" --tree "$TREE"; then
+  FAILURE_ROOT="${OUT}/.release-failures"
+  mkdir -m 700 -p "$FAILURE_ROOT"
+  chmod 700 "$FAILURE_ROOT"
+  FAILURE_ATTEMPT="$(mktemp -d "${FAILURE_ROOT}/${NAME}.${COMMIT}.XXXXXX")"
+  chmod 700 "$FAILURE_ATTEMPT"
+  install -m 600 "$BETA_GATE" "$FAILURE_ATTEMPT/BETA-GATE.json"
+  echo "release failed; private gate diagnostic retained at ${FAILURE_ATTEMPT}/BETA-GATE.json" >&2
+  exit 1
+fi
 "$RELEASE_PYTHON" "$BUILD_ROOT/scripts/create_release_source_archive.py" \
   --root "$ROOT" --output "$SOURCE_ARCHIVE" --commit "$COMMIT" --prefix "$NAME" \
   --policy "$BUILD_ROOT/resources/security/release-package-policy-v1.json"

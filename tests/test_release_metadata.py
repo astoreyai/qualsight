@@ -1714,6 +1714,47 @@ class ReleaseMetadataTests(unittest.TestCase):
             tuple(name.removesuffix(".py") for name in BETA3_BROWSER_VALIDATORS),
         )
 
+    def test_failed_release_preserves_private_gate_diagnostic_outside_stage(
+        self,
+    ) -> None:
+        release_script = (ROOT / "scripts" / "release.sh").read_text(
+            encoding="utf-8"
+        )
+        gate_call = release_script.index(
+            'if ! "$RELEASE_PYTHON" "$BUILD_ROOT/scripts/run_release_beta_gate.py"'
+        )
+        failure_root = release_script.index(
+            'FAILURE_ROOT="${OUT}/.release-failures"'
+        )
+        retained_record = release_script.index(
+            'install -m 600 "$BETA_GATE" "$FAILURE_ATTEMPT/BETA-GATE.json"'
+        )
+        source_archive = release_script.index(
+            '"$BUILD_ROOT/scripts/create_release_source_archive.py"'
+        )
+        self.assertLess(gate_call, failure_root)
+        self.assertLess(failure_root, retained_record)
+        self.assertLess(retained_record, source_archive)
+        self.assertIn('mkdir -m 700 -p "$FAILURE_ROOT"', release_script)
+        self.assertIn('chmod 700 "$FAILURE_ROOT"', release_script)
+        self.assertIn(
+            'mktemp -d "${FAILURE_ROOT}/${NAME}.${COMMIT}.XXXXXX"',
+            release_script,
+        )
+        self.assertIn('chmod 700 "$FAILURE_ATTEMPT"', release_script)
+        self.assertIn(
+            'release failed; private gate diagnostic retained at '
+            '${FAILURE_ATTEMPT}/BETA-GATE.json',
+            release_script,
+        )
+        gate_script = (ROOT / "scripts" / "run_release_beta_gate.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("passed={passed} failed={int(failed is not None)} not_run={not_run}", gate_script)
+        self.assertIn('f"name={failed[\'name\']} exit={failed[\'exit_code\']} "', gate_script)
+        self.assertNotIn("stdout_tail", gate_script)
+        self.assertNotIn("stderr_tail", gate_script)
+
     def test_release_gate_refuses_pass_if_deployment_changes_during_a_gate(
         self,
     ) -> None:

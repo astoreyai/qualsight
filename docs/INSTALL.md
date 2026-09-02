@@ -119,6 +119,13 @@ special bits, or group/world write are refused. Release
 dependency mutation begins only after the exact pinned Python, uv, Node, and pnpm versions pass preflight.
 The package carries no cryptographic publisher signature.
 
+If a beta gate returns nonzero, the terminal distinguishes passed, failed, and not-run gates and names the
+first failed gate using only its exit code plus stdout/stderr byte counts and SHA-256 digests. Before the
+disposable release stage is removed, `release.sh` retains that same path-normalized gate record as a mode-0600
+file beneath a unique mode-0700 `dist/.release-failures/qualsight-<version>.<commit>.*` directory. Captured
+stdout/stderr text, biometric inputs, embeddings, checkpoints, and temporary working records are not retained.
+These private diagnostics are not release artifacts and are never copied into the versioned package directory.
+
 ## Start and verify offline operation
 
 After the explicit `qualsight setup` command has verified and cached every pinned architecture source,

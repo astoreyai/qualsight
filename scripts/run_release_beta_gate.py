@@ -606,10 +606,28 @@ def main() -> int:
         args.tree,
         args.deployment_root,
     )
+    results = record["results"]
+    passed = sum(result["exit_code"] == 0 for result in results)
+    failed = next(
+        (result for result in results if result["exit_code"] != 0),
+        None,
+    )
+    not_run = record["expected_gate_count"] - record["gate_count"]
     print(
         f"controlled beta release gate {record['status']} "
-        f"({record['gate_count']}/{record['expected_gate_count']})"
+        f"(passed={passed} failed={int(failed is not None)} not_run={not_run})"
     )
+    if failed is not None:
+        print(
+            "first failed gate "
+            f"name={failed['name']} exit={failed['exit_code']} "
+            f"stdout_bytes={failed['stdout_bytes']} "
+            f"stdout_sha256={failed['stdout_sha256']} "
+            f"stderr_bytes={failed['stderr_bytes']} "
+            f"stderr_sha256={failed['stderr_sha256']} "
+            f"evidence_error={failed.get('evidence_error', 'none')}",
+            file=sys.stderr,
+        )
     return 0 if record["status"] == "PASS" else 1
 
 
