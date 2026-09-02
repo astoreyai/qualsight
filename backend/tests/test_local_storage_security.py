@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import os
 import json
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from unittest import mock
 
+from qualsight.api.store import RunStore
 from qualsight.api.settings import Settings
 from qualsight.security.local_storage import (
     LocalStorageSecurityError,
@@ -38,6 +43,66 @@ class LocalStorageSecurityTests(unittest.TestCase):
         result = secure_data_tree(self.data_dir)
         self.assertEqual(result, {"directories": 1, "files": 1})
         self.assertEqual(self.data_dir.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(self.photo.stat().st_mode & 0o777, 0o600)
+
+    def test_disappearing_real_sqlite_sidecar_does_not_abort_tree_remediation(self) -> None:
+        database = self.data_dir / "qualsight.sqlite3"
+        store = RunStore(database)
+        sidecar = self.data_dir / "qualsight.sqlite3-shm"
+        self.assertTrue(sidecar.is_file())
+        actual_stat = os.stat
+        removed = False
+
+        def remove_sidecar_before_stat(path: object, *args: object, **kwargs: object) -> os.stat_result:
+            nonlocal removed
+            if path == sidecar.name and kwargs.get("dir_fd") is not None and not removed:
+                sidecar.unlink()
+                removed = True
+                raise FileNotFoundError(sidecar)
+            return actual_stat(path, *args, **kwargs)
+
+        try:
+            with mock.patch(
+                "qualsight.security.local_storage.os.stat",
+                side_effect=remove_sidecar_before_stat,
+            ):
+                result = secure_data_tree(self.data_dir)
+        finally:
+            store.close()
+
+        self.assertTrue(removed)
+        self.assertGreaterEqual(result["directories"], 1)
+        self.assertGreaterEqual(result["files"], 2)
+        self.assertEqual(self.photo.stat().st_mode & 0o777, 0o600)
+
+    def test_disappearing_real_sqlite_sidecar_before_open_is_benign(self) -> None:
+        database = self.data_dir / "qualsight.sqlite3"
+        store = RunStore(database)
+        sidecar = self.data_dir / "qualsight.sqlite3-shm"
+        self.assertTrue(sidecar.is_file())
+        actual_open = os.open
+        removed = False
+
+        def remove_sidecar_before_open(path: object, *args: object, **kwargs: object) -> int:
+            nonlocal removed
+            if path == sidecar.name and kwargs.get("dir_fd") is not None and not removed:
+                sidecar.unlink()
+                removed = True
+                raise FileNotFoundError(sidecar)
+            return actual_open(path, *args, **kwargs)
+
+        try:
+            with mock.patch(
+                "qualsight.security.local_storage.os.open",
+                side_effect=remove_sidecar_before_open,
+            ):
+                result = secure_data_tree(self.data_dir)
+        finally:
+            store.close()
+
+        self.assertTrue(removed)
+        self.assertGreaterEqual(result["directories"], 1)
+        self.assertGreaterEqual(result["files"], 2)
         self.assertEqual(self.photo.stat().st_mode & 0o777, 0o600)
 
     def test_new_application_files_inherit_private_mode(self) -> None:
@@ -97,6 +162,26 @@ class LocalStorageSecurityTests(unittest.TestCase):
                 os.environ.pop("QUALSIGHT_NETWORK_GUARD", None)
             else:
                 os.environ["QUALSIGHT_NETWORK_GUARD"] = previous
+
+    def test_native_execution_timeout_requires_a_finite_positive_value(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        common = {
+            "repository_root": repository_root,
+            "registry_path": repository_root / "resources" / "resource-registry.json",
+            "data_dir": self.data_dir,
+            "runtime_resource_id": "ofiq-v1.2.0-local-runtime",
+            "input_resource_ids": ("ofiq-upstream-test-images",),
+        }
+        self.assertEqual(
+            Settings(**common, native_execution_timeout_seconds=0.01).native_execution_timeout_seconds,
+            0.01,
+        )
+        for invalid in (float("nan"), float("inf")):
+            with self.subTest(value=invalid), self.assertRaisesRegex(
+                ValueError,
+                "native_execution_timeout_seconds must be finite and positive",
+            ):
+                Settings(**common, native_execution_timeout_seconds=invalid)
 
     def test_data_directory_lease_excludes_another_process_and_releases(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
@@ -189,6 +274,32 @@ class LocalStorageSecurityTests(unittest.TestCase):
             first.close()
             if second is not None:
                 second.close()
+
+    def test_store_close_closes_every_thread_local_reader_before_releasing_storage(self) -> None:
+        database = self.data_dir / "reader-lifecycle.sqlite3"
+        store = RunStore(database)
+        readers_ready = threading.Barrier(3)
+
+        def open_real_reader() -> sqlite3.Connection:
+            connection = store._read()
+            connection.execute("SELECT COUNT(*) FROM projects").fetchone()
+            readers_ready.wait(timeout=10)
+            return connection
+
+        executor = ThreadPoolExecutor(max_workers=2)
+        try:
+            futures = [executor.submit(open_real_reader) for _ in range(2)]
+            readers_ready.wait(timeout=10)
+            connections = [future.result(timeout=10) for future in futures]
+            self.assertEqual(len({id(connection) for connection in connections}), 2)
+
+            store.close()
+
+            for connection in connections:
+                with self.assertRaises(sqlite3.ProgrammingError):
+                    connection.execute("SELECT COUNT(*) FROM projects").fetchone()
+        finally:
+            executor.shutdown(wait=True, cancel_futures=True)
 
     def test_api_lifespan_refuses_concurrent_cli_use_of_the_same_data_directory(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]

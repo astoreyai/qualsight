@@ -5,7 +5,7 @@
 > **SUPERSEDED for product scope by `PRD.md` v0.3 (Aug 13, 2026), the canonical PRD.** QualSight is now a biometric T&E workstation with an ExecutionAdapter architecture; OFIQ is the first validated adapter, not the core execution model. Notable scope changes vs this document: live webcam capture, tablet/kiosk mode, and mobile apps are explicit beta **non-goals** (PRD §5); deployment target is a Clarkson-controlled workstation. This file is retained for the still-valid research and integration mechanics below: OFIQ library-vs-CLI analysis and python-ofiq process-pool design (§4.2), dataset research (§8), environment facts, and timeline heuristics.
 
 **Project plan v0.2 — August 13, 2026**
-**Author:** Aaron Storey (with Claude) · **Stakeholders:** DFAB, DHS
+**Author:** Aaron Storey · **Stakeholders:** DFAB, DHS
 
 ---
 
@@ -165,7 +165,9 @@ QualSight needs identity-labeled data (mated pairs) for ERC and DET. No commerci
 ### Tier A — primary demo data (cleanest provenance, best for DHS audiences)
 
 - **NIST MEDS-II (Special Database 32)** — U.S. government mugshot dataset, ~1,300 subjects with **multiple encounters per subject** (natural mated pairs), freely downloadable from NIST, public U.S. government work. Government provenance and unconstrained-but-realistic quality variation make it the default demo dataset for a DHS audience. ([NIST SD32](https://www.nist.gov/itl/iad/btg/special-database-32-multiple-encounter-dataset-meds))
-- **Synthetic identities — DigiFace-1M** (1.22M images, 110k synthetic identities, multiple images each; Microsoft Research license) and diffusion-based sets like **DCFace / IDiff-Face**. Zero real-person PII — ideal when showing screens to stakeholders where displaying real faces is awkward, and useful for stress-testing batch throughput.
+- **Real-data-only boundary** — candidate datasets must contain real observations, documented provenance,
+  and rights sufficient for the intended local research use. Presentation convenience and throughput
+  testing do not justify substituting generated identities or images for the real biometric pipeline.
 
 ### Tier B — standard academic benchmarks (research licenses; what the FIQA literature uses)
 
@@ -224,4 +226,3 @@ Still open:
 - NIST biometric special databases index: https://www.nist.gov/itl/iad/btg/resources/biometric-special-databases-and-software
 - XQLFW (cross-quality LFW): https://mediatum.ub.tum.de/doc/1640000/ (paper)
 - CR-FIQA (ERC evaluation methodology in practice): https://github.com/fdbtrs/cr-fiqa
-

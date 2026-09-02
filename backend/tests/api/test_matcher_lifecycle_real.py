@@ -144,6 +144,10 @@ class MatcherLifecycleRealTests(unittest.TestCase):
             self.assertIsNone(protocol_dataset["identity_count"])
             self.assertEqual(protocol_dataset["runtime_state"], "MISSING")
             self.assertTrue(protocol_dataset["acquisition"]["available"])
+            self.assertEqual(
+                protocol_dataset["acquisition"]["source_uri"],
+                "https://drive.google.com/file/d/1HBGwyTFnl4Bt4hl5BpLE3t__J84R72TX/view?usp=sharing",
+            )
             self.assertEqual(protocol_dataset["acquisition"]["archive_sha256"], "d16039c1aa5b801b3a121c1748e3b49ccefe3e5b72f3f918d8a0cd09bb597b96")
 
         profiles = self.client.get("/api/preprocessing-profiles")
@@ -281,7 +285,9 @@ class MatcherLifecycleRealTests(unittest.TestCase):
         quality_job_id = batch.json()["job_id"]
         deadline = time.monotonic() + 300
         while time.monotonic() < deadline:
-            quality_job = self.client.get(f"/api/jobs/{quality_job_id}").json()
+            quality_job = self.client.get(
+                f"/api/projects/{project_id}/jobs/{quality_job_id}"
+            ).json()
             if quality_job["state"] in {"COMPLETED", "CANCELLED", "FAILED"} and quality_job["ended_at"]:
                 break
             time.sleep(0.5)
@@ -318,21 +324,21 @@ class MatcherLifecycleRealTests(unittest.TestCase):
             self.assertEqual(degradation.status_code, 422, degradation.text)
             self.assertIn("matcher_threshold", degradation.text)
             errors = self.client.get(
-                f"/api/matcher-runs/{matcher_run_id}/errors",
+                f"/api/projects/{project_id}/matcher-runs/{matcher_run_id}/errors",
                 params={"threshold": token},
             )
             self.assertEqual(errors.status_code, 422, errors.text)
             self.assertIn("threshold", errors.text)
             for score_filter in ("min_score", "max_score"):
                 comparisons = self.client.get(
-                    f"/api/matcher-runs/{matcher_run_id}/comparisons",
+                    f"/api/projects/{project_id}/matcher-runs/{matcher_run_id}/comparisons",
                     params={score_filter: token},
                 )
                 self.assertEqual(comparisons.status_code, 422, comparisons.text)
                 self.assertIn(score_filter, comparisons.text)
             for erc_parameter in ("threshold", "target_fmr"):
                 erc = self.client.get(
-                    f"/api/matcher-runs/{matcher_run_id}/erc",
+                    f"/api/projects/{project_id}/matcher-runs/{matcher_run_id}/erc",
                     params={"quality_job_id": quality_job_id, erc_parameter: token},
                 )
                 self.assertEqual(erc.status_code, 422, erc.text)
@@ -406,7 +412,7 @@ class MatcherLifecycleRealTests(unittest.TestCase):
         with TestClient(
             create_app(settings), base_url="http://127.0.0.1", raise_server_exceptions=False
         ) as restarted:
-            status = restarted.get(f"/api/matrices/{matrix_id}")
+            status = restarted.get(f"/api/projects/{project_id}/matrices/{matrix_id}")
             self.assertEqual(status.status_code, 200, status.text)
             self.assertEqual(status.json()["progress"], {"phase": "completed", "detail": "1/1 leaves recorded"})
 
@@ -620,7 +626,13 @@ class MatcherLifecycleRealTests(unittest.TestCase):
     def test_checkpoint_completion_event_failure_removes_new_managed_bytes_and_receipt(self) -> None:
         matcher_id = "elasticface-arc-r100-local-candidate"
         initial = {item["matcher_id"]: item for item in self.client.get("/api/matcher-assets").json()}[matcher_id]
-        managed_path = Path(initial["checkpoint_acquisition"]["managed_path"])
+        self.assertNotIn("managed_path", initial["checkpoint_acquisition"])
+        managed_path = (
+            self.data_dir
+            / "checkpoints"
+            / matcher_id
+            / "295672backbone.pth"
+        )
         self.assertFalse(managed_path.exists())
         connection = sqlite3.connect(self.data_dir / "qualsight.sqlite3")
         try:

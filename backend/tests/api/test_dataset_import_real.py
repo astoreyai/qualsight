@@ -77,12 +77,16 @@ class RealDatasetImportTests(unittest.TestCase):
         self.assertIn("subject_id is the immediate parent directory", manifest["identity_rule"])
         listed = self.client.get(f"/api/projects/{self.project_id}/datasets").json()
         self.assertEqual([item["dataset_id"] for item in listed], [body["dataset_id"]])
-        head = self.client.get(f"/api/datasets/{body['dataset_id']}").json()
+        head = self.client.get(
+            f"/api/projects/{self.project_id}/datasets/{body['dataset_id']}"
+        ).json()
         self.assertEqual(head["evidence_sha256"], body["evidence_sha256"])
 
     def test_statistics_report_population_support_and_completeness(self) -> None:
         dataset_id = self.imported.json()["dataset_id"]
-        response = self.client.get(f"/api/datasets/{dataset_id}/statistics")
+        response = self.client.get(
+            f"/api/projects/{self.project_id}/datasets/{dataset_id}/statistics"
+        )
         self.assertEqual(response.status_code, 200, response.text)
         stats = response.json()["statistics"]
         population = stats["population"]
@@ -117,15 +121,22 @@ class RealDatasetImportTests(unittest.TestCase):
 
     def test_samples_carry_identity_mapping_and_verified_bytes(self) -> None:
         dataset_id = self.imported.json()["dataset_id"]
-        page = self.client.get(f"/api/datasets/{dataset_id}/samples", params={"limit": 3}).json()
+        page = self.client.get(
+            f"/api/projects/{self.project_id}/datasets/{dataset_id}/samples",
+            params={"limit": 3},
+        ).json()
         self.assertEqual(len(page), 3)
         first = page[0]
         self.assertEqual(first["media_type"], "image/jpeg")
-        self.assertEqual(first["subject_id"], Path(first["source_path"]).parent.name)
-        self.assertEqual(hashlib.sha256(Path(first["source_path"]).read_bytes()).hexdigest(), first["sha256"])
+        self.assertEqual(first["subject_id"], first["metadata"]["subject_id"])
+        image = self.client.get(first["links"]["image"])
+        self.assertEqual(image.status_code, 200, image.text)
+        self.assertEqual(hashlib.sha256(image.content).hexdigest(), first["sha256"])
+        self.assertEqual(image.headers["x-qualsight-sha256"], first["sha256"])
         self.assertEqual(first["metadata"]["width"], 250)
         subject = self.client.get(
-            f"/api/datasets/{dataset_id}/samples", params={"subject_id": "George_W_Bush", "limit": 1000}
+            f"/api/projects/{self.project_id}/datasets/{dataset_id}/samples",
+            params={"subject_id": "George_W_Bush", "limit": 1000},
         ).json()
         self.assertEqual(len(subject), 530)
         self.assertTrue(all(item["subject_id"] == "George_W_Bush" for item in subject))

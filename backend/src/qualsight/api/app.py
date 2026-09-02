@@ -2,7 +2,7 @@
 
 Every quality result served here comes from a real execution of the registered
 engine on registered bytes; every Run is persisted immutably before it is
-returned, and ``GET /api/runs/{run_id}`` re-reads the persisted evidence rather
+returned, and ``GET /api/projects/{project_id}/runs/{run_id}`` re-reads the persisted evidence rather
 than an in-memory copy, so the API response and the stored Run agree by
 construction. Source images are neither copied nor transmitted anywhere except
 to the local console viewer, and only when they are registered inputs.
@@ -26,16 +26,25 @@ import threading
 import tempfile
 import time
 import uuid
-from pathlib import Path
+import zipfile
+from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 from urllib.parse import quote, urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from starlette.background import BackgroundTask
 
 from ..domain.entities import AuditEvent, AuditEventType, DataClassification
+from ..domain.direct_pair_comparison import DirectPairThreshold
+from ..domain.owner_pair import (
+    OwnerPairIntegrityError,
+    OwnerPairNotFound,
+    OwnerPairRelationship,
+    OwnerPairValidationError,
+)
 from ..domain.primitives import CanonicalJson
 from ..domain.run import CompletedRun
 from ..addons import ANALYSIS_PARAMETER_CONTRACTS, catalog as addon_catalog, dataset_addons, preprocessing_profiles
@@ -50,24 +59,38 @@ from ..verification_datasets import (
     VerificationDatasetImportError,
 )
 from ..engines.ofiq.adapter import OFIQEngineError, OFIQQualityEngine, OFIQSingleSampleResult
+from ..engines.ofiq.measure_metadata import (
+    native_measure_metadata,
+    observed_measure_failure_reason,
+)
 from ..datasets import DatasetImportError, RegisteredDatasetImporter
-from ..engines.ofiq.batch import BatchJobError, OFIQBatchJob
+from ..engines.ofiq.batch import BatchJobError, MEASURE_NAMES, OFIQBatchJob
 from ..projects import ProjectLifecycleError, ProjectService, ProjectView
 from ..protocols import ProtocolError, ProtocolService
 from ..matchers.matrix import MatcherMatrixJob, MatrixError
-from ..analysis.utility import UtilityAnalysisError, UtilityAnalysisJob, UtilityRequest, pair_quality_policies
+from ..analysis.utility import UtilityAnalysisError, UtilityAnalysisJob, UtilityRequest, pair_quality_policies, quality_columns
 from ..analysis.crossmatcher import CrossMatcherError, CrossMatcherJob, CrossMatcherRequest, matcher_sets
 from ..reporting import bundle as bundle_module
 from ..reporting import figures as figure_module
 from ..reporting.dashboards import DashboardError, load_dashboard, save_dashboard
 from ..reporting.exports import ExportError, export_table
+from ..reporting.recovery import (
+    reconcile_prepared_reporting_publications,
+    reporting_publication_audit_event,
+)
 from ..reporting.reports import ReportBuilder, ReportError
 from ..security.network_guard import guard_status, install_network_guard, permit_explicit_setup_network
 from ..security.local_storage import activate_private_umask, secure_data_tree
 from ..security.process_lease import DataDirectoryLease
-from ..importers.external_scores import EXTERNAL_CONDITION_ID, ExternalScoreImportError, ExternalScoreImporter
+from ..importers.external_scores import (
+    EXTERNAL_CONDITION_ID,
+    ExternalScoreImportError,
+    ExternalScoreImporter,
+    recover_prepared_external_score_import,
+)
 from ..importers.owner_supplied import (
     MAX_UPLOAD_BYTES,
+    OWNER_PAIR_MAX_OUTPUT_PAIRS,
     SOURCE_KIND as OWNER_SOURCE_KIND,
     OwnerSuppliedAdmission,
     OwnerSuppliedError,
@@ -76,22 +99,40 @@ from ..importers.owner_supplied import (
 )
 from ..identification.protocol import IdentificationProtocolError, freeze_lfw_identification
 from ..identification.search import IdentificationSearchError, IdentificationSearchJob
-from ..transforms.derived import DerivedSetError, build_derived_set
+from ..transforms.derived import (
+    DerivedSetError,
+    build_derived_set,
+    derived_set_identity,
+)
 from ..transforms.degradation import DegradationAnalysisError, DegradationAnalysisJob, DegradationRequest
-from ..transforms.operators import PARAMETER_NAMES
+from ..transforms.operators import (
+    OPERATOR_VERSION,
+    PARAMETER_CONTRACTS,
+    PARAMETER_NAMES,
+    validate_parameter,
+)
 from ..matchers.matrix import dataset_resource_of
 from ..security.purge import PurgeError, SCOPE_STATEMENT, purge_project, purge_targets, reconcile_incomplete_purges
+from ..security.owner_file_lock import serialized_owner_file_mutation
+from ..security.privacy import public_diagnostic, redact_private_paths
 from ..matchers.upstream import UpstreamSources
 from ..matchers.lifecycle import MatcherLifecycleError, MatcherRuntimeManager
 from ..matchers.runtime import MatcherId
+from ..matchers.conditions import SCRFD_CONDITIONS, ConditionId
+from ..matchers.direct_pair import (
+    DirectPairComparisonError,
+    DirectPairComparisonJob,
+    direct_comparison_identity,
+)
 from .evidence import EvidenceError, HONESTY_STATEMENT, detection_geometry, ofiq_landmarks, pair_evidence, recompute_crop
 from ..execution.contracts import ContractValidationError, ExecutionOutcomeError
 from ..execution.bounded_executor import BoundedExecutor, ExecutorOverloaded, ExecutorReservation
-from ..provenance import application_version, artifact_identity
+from ..provenance import application_version, artifact_identity, sha256_file
 from .settings import Settings
 from .store import ImmutableRecordConflict, RunStore
 
-API_CONTRACT_VERSION = "1.0.0"
+API_CONTRACT_VERSION = "2.0.0-beta.1"
+MAX_DERIVED_OUTPUT_FILES = 20_000
 
 
 class ApiModel(BaseModel):
@@ -135,8 +176,11 @@ class MeasureOut(ApiModel):
 
     name: str
     native: float | None
+    native_unit: str
+    native_semantics: str
     scalar: int | None
     failed: bool
+    failure_reason: str | None
 
 
 class ProvenanceLinks(ApiModel):
@@ -148,7 +192,11 @@ class ProvenanceLinks(ApiModel):
 
 
 class AssessRequest(ApiModel):
-    image_path: str = Field(min_length=1)
+    registered_sample_id: str = Field(
+        min_length=len("registered-sample:sha256:") + 64,
+        max_length=len("registered-sample:sha256:") + 64,
+        pattern=r"^registered-sample:sha256:[0-9a-f]{64}$",
+    )
     purpose_scope: str = Field(min_length=1)
     project_id: str | None = None
 
@@ -169,6 +217,25 @@ class OwnerPairsRequest(ApiModel):
     seed: int = Field(ge=ANALYSIS_PARAMETER_CONTRACTS["owner_pair_seed"]["minimum"])
     max_mated_pairs_per_subject: int = Field(default=6, ge=1, le=1000)
     nonmated_multiple: float = Field(default=1.0, gt=0, le=100)
+
+
+class OwnerPairAdmissionRequest(ApiModel):
+    left_sample_id: str = Field(min_length=1, max_length=256)
+    right_sample_id: str = Field(min_length=1, max_length=256)
+    relationship: OwnerPairRelationship
+
+
+class DirectPairThresholdRequest(ApiModel):
+    contract_id: Literal["matcher_threshold"]
+    kind: Literal["FIXED_VALUE"]
+    value: float = Field(strict=True, allow_inf_nan=False)
+
+
+class DirectPairComparisonRequest(ApiModel):
+    pair_id: str = Field(min_length=1, max_length=256)
+    matcher_id: str = Field(min_length=1, max_length=128)
+    preprocessing_id: str = Field(min_length=1, max_length=128)
+    threshold: DirectPairThresholdRequest
 
 
 class UtilityAnalysisRequest(ApiModel):
@@ -202,7 +269,6 @@ class CrossMatcherRequestBody(ApiModel):
 
 
 class AnnotationCreate(ApiModel):
-    project_id: str = Field(min_length=1)
     subject_type: str = Field(min_length=1, max_length=64)
     subject_id: str = Field(min_length=1, max_length=512)
     text: str = Field(min_length=1, max_length=4000)
@@ -231,7 +297,7 @@ class BundleCreate(ApiModel):
 
 
 class ReproduceRequest(ApiModel):
-    bundle_path: str = Field(min_length=1)
+    bundle_id: str = Field(min_length=1)
 
 
 class ExternalScoreImportRequest(ApiModel):
@@ -253,10 +319,51 @@ class IdentificationSearchRequest(ApiModel):
     purpose_scope: str = Field(default="QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1", min_length=1)
 
 
+class TransformationSpec(ApiModel):
+    kind: Literal[
+        "jpeg",
+        "gaussian_blur",
+        "downscale",
+        "gamma",
+        "contrast",
+        "rotation",
+        "occlusion",
+    ]
+    parameters: tuple[int | float, ...] = Field(min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_published_contract(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        kind = value.get("kind")
+        parameters = value.get("parameters")
+        if not isinstance(parameters, (list, tuple)):
+            raise ValueError("transform parameters must be a JSON array")
+        if not isinstance(kind, str):
+            return value
+        normalized = dict(value)
+        normalized["parameters"] = tuple(validate_parameter(kind, parameter) for parameter in parameters)
+        return normalized
+
+
 class TransformationRequest(ApiModel):
     selection: Literal["all", "subset_fixture", "sample_ids"] = "subset_fixture"
-    sample_ids: tuple[str, ...] = ()
-    transforms: list[dict[str, Any]] = Field(min_length=1)
+    sample_ids: tuple[str, ...] = Field(default=(), max_length=20_000)
+    transforms: tuple[TransformationSpec, ...] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> "TransformationRequest":
+        if self.selection == "sample_ids":
+            if not self.sample_ids:
+                raise ValueError("sample_ids selection requires at least one sample ID")
+            if any(not sample_id or len(sample_id) > 256 for sample_id in self.sample_ids):
+                raise ValueError("sample_ids must contain nonempty IDs of at most 256 characters")
+            if len(set(self.sample_ids)) != len(self.sample_ids):
+                raise ValueError("sample_ids selection must not contain duplicates")
+        elif self.sample_ids:
+            raise ValueError("sample_ids are accepted only when selection is sample_ids")
+        return self
 
 
 class DegradationAnalysisRequestBody(ApiModel):
@@ -301,7 +408,7 @@ class DatasetOut(ApiModel):
     project_id: str
     name: str
     version: str
-    source_uri: str
+    source_uri: str | None
     rights_status: str
     modality: str
     classification: str
@@ -356,9 +463,9 @@ class JobOut(ApiModel):
     run_id: str | None
     error: str | None
     resource_use: dict[str, float]
-    parquet_path: str | None = None
     engine_version: str | None = None
     dataset_id: str | None = None
+    quality_result_available: bool
 
 
 class ProjectOut(ApiModel):
@@ -387,7 +494,7 @@ class AssessResponse(ApiModel):
     engine_version: str
     engine_state: str
     purpose_scope: str
-    image_path: str
+    registered_sample_id: str
     image_sha256: str
     initialization_ms: int
     assessment_ms: int
@@ -401,18 +508,24 @@ class AssessResponse(ApiModel):
 
 class AssessmentFailure(ApiModel):
     error: Literal["ASSESSMENT_FAILED"] = "ASSESSMENT_FAILED"
-    image_path: str
+    registered_sample_id: str
     engine_version: str
     exit_code: int
-    reason: str
-    stderr: str
+    reason_code: Literal[
+        "ENGINE_EXECUTION_FAILED", "ENGINE_RETURNED_NO_MEASURES"
+    ]
+    message: str
+    failure_event_id: str
+    failure_evidence_sha256: str
 
 
 class RegisteredSample(ApiModel):
+    registered_sample_id: str
     resource_id: str
     resource_state: str
     approved_scopes: tuple[str, ...]
-    path: str
+    display_name: str
+    role: Literal["DATA"] = "DATA"
     sha256: str
     size_bytes: int
     media_type: str
@@ -437,7 +550,6 @@ class HealthOut(ApiModel):
     registry_sha256: str
     registry_id: str
     engine: ResourceOut
-    database_path: str
     actor_id: str = ""
     network_guard: dict[str, Any] = Field(default_factory=dict)
 
@@ -490,6 +602,123 @@ def _validation_error_json(value: Any) -> Any:
     return str(value)
 
 
+def _public_diagnostic(value: str | None) -> str | None:
+    return public_diagnostic(value) if value is not None else None
+
+
+_OMIT_PUBLIC_VALUE = object()
+
+
+def _public_projection(
+    value: Any,
+    *,
+    omit_location_keys: bool = False,
+) -> Any:
+    """Project a private record for the browser without host locations."""
+
+    if isinstance(value, dict):
+        projected: dict[str, Any] = {}
+        canonical_or_log_text = "sha256" in value and "text" in value
+        for key, item in value.items():
+            normalized = str(key).lower()
+            location_key = (
+                normalized == "path"
+                or normalized.endswith("_path")
+                or normalized in {"local_root", "managed_root"}
+                or "directory" in normalized
+            )
+            if omit_location_keys and normalized in {"root", "uri", "hostname"}:
+                location_key = True
+            if location_key or (canonical_or_log_text and normalized == "text"):
+                continue
+            public_item = _public_projection(
+                item,
+                omit_location_keys=omit_location_keys,
+            )
+            if public_item is not _OMIT_PUBLIC_VALUE:
+                projected[str(key)] = public_item
+        return projected
+    if isinstance(value, (list, tuple)):
+        return [
+            public_item
+            for item in value
+            if (
+                public_item := _public_projection(
+                    item,
+                    omit_location_keys=omit_location_keys,
+                )
+            )
+            is not _OMIT_PUBLIC_VALUE
+        ]
+    if isinstance(value, str):
+        return redact_private_paths(value)
+    return value
+
+
+def _public_run(completed: CompletedRun) -> dict[str, Any]:
+    return _public_projection(
+        completed.model_dump(mode="json"),
+        omit_location_keys=True,
+    )
+
+
+def _public_system_event(record: dict[str, Any]) -> dict[str, Any]:
+    projected = _public_projection(record, omit_location_keys=True)
+    details = projected.get("details")
+    if isinstance(details, dict):
+        private_diagnostic_keys = {
+            "error",
+            "exception",
+            "message",
+            "reason",
+            "stderr",
+            "traceback",
+        }
+        omitted = private_diagnostic_keys.intersection(details)
+        for key in omitted:
+            details.pop(key, None)
+        if omitted:
+            details["diagnostic_state"] = "PRIVATE_LOCAL_EVIDENCE"
+    return projected
+
+
+def _public_reproduction_result(record: dict[str, Any]) -> dict[str, Any]:
+    """Expose reproduction state without host locations or native diagnostics."""
+
+    projected = _public_projection(record, omit_location_keys=True)
+    private_diagnostic_keys = {
+        "error",
+        "exception",
+        "message",
+        "reason",
+        "stderr",
+        "traceback",
+    }
+
+    def sanitize(value: Any) -> Any:
+        if isinstance(value, dict):
+            public: dict[str, Any] = {}
+            diagnostics_omitted = False
+            for key, item in value.items():
+                if key in private_diagnostic_keys:
+                    diagnostics_omitted = True
+                    continue
+                if key == "missing_or_drifted":
+                    public["missing_or_drifted_count"] = (
+                        len(item) if isinstance(item, list) else 0
+                    )
+                    continue
+                public[key] = sanitize(item)
+            if diagnostics_omitted:
+                public["diagnostic_state"] = "PRIVATE_LOCAL_EVIDENCE"
+            return public
+        if isinstance(value, list):
+            return [sanitize(item) for item in value]
+        return value
+
+    return sanitize(projected)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_environment()
     state: dict[str, Any] = {}
@@ -511,6 +740,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         lease = DataDirectoryLease.acquire(settings.data_dir, owner="api-server")
+        state["data_directory_lease"] = lease
         cleanup_lock = threading.Lock()
         cleaned = {"value": False}
 
@@ -535,13 +765,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 output_limit_bytes=settings.native_output_limit_bytes,
             )
             state["store"] = RunStore(settings.database_path)
+            state["reconciled_owner_publications"] = state[
+                "store"
+            ].reconcile_prepared_owner_publications(settings.data_dir)
             state["reconciled_operations"] = state["store"].reconcile_interrupted_operations()
             state["reconciled_purges"] = reconcile_incomplete_purges(
                 state["store"], data_dir=settings.data_dir
             )
+            state["reconciled_reporting_publications"] = (
+                reconcile_prepared_reporting_publications(
+                    state["store"],
+                    data_dir=settings.data_dir,
+                    actor_id=settings.actor,
+                )
+            )
             state["upstream"] = UpstreamSources(
                 settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json",
                 settings.data_dir,
+                cache_root=settings.upstream_cache_root,
             )
             state["matcher_manager"] = MatcherRuntimeManager(state["engine"].registry, state["upstream"])
             yield
@@ -643,7 +884,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if mutation_project:
             with job_lock:
-                if mutation_project in purging_projects:
+                if (
+                    mutation_project in purging_projects
+                    or store().active_purge_journal(mutation_project) is not None
+                ):
                     return JSONResponse(status_code=409, content={"detail": "project purge is in progress; new work is refused"})
                 active_project_mutations[mutation_project] = active_project_mutations.get(mutation_project, 0) + 1
         try:
@@ -699,6 +943,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {**record, "evidence_sha256": evidence}
 
     jobs: dict[str, OFIQBatchJob] = {}
+    direct_pair_jobs: dict[str, DirectPairComparisonJob] = {}
     job_lock = threading.Lock()
     purging_projects: set[str] = set()
     active_project_mutations: dict[str, int] = {}
@@ -738,7 +983,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         existing = store().operation(operation_id)
         if existing is not None and not retry_interrupted:
-            return existing, None
+            recovered = store().reconcile_prepared_operation(operation_id)
+            return recovered or existing, None
         reservation = reserve_scientific_work(operation_id)
         try:
             operation, created = store().admit_operation(
@@ -788,6 +1034,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         del active_project_mutations[project_id]
 
     def job_out(job: OFIQBatchJob | None, row: dict[str, Any] | None) -> JobOut:
+        quality_result_available = bool(
+            row is not None
+            and row["state"] == "COMPLETED"
+            and row.get("parquet_path")
+            and row.get("parquet_sha256")
+            and row.get("run_id")
+        )
         if job is not None:
             progress = job.progress()
             return JobOut(
@@ -803,11 +1056,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ended_at=progress.ended_at,
                 cancellation_requested=progress.cancellation_requested,
                 run_id=progress.run_id,
-                error=progress.error,
+                error=_public_diagnostic(progress.error),
                 resource_use=progress.resource_use,
-                parquet_path=str(job.parquet_path) if job.parquet_path else None,
                 engine_version=job.engine_version,
                 dataset_id=job.dataset.dataset_id,
+                quality_result_available=quality_result_available,
             )
         assert row is not None
         return JobOut(
@@ -825,9 +1078,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             run_id=row["run_id"],
             error=None,
             resource_use=json.loads(row["resource_use_json"]),
-            parquet_path=row["parquet_path"],
             engine_version=row["engine_version"],
             dataset_id=row["dataset_id"],
+            quality_result_available=quality_result_available,
         )
 
     def operation_job_out(row: dict[str, Any]) -> JobOut:
@@ -845,11 +1098,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ended_at=row["ended_at"],
             cancellation_requested=False,
             run_id=None,
-            error=row["error"],
+            error=_public_diagnostic(row["error"]),
             resource_use={},
-            parquet_path=None,
             engine_version=None,
             dataset_id=request["dataset_id"],
+            quality_result_available=False,
         )
 
     def _start_batch(
@@ -864,7 +1117,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         dataset = store().dataset(dataset_id)
         if dataset is None or dataset.project_id != project_id:
             raise HTTPException(status_code=404, detail="dataset is not recorded in this project")
@@ -916,26 +1169,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     selection_rule=rule,
                     execution=request.execution,
                 )
+                operation_request = {
+                    **request.model_dump(mode="json"),
+                    "dataset_id": dataset_id,
+                    "purpose_scope": purpose_scope,
+                    "sample_count": len(samples),
+                    "selection_rule": rule,
+                }
                 operation, reservation = admit_scientific_operation(
                     operation_id=retry_operation_id or job.job_id,
                     operation_kind="QUALITY_BATCH",
                     project_id=project_id,
-                    request={
-                        **request.model_dump(mode="json"),
-                        "dataset_id": dataset_id,
-                        "purpose_scope": purpose_scope,
-                        "sample_count": len(samples),
-                        "selection_rule": rule,
-                    },
+                    request=operation_request,
                     output_path=job.job_dir,
                     retry_interrupted=retry_operation_id is not None,
                     result_id=job.job_id,
                 )
                 if reservation is None:
                     return operation_job_out(operation), operation
+                job.bind_operation_request_sha256(
+                    CanonicalJson.from_value(operation_request).sha256
+                )
                 jobs[job.job_id] = job
         except BatchJobError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
+            raise HTTPException(status_code=422, detail=redact_private_paths(str(error))) from error
 
         def _run() -> None:
             try:
@@ -964,15 +1221,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response, _ = _start_batch(project_id, dataset_id, request)
         return response
 
-    @app.post("/api/operations/{operation_id}/retry", status_code=202)
-    def retry_interrupted_operation(operation_id: str) -> JSONResponse:
+    @app.post("/api/projects/{project_id}/operations/{operation_id}/retry", status_code=202)
+    def retry_interrupted_operation(project_id: str, operation_id: str) -> JSONResponse:
         requested = store().operation(operation_id)
-        if requested is None:
-            raise HTTPException(status_code=404, detail="operation is not recorded")
+        if requested is None or requested["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="operation is not recorded in this project")
         request_id = str(requested["request_id"])
         latest = store().latest_operation_attempt(request_id)
-        if latest is None:
-            raise HTTPException(status_code=404, detail="operation request is not recorded")
+        if latest is None or latest["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="operation request is not recorded in this project")
         if latest["state"] != "INTERRUPTED":
             raise HTTPException(
                 status_code=409,
@@ -980,6 +1237,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "only the latest INTERRUPTED attempt can be retried explicitly; "
                     f"latest state is {latest['state']}"
                 ),
+            )
+        payload = json.loads(latest["request_json"])
+        if latest["operation_kind"] == "MATCHER_MATRIX":
+            fixture_pairs_only = payload.get("fixture_pairs_only")
+            leaves = payload.get("leaves")
+            protocol_id = payload.get("protocol_id")
+            if (
+                not isinstance(fixture_pairs_only, bool)
+                or not isinstance(protocol_id, str)
+                or (leaves is not None and not isinstance(leaves, str))
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="the interrupted matcher matrix request contract is invalid",
+                )
+            execution, admitted = _start_matrix(
+                str(latest["project_id"]),
+                protocol_id,
+                fixture_pairs_only,
+                leaves,
+                retry_operation_id=request_id,
+            )
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "operation": operation_out(admitted),
+                    "result_id": json.loads(execution.body)["matrix_id"],
+                    "execution": json.loads(execution.body),
+                },
             )
         if latest["operation_kind"] != "QUALITY_BATCH":
             raise HTTPException(
@@ -989,7 +1275,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     f"{latest['operation_kind']} requires a new operator request"
                 ),
             )
-        payload = json.loads(latest["request_json"])
         batch_request = BatchRequest.model_validate(
             {
                 key: payload[key]
@@ -1011,31 +1296,55 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
-    @app.get("/api/jobs/{job_id}", response_model=JobOut)
-    def job_status(job_id: str) -> JobOut:
+    @app.get("/api/projects/{project_id}/jobs/{job_id}", response_model=JobOut)
+    def job_status(project_id: str, job_id: str) -> JobOut:
         with job_lock:
             job = jobs.get(job_id)
         if job is not None:
-            return job_out(job, None)
+            if job.project.project_id != project_id:
+                raise HTTPException(
+                    status_code=404, detail="job is not recorded in this project"
+                )
+            return job_out(job, store().job(job_id))
         row = store().job(job_id)
         if row is None:
             operation = store().latest_operation_for_result(job_id)
             if (
                 operation is None
                 or operation["operation_kind"] != "QUALITY_BATCH"
+                or operation["project_id"] != project_id
             ):
-                raise HTTPException(status_code=404, detail="job is not recorded")
+                raise HTTPException(
+                    status_code=404, detail="job is not recorded in this project"
+                )
             return operation_job_out(operation)
+        if row["project_id"] != project_id:
+            raise HTTPException(
+                status_code=404, detail="job is not recorded in this project"
+            )
         return job_out(None, row)
 
-    @app.post("/api/jobs/{job_id}/cancel", response_model=JobOut)
-    def job_cancel(job_id: str) -> JobOut:
+    @app.post("/api/projects/{project_id}/jobs/{job_id}/cancel", response_model=JobOut)
+    def job_cancel(project_id: str, job_id: str) -> JobOut:
         with job_lock:
             job = jobs.get(job_id)
+        if job is not None and job.project.project_id != project_id:
+            raise HTTPException(
+                status_code=404, detail="job is not recorded in this project"
+            )
         if job is None:
+            row = store().job(job_id)
+            if row is None or row["project_id"] != project_id:
+                raise HTTPException(
+                    status_code=404, detail="job is not recorded in this project"
+                )
             raise HTTPException(status_code=404, detail="job is not active in this process")
         job.cancel()
-        return job_out(job, None)
+        return job_out(job, store().job(job_id))
+
+    @app.post("/api/jobs/{job_id}/cancel", include_in_schema=False)
+    def retired_global_job_cancel(job_id: str) -> None:
+        raise HTTPException(status_code=404, detail="job route requires project identity")
 
     @app.get("/api/projects/{project_id}/jobs", response_model=list[JobOut])
     def project_jobs(project_id: str) -> list[JobOut]:
@@ -1044,7 +1353,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for row in rows:
             with job_lock:
                 job = jobs.get(row["job_id"])
-            items.append(job_out(job, row) if job is None else job_out(job, None))
+            items.append(job_out(job, row))
         projected_ids = {row["job_id"] for row in rows}
         for row in store().operations_for_project(project_id):
             result_id = row["result_id"]
@@ -1054,8 +1363,82 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             projected_ids.add(result_id)
         return items
 
-    @app.get("/api/jobs/{job_id}/distribution")
+    def _project_job_record(project_id: str, job_id: str) -> dict[str, Any]:
+        row = store().job(job_id)
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(
+                status_code=404, detail="job is not recorded in this project"
+            )
+        return row
+
+    def _verified_job_parquet(row: dict[str, Any]) -> Any:
+        recorded_sha256 = row.get("parquet_sha256")
+        if not row.get("parquet_path") or not isinstance(recorded_sha256, str):
+            raise HTTPException(
+                status_code=409,
+                detail="quality job result artifact is not immutably recorded",
+            )
+        try:
+            snapshot, _ = open_recorded_snapshot(
+                Path(row["parquet_path"]),
+                recorded_sha256,
+                "quality job result artifact",
+            )
+        except HTTPException as error:
+            raise HTTPException(
+                status_code=409,
+                detail="quality job result artifact hash does not match its recorded SHA-256",
+            ) from error
+        return snapshot
+
+    @app.get("/api/projects/{project_id}/jobs/{job_id}/quality-measures")
+    def job_quality_measures(project_id: str, job_id: str) -> JSONResponse:
+        """List scalar measures recorded by one completed quality job."""
+
+        row = _project_job_record(project_id, job_id)
+        if (
+            row["state"] != "COMPLETED"
+            or not row["parquet_path"]
+            or not row["parquet_sha256"]
+            or not row["run_id"]
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="quality job is not a completed recorded job",
+            )
+
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        snapshot = _verified_job_parquet(row)
+        try:
+            recorded = set(quality_columns(pq.read_schema(snapshot)))
+        except (OSError, pa.ArrowException) as error:
+            raise HTTPException(
+                status_code=409,
+                detail="quality job result schema is unreadable",
+            ) from error
+        finally:
+            snapshot.close()
+        registered = [name for name in MEASURE_NAMES if name in recorded]
+        registered.extend(sorted(recorded - set(MEASURE_NAMES)))
+        return JSONResponse(
+            content={
+                "job_id": job_id,
+                "run_id": row["run_id"],
+                "parquet_sha256": row["parquet_sha256"],
+                "measures": registered,
+                "default_measure": (
+                    "UnifiedQualityScore"
+                    if "UnifiedQualityScore" in recorded
+                    else (registered[0] if registered else None)
+                ),
+            }
+        )
+
+    @app.get("/api/projects/{project_id}/jobs/{job_id}/distribution")
     def job_distribution(
+        project_id: str,
         job_id: str,
         measure: str = Query(default="UnifiedQualityScore"),
         component: Literal["scalar", "native"] = Query(default="scalar"),
@@ -1068,15 +1451,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         also carries the exact row totals per outcome for that reconciliation.
         """
 
-        row = store().job(job_id)
-        if row is None or not row["parquet_path"]:
-            raise HTTPException(status_code=404, detail="job has no recorded results")
+        row = _project_job_record(project_id, job_id)
         import duckdb
 
         column = f'"{measure}.{component}"'
+        snapshot = _verified_job_parquet(row)
         connection = duckdb.connect()
         try:
-            parquet = row["parquet_path"].replace("'", "''")
+            parquet = f"/proc/self/fd/{snapshot.fileno()}"
             columns = {item[0] for item in connection.execute(f"DESCRIBE SELECT * FROM read_parquet('{parquet}')").fetchall()}
             if f"{measure}.{component}" not in columns:
                 raise HTTPException(status_code=422, detail=f"unknown measure column {measure}.{component}")
@@ -1099,6 +1481,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ).fetchall()
         finally:
             connection.close()
+            snapshot.close()
         counts = {int(bin_index): int(bin_count) for bin_index, bin_count in histogram}
         bins_out = [
             {"bin": index, "low": low + index * width, "high": low + (index + 1) * width, "count": counts.get(index, 0)}
@@ -1119,8 +1502,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         )
 
-    @app.get("/api/jobs/{job_id}/drilldown")
+    @app.get("/api/projects/{project_id}/jobs/{job_id}/drilldown")
     def job_drilldown(
+        project_id: str,
         job_id: str,
         min_scalar: int | None = Query(default=None, ge=0, le=100),
         max_scalar: int | None = Query(default=None, ge=0, le=100),
@@ -1128,63 +1512,83 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         limit: int = Query(default=50, ge=1, le=2000),
         offset: int = Query(default=0, ge=0),
     ) -> JSONResponse:
-        """Real samples behind a distribution point: sample, subject, path, UQS, run link."""
+        """Real samples behind a distribution point without exposing filesystem paths."""
 
-        if store().job(job_id) is None:
-            raise HTTPException(status_code=404, detail="job is not recorded")
+        _project_job_record(project_id, job_id)
         total, rows = store().quality_results_for_job(
             job_id, min_scalar=min_scalar, max_scalar=max_scalar, outcome=outcome, limit=limit, offset=offset
         )
         for item in rows:
+            item.pop("source_path", None)
+            if isinstance(item.get("failure_reason"), str):
+                item["failure_reason"] = redact_private_paths(item["failure_reason"])
             item["links"] = {
-                "sample": f"/api/samples/{item['sample_id']}",
-                "quality": f"/api/samples/{item['sample_id']}/quality",
-                "run": f"/api/runs/{item['run_id']}" if item.get("run_id") else None,
-                "image": f"/api/samples/image?path={item['source_path']}",
+                "sample": f"/api/projects/{project_id}/samples/{item['sample_id']}",
+                "quality": f"/api/projects/{project_id}/samples/{item['sample_id']}/quality",
+                "run": f"/api/projects/{project_id}/runs/{item['run_id']}" if item.get("run_id") else None,
+                "image": f"/api/projects/{project_id}/samples/{item['sample_id']}/image",
             }
         return JSONResponse(content={"job_id": job_id, "total": total, "offset": offset, "rows": rows})
 
-    @app.get("/api/samples/{sample_id}/quality")
-    def sample_quality(sample_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/samples/{sample_id}/quality")
+    def sample_quality(project_id: str, sample_id: str) -> JSONResponse:
         """Every recorded quality result for one sample with its Run and provenance links."""
 
-        sample = store().sample(sample_id)
-        if sample is None:
-            raise HTTPException(status_code=404, detail="sample is not recorded")
+        sample = _project_sample(project_id, sample_id)
         results = store().quality_results_for_sample(sample_id)
         for item in results:
+            if isinstance(item.get("failure_reason"), str):
+                item["failure_reason"] = redact_private_paths(item["failure_reason"])
             item["links"] = {
-                "run": f"/api/runs/{item['run_id']}" if item.get("run_id") else None,
-                "job": f"/api/jobs/{item['job_id']}",
-                "audit": f"/api/runs/{item['run_id']}/audit" if item.get("run_id") else None,
+                "run": f"/api/projects/{project_id}/runs/{item['run_id']}" if item.get("run_id") else None,
+                "job": f"/api/projects/{project_id}/jobs/{item['job_id']}",
+                "audit": f"/api/projects/{project_id}/runs/{item['run_id']}/audit" if item.get("run_id") else None,
             }
         return JSONResponse(
             content={
-                "sample": sample.model_dump(mode="json"),
+                "sample": _public_sample(project_id, sample),
                 "results": results,
-                "links": {"image": f"/api/samples/image?path={sample.source_path}", "dataset": f"/api/datasets/{sample.dataset_id}"},
+                "links": {
+                    "image": f"/api/projects/{project_id}/samples/{sample.sample_id}/image",
+                    "dataset": f"/api/projects/{project_id}/datasets/{sample.dataset_id}",
+                },
             }
         )
 
-    @app.get("/api/jobs/{job_id}/results")
+    @app.get("/api/projects/{project_id}/jobs/{job_id}/results")
     def job_results(
+        project_id: str,
         job_id: str,
         limit: int = Query(default=100, ge=1, le=20_000),
         offset: int = Query(default=0, ge=0),
         outcome: str | None = Query(default=None),
     ) -> JSONResponse:
-        row = store().job(job_id)
-        if row is None or not row["parquet_path"]:
-            raise HTTPException(status_code=404, detail="job has no recorded results")
+        row = _project_job_record(project_id, job_id)
         import pyarrow.parquet as pq
 
-        table = pq.read_table(row["parquet_path"])
+        snapshot = _verified_job_parquet(row)
+        try:
+            table = pq.read_table(snapshot)
+        finally:
+            snapshot.close()
         if outcome is not None:
             import pyarrow.compute as pc
 
             table = table.filter(pc.equal(table["outcome"], outcome))
         total = table.num_rows
         page = table.slice(offset, limit).to_pylist()
+        for item in page:
+            item.pop("source_path", None)
+            if isinstance(item.get("failure_reason"), str):
+                item["failure_reason"] = redact_private_paths(item["failure_reason"])
+            sample_id = item["sample_id"]
+            item["links"] = {
+                "sample": f"/api/projects/{project_id}/samples/{sample_id}",
+                "quality": f"/api/projects/{project_id}/samples/{sample_id}/quality",
+                "image": f"/api/projects/{project_id}/samples/{sample_id}/image",
+                "job": f"/api/projects/{project_id}/jobs/{job_id}",
+                "run": f"/api/projects/{project_id}/runs/{row['run_id']}" if row.get("run_id") else None,
+            }
         return JSONResponse(content={"job_id": job_id, "total": total, "offset": offset, "rows": page, "parquet_sha256": row["parquet_sha256"]})
 
     def project_out(view: ProjectView) -> ProjectOut:
@@ -1224,19 +1628,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "started_at": row["started_at"],
             "ended_at": row["ended_at"],
             "request": json.loads(row["request_json"]),
-            "output_path": row["output_path"],
-            "error": row["error"],
+            "error": _public_diagnostic(row["error"]),
             "links": {
-                "operation": f"/api/operations/{row['operation_id']}",
+                "operation": f"/api/projects/{row['project_id']}/operations/{row['operation_id']}",
                 "project": f"/api/projects/{row['project_id']}",
             },
         }
 
-    @app.get("/api/operations/{operation_id}")
-    def operation_status(operation_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/operations/{operation_id}")
+    def operation_status(project_id: str, operation_id: str) -> JSONResponse:
         row = store().operation(operation_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="operation is not recorded")
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="operation is not recorded in this project")
         return JSONResponse(content=operation_out(row))
 
     @app.get("/api/projects/{project_id}/operations")
@@ -1272,7 +1675,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         return project_out(view)
 
     @app.post("/api/projects/{project_id}/open", response_model=ProjectOut)
@@ -1333,53 +1736,109 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             project_id=dataset.project_id,
             name=dataset.name,
             version=dataset.version,
-            source_uri=dataset.source_uri,
+            source_uri=_public_dataset_source_uri(dataset.source_uri),
             rights_status=dataset.rights_status,
             modality=dataset.modality.value,
             classification=dataset.classification.value,
             subject_count=dataset.subject_count.value,
             sample_count=store().sample_count(dataset.dataset_id),
             manifest_sha256=dataset.manifest.sha256,
-            manifest=_json.loads(dataset.manifest.text),
+            manifest=_public_dataset_manifest(_json.loads(dataset.manifest.text)),
             statistics_sha256=statistics_sha256,
             evidence_sha256=_hashlib.sha256(dataset.model_dump_json().encode("utf-8")).hexdigest(),
         )
 
-    @app.post("/api/projects/{project_id}/datasets/import-registered", response_model=DatasetOut, status_code=201)
-    def import_registered_dataset(project_id: str, request: DatasetImportRequest) -> DatasetOut:
+    @app.post("/api/projects/{project_id}/datasets/import-registered", status_code=201)
+    def import_registered_dataset(project_id: str, request: DatasetImportRequest) -> JSONResponse:
         try:
             project = projects().require_writable(project_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         if request.resource_id != "lfw-funneled-local-candidate":
             raise HTTPException(status_code=422, detail="only the registered LFW resource has an importer in this release")
         importer = RegisteredDatasetImporter(engine().registry, store())
         try:
             result = importer.import_lfw(project, verify_hashes=request.verify_hashes)
         except DatasetImportError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        return dataset_out(result.dataset, result.statistics_sha256)
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
+        return JSONResponse(
+            status_code=201,
+            content=_public_dataset(result.dataset, result.statistics_sha256),
+        )
 
-    @app.get("/api/projects/{project_id}/datasets", response_model=list[DatasetOut])
-    def project_datasets(project_id: str) -> list[DatasetOut]:
+    @app.get("/api/projects/{project_id}/datasets")
+    def project_datasets(project_id: str) -> JSONResponse:
         items = []
         for dataset in store().datasets_for_project(project_id):
             stats = store().dataset_statistics(dataset.dataset_id)
-            items.append(dataset_out(dataset, stats[1] if stats else None))
-        return items
+            items.append(_public_dataset(dataset, stats[1] if stats else None))
+        return JSONResponse(content=items)
 
-    @app.get("/api/datasets/{dataset_id}", response_model=DatasetOut)
-    def dataset(dataset_id: str) -> DatasetOut:
+    def _public_dataset_source_uri(value: str) -> str | None:
+        parsed = urlsplit(value)
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            return value
+        return None
+
+    private_dataset_manifest_value = object()
+
+    def _public_dataset_manifest(value: Any) -> Any:
+        if isinstance(value, dict):
+            public: dict[str, Any] = {}
+            for key, item in value.items():
+                if key in {
+                    "path",
+                    "tree_root",
+                    "directory",
+                    "source_path",
+                    "original_name",
+                }:
+                    continue
+                projected = _public_dataset_manifest(item)
+                if projected is not private_dataset_manifest_value:
+                    public[key] = projected
+            return public
+        if isinstance(value, list):
+            projected = [_public_dataset_manifest(item) for item in value]
+            return [
+                item for item in projected if item is not private_dataset_manifest_value
+            ]
+        if isinstance(value, str):
+            parsed = urlsplit(value)
+            if (
+                parsed.scheme == "file"
+                or Path(value).is_absolute()
+                or PureWindowsPath(value).is_absolute()
+            ):
+                return private_dataset_manifest_value
+        return value
+
+    def _public_dataset(dataset: Dataset, statistics_sha256: str | None) -> dict[str, Any]:
+        payload = dataset_out(dataset, statistics_sha256).model_dump(mode="json")
+        payload["manifest"] = _public_dataset_manifest(payload["manifest"])
+        return payload
+
+    def _project_dataset(project_id: str, dataset_id: str) -> Dataset:
         found = store().dataset(dataset_id)
-        if found is None:
-            raise HTTPException(status_code=404, detail="dataset is not recorded")
-        stats = store().dataset_statistics(dataset_id)
-        return dataset_out(found, stats[1] if stats else None)
+        if found is None or found.project_id != project_id:
+            raise HTTPException(
+                status_code=404, detail="dataset is not recorded in this project"
+            )
+        return found
 
-    @app.get("/api/datasets/{dataset_id}/statistics")
-    def dataset_statistics(dataset_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/datasets/{dataset_id}")
+    def dataset(project_id: str, dataset_id: str) -> JSONResponse:
+        found = _project_dataset(project_id, dataset_id)
+        stats = store().dataset_statistics(dataset_id)
+        return JSONResponse(
+            content=_public_dataset(found, stats[1] if stats else None)
+        )
+
+    @app.get("/api/projects/{project_id}/datasets/{dataset_id}/statistics")
+    def dataset_statistics(project_id: str, dataset_id: str) -> JSONResponse:
+        _project_dataset(project_id, dataset_id)
         stats = store().dataset_statistics(dataset_id)
         if stats is None:
             raise HTTPException(status_code=404, detail="no statistics are recorded for this dataset")
@@ -1389,29 +1848,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         statistics["quality_coverage"] = store().quality_coverage(dataset_id)
         return JSONResponse(content={"dataset_id": dataset_id, "evidence_sha256": stats[1], "import_statistics_sha256": stats[1], "statistics": statistics})
 
-    @app.get("/api/datasets/{dataset_id}/samples", response_model=list[SampleOut])
+    @app.get("/api/projects/{project_id}/datasets/{dataset_id}/samples")
     def dataset_samples(
+        project_id: str,
         dataset_id: str,
         limit: int = Query(default=100, ge=1, le=20_000),
         offset: int = Query(default=0, ge=0),
         subject_id: str | None = Query(default=None),
-    ) -> list[SampleOut]:
-        import json as _json
-
+    ) -> JSONResponse:
+        _project_dataset(project_id, dataset_id)
         items = store().samples_for_dataset(dataset_id, limit=limit, offset=offset, subject_id=subject_id)
-        return [
-            SampleOut(
-                sample_id=sample.sample_id,
-                dataset_id=sample.dataset_id,
-                subject_id=sample.subject_id.value,
-                source_path=sample.source_path,
-                media_type=sample.media_type,
-                sha256=sample.sha256,
-                size_bytes=sample.size_bytes,
-                metadata=_json.loads(sample.metadata.text),
-            )
-            for sample in items
-        ]
+        return JSONResponse(
+            content=[_public_sample(project_id, sample) for sample in items]
+        )
 
     @app.post("/api/projects/{project_id}/datasets/{dataset_id}/protocols/freeze-lfw-view2", status_code=201)
     def freeze_lfw_protocol(project_id: str, dataset_id: str) -> JSONResponse:
@@ -1420,7 +1869,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         dataset = store().dataset(dataset_id)
         if dataset is None or dataset.project_id != project_id:
             raise HTTPException(status_code=404, detail="dataset is not recorded in this project")
@@ -1428,34 +1877,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             frozen = service.freeze_lfw_view2(project, dataset)
         except ProtocolError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        return JSONResponse(status_code=201, content=frozen.record.model_dump(mode="json"))
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
+        return JSONResponse(
+            status_code=201,
+            content=_public_projection(
+                frozen.record.model_dump(mode="json"), omit_location_keys=True
+            ),
+        )
 
     @app.get("/api/projects/{project_id}/protocols")
     def project_protocols(project_id: str) -> JSONResponse:
-        return JSONResponse(content=[record.model_dump(mode="json") for record in store().protocols_for_project(project_id)])
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
+        return JSONResponse(
+            content=[
+                _public_projection(
+                    record.model_dump(mode="json"), omit_location_keys=True
+                )
+                for record in store().protocols_for_project(project_id)
+            ]
+        )
 
-    @app.get("/api/protocols/{protocol_id}")
-    def protocol(protocol_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/protocols/{protocol_id}")
+    def protocol(project_id: str, protocol_id: str) -> JSONResponse:
         found = store().protocol(protocol_id)
-        if found is None:
-            raise HTTPException(status_code=404, detail="protocol is not recorded")
-        body = found.model_dump(mode="json")
+        if found is None or found.project_id != project_id:
+            raise HTTPException(status_code=404, detail="protocol is not recorded in this project")
+        body = _public_projection(
+            found.model_dump(mode="json"), omit_location_keys=True
+        )
         body["recorded_pair_count"] = store().protocol_pair_count(protocol_id)
         return JSONResponse(content=body)
 
-    @app.get("/api/protocols/{protocol_id}/pairs")
+    @app.get("/api/projects/{project_id}/protocols/{protocol_id}/pairs")
     def protocol_pairs(
+        project_id: str,
         protocol_id: str,
         limit: int = Query(default=100, ge=1, le=10_000),
         offset: int = Query(default=0, ge=0),
         fold: int | None = Query(default=None, ge=1),
         label: str | None = Query(default=None),
     ) -> JSONResponse:
-        if store().protocol(protocol_id) is None:
-            raise HTTPException(status_code=404, detail="protocol is not recorded")
+        found = store().protocol(protocol_id)
+        if found is None or found.project_id != project_id:
+            raise HTTPException(status_code=404, detail="protocol is not recorded in this project")
         pairs = store().protocol_pairs(protocol_id, limit=limit, offset=offset, fold=fold, label=label)
-        return JSONResponse(content=[pair.model_dump(mode="json") for pair in pairs])
+        return JSONResponse(
+            content=[
+                _public_projection(
+                    pair.model_dump(mode="json"), omit_location_keys=True
+                )
+                for pair in pairs
+            ]
+        )
 
     matrices: dict[str, MatcherMatrixJob] = {}
 
@@ -1482,17 +1956,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "counts": metrics["counts"],
             "metrics_sha256": row["metrics_sha256"],
             "comparisons_sha256": row["comparisons_sha256"],
-            "links": {"run": f"/api/runs/{row['run_id']}", "metrics": f"/api/matcher-runs/{row['run_id']}/metrics", "comparisons": f"/api/matcher-runs/{row['run_id']}/comparisons", "errors": f"/api/matcher-runs/{row['run_id']}/errors"},
+            "links": {"run": f"/api/projects/{row['project_id']}/runs/{row['run_id']}", "metrics": f"/api/projects/{row['project_id']}/matcher-runs/{row['run_id']}/metrics", "comparisons": f"/api/projects/{row['project_id']}/matcher-runs/{row['run_id']}/comparisons", "errors": f"/api/projects/{row['project_id']}/matcher-runs/{row['run_id']}/errors"},
         }
 
-    @app.post("/api/projects/{project_id}/protocols/{protocol_id}/matrix", status_code=202)
-    def start_matrix(project_id: str, protocol_id: str, fixture_pairs_only: bool = Query(default=False), leaves: str | None = Query(default=None)) -> JSONResponse:
+    def _start_matrix(
+        project_id: str,
+        protocol_id: str,
+        fixture_pairs_only: bool,
+        leaves: str | None,
+        *,
+        retry_operation_id: str | None = None,
+    ) -> tuple[JSONResponse, dict[str, Any]]:
         try:
             project = projects().require_writable(project_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         protocol = store().protocol(protocol_id)
         if protocol is None or protocol.project_id != project_id:
             raise HTTPException(status_code=404, detail="protocol is not recorded in this project")
@@ -1536,54 +2016,89 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     store=store(), project=project, dataset=dataset, protocol=protocol, pairs=pairs, job_root=settings.data_dir / "matrix", selection_rule=rule, **extra,
                     runtime_manager=matcher_manager(),
                     detector_workers=settings.detector_workers,
+                    execution_timeout_seconds=settings.native_execution_timeout_seconds,
                 )
+                operation_request = {
+                    "dataset_id": dataset.dataset_id,
+                    "protocol_id": protocol_id,
+                    "fixture_pairs_only": fixture_pairs_only,
+                    "leaves": leaves,
+                    "leaf_ids": sorted(job.leaf_ids),
+                    "pair_count": len(job.pairs),
+                    "sample_count": len(job.sample_ids),
+                    "expected_leaf_count": job.expected_leaf_count,
+                    "selection_rule": rule,
+                }
                 operation, reservation = admit_scientific_operation(
-                    operation_id=job.matrix_id,
+                    operation_id=retry_operation_id or job.matrix_id,
                     operation_kind="MATCHER_MATRIX",
                     project_id=project_id,
-                    request={
-                        "protocol_id": protocol_id,
-                        "fixture_pairs_only": fixture_pairs_only,
-                        "leaves": leaves,
-                        "pair_count": len(job.pairs),
-                        "sample_count": len(job.sample_ids),
-                        "expected_leaf_count": job.expected_leaf_count,
-                        "selection_rule": rule,
-                    },
+                    request=operation_request,
                     output_path=job.job_dir,
+                    retry_interrupted=retry_operation_id is not None,
+                    result_id=job.matrix_id,
                 )
                 if reservation is None:
-                    return JSONResponse(
-                        status_code=200,
-                        content={
-                            "matrix_id": job.matrix_id,
-                            "state": operation["state"],
-                            "error": operation["error"],
-                            "already_recorded": True,
-                        },
+                    return (
+                        JSONResponse(
+                            status_code=200,
+                            content={
+                                "matrix_id": job.matrix_id,
+                                "state": operation["state"],
+                                "error": _public_diagnostic(operation["error"]),
+                                "already_recorded": True,
+                            },
+                        ),
+                        operation,
                     )
                 matrices[job.matrix_id] = job
         except HTTPException:
             raise
         except (MatrixError, Exception) as error:  # noqa: BLE001 - surfaced as a typed HTTP error
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
 
         def _run() -> None:
+            active_operation_id = str(operation["operation_id"])
             try:
-                store().start_operation(job.matrix_id)
-                job.run()
-                store().finish_operation(job.matrix_id, state="COMPLETED")
+                store().start_operation(active_operation_id)
+                job.run(
+                    request_sha256=CanonicalJson.from_value(
+                        operation_request
+                    ).sha256,
+                    resume_interrupted=retry_operation_id is not None,
+                )
+                store().finish_operation(active_operation_id, state="COMPLETED")
             except Exception as error:  # noqa: BLE001
                 detail = f"{type(error).__name__}: {error}"
                 job.progress = {"phase": "failed", "detail": detail}
-                store().finish_operation(job.matrix_id, state="FAILED", error=detail)
+                store().finish_operation(
+                    active_operation_id, state="FAILED", error=detail
+                )
             finally:
                 with job_lock:
                     matrices.pop(job.matrix_id, None)
 
         reservation.submit(_run)
         record_action(project_id, AuditEventType.RUN_STARTED, "MatcherMatrix", job.matrix_id, {"protocol_id": protocol_id, "pairs": len(job.pairs), "samples": len(job.sample_ids), "selection_rule": rule})
-        return JSONResponse(status_code=202, content={"matrix_id": job.matrix_id, "pairs": len(job.pairs), "samples": len(job.sample_ids), "expected_leaves": job.expected_leaf_count, "progress": job.progress})
+        return (
+            JSONResponse(status_code=202, content={"matrix_id": job.matrix_id, "pairs": len(job.pairs), "samples": len(job.sample_ids), "expected_leaves": job.expected_leaf_count, "progress": job.progress}),
+            operation,
+        )
+
+    @app.post("/api/projects/{project_id}/protocols/{protocol_id}/matrix", status_code=202)
+    def start_matrix(
+        project_id: str,
+        protocol_id: str,
+        fixture_pairs_only: bool = Query(default=False),
+        leaves: str | None = Query(default=None),
+    ) -> JSONResponse:
+        response, _operation = _start_matrix(
+            project_id,
+            protocol_id,
+            fixture_pairs_only,
+            leaves,
+        )
+        return response
 
     @app.post("/api/projects/{project_id}/protocols/{protocol_id}/import-external-scores", status_code=201)
     def import_external_scores(project_id: str, protocol_id: str, request: ExternalScoreImportRequest) -> JSONResponse:
@@ -1594,24 +2109,79 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         protocol = store().protocol(protocol_id)
         if protocol is None or protocol.project_id != project_id:
             raise HTTPException(status_code=404, detail="protocol is not recorded in this project")
         try:
-            field_mapping = request.field_mapping
-            if field_mapping is None and request.mapping_name:
-                field_mapping = store().import_mapping(request.mapping_name)
-                if field_mapping is None:
-                    raise HTTPException(status_code=404, detail=f"import mapping {request.mapping_name} is not recorded")
-            importer = ExternalScoreImporter(store=store(), registry=engine().registry, repository_root=settings.repository_root, project=project, protocol=protocol, resource_id=request.resource_id, job_root=settings.data_dir / "external", actor=projects().actor, purpose_scope=request.purpose_scope, field_mapping=field_mapping)
-            if request.mapping_name and request.field_mapping is not None:
-                store().record_import_mapping(request.mapping_name, request.field_mapping, projects().actor, datetime.now(timezone.utc).astimezone().isoformat())
-            result = importer.run()
+            with admitted_mutation(project_id):
+                field_mapping = request.field_mapping
+                if field_mapping is None and request.mapping_name:
+                    field_mapping = store().import_mapping(request.mapping_name)
+                    if field_mapping is None:
+                        raise HTTPException(status_code=404, detail=f"import mapping {request.mapping_name} is not recorded")
+                importer = ExternalScoreImporter(store=store(), registry=engine().registry, repository_root=settings.repository_root, project=project, protocol=protocol, resource_id=request.resource_id, job_root=settings.data_dir / "external", actor=projects().actor, purpose_scope=request.purpose_scope, field_mapping=field_mapping)
+                if request.mapping_name and request.field_mapping is not None:
+                    store().record_import_mapping(request.mapping_name, request.field_mapping, projects().actor, datetime.now(timezone.utc).astimezone().isoformat())
+                existing_operation = store().operation(importer.matrix_id)
+                if existing_operation is not None:
+                    recovered_operation = store().reconcile_prepared_operation(
+                        importer.matrix_id
+                    )
+                    if (
+                        recovered_operation is not None
+                        and recovered_operation["state"] == "COMPLETED"
+                    ):
+                        result = recover_prepared_external_score_import(
+                            importer.leaf_dir,
+                            matrix_id=importer.matrix_id,
+                            project_id=project_id,
+                            dataset_id=importer.dataset.dataset_id,
+                            protocol_id=protocol_id,
+                            resource_id=request.resource_id,
+                            request_sha256=importer.request_sha256,
+                        )
+                        record_action(project_id, AuditEventType.RUN_COMPLETED, "ExternalScoreImport", result.run.run_id, {"resource_id": request.resource_id, "protocol_id": protocol_id, "provenance_marker": "EXTERNALLY_COMPUTED", "mapping": result.mapping})
+                        row = store().matcher_leaf(result.run.run_id)
+                        return JSONResponse(
+                            status_code=200,
+                            content={
+                                **leaf_summary(row),
+                                "provenance_marker": "EXTERNALLY_COMPUTED",
+                                "mapping": result.mapping,
+                            },
+                        )
+                operation, created = store().admit_operation(
+                    operation_id=importer.matrix_id,
+                    operation_kind="EXTERNAL_SCORE_IMPORT",
+                    project_id=project_id,
+                    request=importer.operation_request,
+                    output_path=importer.job_dir,
+                    result_id=importer.matrix_id,
+                )
+                if not created:
+                    raise ExternalScoreImportError(
+                        f"this external-score request is already recorded in state {operation['state']}"
+                    )
+                try:
+                    store().start_operation(operation["operation_id"])
+                    result = importer.run(
+                        request_sha256=importer.request_sha256,
+                        operation_id=operation["operation_id"],
+                    )
+                except BaseException as error:
+                    current = store().operation(operation["operation_id"])
+                    if current is not None and current["state"] in {"QUEUED", "RUNNING"}:
+                        store().finish_operation(
+                            operation["operation_id"],
+                            state="FAILED",
+                            error=f"{type(error).__name__}: {error}",
+                        )
+                    raise
+                record_action(project_id, AuditEventType.RUN_COMPLETED, "ExternalScoreImport", result.run.run_id, {"resource_id": request.resource_id, "protocol_id": protocol_id, "provenance_marker": "EXTERNALLY_COMPUTED", "mapping": result.mapping})
+                row = store().matcher_leaf(result.run.run_id)
         except (ExternalScoreImportError, ContractValidationError) as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        record_action(project_id, AuditEventType.RUN_COMPLETED, "ExternalScoreImport", result.run.run_id, {"resource_id": request.resource_id, "protocol_id": protocol_id, "provenance_marker": "EXTERNALLY_COMPUTED", "mapping": result.mapping})
-        row = store().matcher_leaf(result.run.run_id)
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         return JSONResponse(status_code=201, content={**leaf_summary(row), "provenance_marker": "EXTERNALLY_COMPUTED", "mapping": result.mapping})
 
     # -- controlled transformations and degradation responses (QS-X61) ---------------
@@ -1620,7 +2190,78 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/transforms")
     def list_transforms() -> JSONResponse:
-        return JSONResponse(content={"operators": [{"kind": kind, "parameter": name, "version": "1.0.0"} for kind, name in PARAMETER_NAMES.items()]})
+        return JSONResponse(
+            content={
+                "operators": [
+                    {
+                        "kind": kind,
+                        "parameter": name,
+                        "version": OPERATOR_VERSION,
+                        "parameter_contract": dict(PARAMETER_CONTRACTS[kind]),
+                    }
+                    for kind, name in PARAMETER_NAMES.items()
+                ]
+            }
+        )
+
+    def _public_derived_sample(project_id: str, row: dict[str, Any]) -> dict[str, Any]:
+        chain = [
+            {key: value for key, value in item.items() if key != "parent_path"}
+            for item in row.get("chain", [])
+            if isinstance(item, dict)
+        ]
+        sample_id = str(row["derived_sample_id"])
+        sample = store().sample(sample_id)
+        if sample is None:
+            raise RuntimeError(
+                f"derived sample {sample_id} is missing its immutable sample record"
+            )
+        return {
+            "derived_sample_id": sample_id,
+            "parent_sample_id": row["parent_sample_id"],
+            "transform": row["transform"],
+            "parameter": row["parameter"],
+            "level_index": row["level_index"],
+            "sha256": row["sha256"],
+            "size_bytes": sample.size_bytes,
+            "chain": chain,
+            "links": {
+                "image": f"/api/projects/{project_id}/samples/{sample_id}/image",
+                "detection": f"/api/projects/{project_id}/samples/{sample_id}/detection",
+                "ofiq_landmarks": f"/api/projects/{project_id}/samples/{sample_id}/ofiq-landmarks",
+            },
+        }
+
+    def _public_derived_set(
+        record: dict[str, Any], *, include_samples: bool = False
+    ) -> dict[str, Any]:
+        project_id = str(record["project_id"])
+        public = {
+            key: record[key]
+            for key in (
+                "derived_set_id",
+                "project_id",
+                "source_dataset_id",
+                "source_resource_id",
+                "source_kind",
+                "derived_dataset_id",
+                "transforms",
+                "levels",
+                "source_count",
+                "derived_count",
+                "created_at",
+            )
+            if key in record
+        }
+        public["links"] = {
+            "detail": f"/api/projects/{project_id}/derived-sets/{record['derived_set_id']}"
+        }
+        if include_samples:
+            public["samples"] = [
+                _public_derived_sample(project_id, row)
+                for row in store().derived_samples(str(record["derived_set_id"]))
+            ]
+        return public
 
     @app.post("/api/projects/{project_id}/datasets/{dataset_id}/transformations", status_code=201)
     def create_transformations(project_id: str, dataset_id: str, request: TransformationRequest) -> JSONResponse:
@@ -1629,39 +2270,199 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         dataset = store().dataset(dataset_id)
         if dataset is None or dataset.project_id != project_id:
             raise HTTPException(status_code=404, detail="dataset is not recorded in this project")
         if store().derived_set(dataset_id) is not None:
             raise HTTPException(status_code=409, detail="transformations start from a registered source dataset, not from a derived one")
+        transforms = [item.model_dump(mode="json") for item in request.transforms]
+        level_count = sum(len(item["parameters"]) for item in transforms)
         if request.selection == "subset_fixture":
             fixture = json.loads((settings.repository_root / "resources" / "manifests" / "lfw-subset-fixture-v1.json").read_text(encoding="utf-8"))
             wanted = {image["path"] for image in fixture["images"]}
             samples = [s for s in store().samples_for_dataset(dataset_id, limit=1_000_000) if any(s.source_path.endswith("/" + path) for path in wanted)]
         elif request.selection == "sample_ids":
-            samples = [s for s in (store().sample(sample_id) for sample_id in request.sample_ids) if s is not None and s.dataset_id == dataset_id]
+            samples = []
+            for sample_id in request.sample_ids:
+                selected = store().sample(sample_id)
+                if selected is None or selected.dataset_id != dataset_id:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=[
+                            {
+                                "type": "value_error",
+                                "loc": ["body", "sample_ids"],
+                                "msg": "sample_ids must be an exact set recorded in the route dataset",
+                            }
+                        ],
+                    )
+                samples.append(selected)
         else:
-            samples = store().samples_for_dataset(dataset_id, limit=1_000_000)
+            available = store().sample_count(dataset_id)
+            if available * level_count > MAX_DERIVED_OUTPUT_FILES:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "derived output cardinality exceeds the controlled beta "
+                        f"limit of {MAX_DERIVED_OUTPUT_FILES} files"
+                    ),
+                )
+            samples = store().samples_for_dataset(dataset_id, limit=available)
         if not samples:
             raise HTTPException(status_code=422, detail="the selection contains no samples")
-        try:
-            result = build_derived_set(store(), project=project, dataset=dataset, dataset_resource_id=dataset_resource_of(dataset), samples=samples, transforms=request.transforms, root=settings.data_dir / "derived", actor=projects().actor)
-        except DerivedSetError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        record_action(project_id, AuditEventType.DATASET_IMPORTED, "DerivedSet", result.derived_set_id, {"source_dataset_id": dataset_id, "derived_dataset_id": result.record["derived_dataset_id"], "transforms": request.transforms, "source_count": len(samples), "derived_count": len(result.samples)})
-        return JSONResponse(status_code=201, content=result.record)
+        output_count = len(samples) * level_count
+        if output_count > MAX_DERIVED_OUTPUT_FILES:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "derived output cardinality exceeds the controlled beta "
+                    f"limit of {MAX_DERIVED_OUTPUT_FILES} files"
+                ),
+            )
+        derived_set_id = derived_set_identity(
+            project_id=project_id,
+            dataset_id=dataset_id,
+            samples=samples,
+            transforms=transforms,
+        )
+        operation_id = "operation:sha256:" + hashlib.sha256(
+            derived_set_id.encode("utf-8")
+        ).hexdigest()
+        output_path = settings.data_dir / "derived" / derived_set_id.replace(":", "_")
+        operation_request = {
+            "dataset_id": dataset_id,
+            "derived_set_id": derived_set_id,
+            "output_count": output_count,
+            "sample_ids": sorted(sample.sample_id for sample in samples),
+            "sample_count": len(samples),
+            "selection": request.selection,
+            "source_sample_ids_sha256": hashlib.sha256(
+                "\n".join(sorted(sample.sample_id for sample in samples)).encode("utf-8")
+            ).hexdigest(),
+            "transforms": transforms,
+        }
+        existing = store().operation(operation_id)
+        if existing is not None:
+            existing = store().reconcile_prepared_operation(operation_id) or existing
+        retry_interrupted = bool(
+            existing is not None and existing["state"] == "INTERRUPTED"
+        )
+        with admitted_mutation(project_id):
+            operation, reservation = admit_scientific_operation(
+                operation_id=operation_id,
+                operation_kind="DERIVED_SET",
+                project_id=project_id,
+                request=operation_request,
+                output_path=output_path,
+                retry_interrupted=retry_interrupted,
+                result_id=derived_set_id,
+            )
+            if reservation is None:
+                if operation["state"] == "COMPLETED":
+                    recorded = store().derived_set(derived_set_id)
+                    if recorded is None or not Path(recorded["directory"]).is_dir():
+                        raise HTTPException(
+                            status_code=409,
+                            detail="derived set could not be recorded atomically",
+                        )
+                    return JSONResponse(
+                        status_code=200,
+                        content=_public_derived_set(recorded),
+                    )
+                if operation["state"] in {"QUEUED", "RUNNING"}:
+                    return JSONResponse(
+                        status_code=202,
+                        content=operation_out(operation),
+                    )
+                raise HTTPException(
+                    status_code=409,
+                    detail="the prior derived-set operation did not complete",
+                )
 
-    @app.get("/api/derived-sets/{derived_set_id}")
-    def derived_set_detail(derived_set_id: str) -> JSONResponse:
+            def _run_transformation():
+                active_operation_id = str(operation["operation_id"])
+                store().start_operation(active_operation_id)
+                try:
+                    result = build_derived_set(
+                        store(),
+                        project=project,
+                        dataset=dataset,
+                        dataset_resource_id=dataset_resource_of(dataset),
+                        samples=samples,
+                        transforms=transforms,
+                        root=settings.data_dir / "derived",
+                        actor=projects().actor,
+                        request_sha256=CanonicalJson.from_value(
+                            operation_request
+                        ).sha256,
+                    )
+                    record_action(
+                        project_id,
+                        AuditEventType.DATASET_IMPORTED,
+                        "DerivedSet",
+                        result.derived_set_id,
+                        {
+                            "source_dataset_id": dataset_id,
+                            "derived_dataset_id": result.record["derived_dataset_id"],
+                            "transforms": transforms,
+                            "source_count": len(samples),
+                            "derived_count": len(result.samples),
+                        },
+                    )
+                    store().finish_operation(active_operation_id, state="COMPLETED")
+                    return result
+                except BaseException:
+                    current = store().operation(active_operation_id)
+                    if current is not None and current["state"] in {"QUEUED", "RUNNING"}:
+                        store().finish_operation(
+                            active_operation_id,
+                            state="FAILED",
+                            error=(
+                                "derived-set execution failed; inspect registered "
+                                "input integrity and private local diagnostics"
+                            ),
+                        )
+                    raise
+
+            try:
+                result = reservation.submit(_run_transformation).result()
+            except DerivedSetError as error:
+                raise HTTPException(
+                    status_code=409,
+                    detail=redact_private_paths(str(error)),
+                ) from error
+            except Exception as error:
+                operations_logger.exception(
+                    "derived-set execution failed",
+                    extra={"derived_set_id": derived_set_id, "project_id": project_id},
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail="derived set could not be recorded atomically",
+                ) from error
+        return JSONResponse(status_code=201, content=_public_derived_set(result.record))
+
+    @app.get("/api/projects/{project_id}/derived-sets/{derived_set_id}")
+    def derived_set_detail(project_id: str, derived_set_id: str) -> JSONResponse:
         record = store().derived_set(derived_set_id)
-        if record is None:
-            raise HTTPException(status_code=404, detail="derived set is not recorded")
-        return JSONResponse(content={**record, "samples": store().derived_samples(record["derived_set_id"])})
+        if record is None or record["project_id"] != project_id:
+            raise HTTPException(
+                status_code=404,
+                detail="derived set is not recorded in this project",
+            )
+        return JSONResponse(content=_public_derived_set(record, include_samples=True))
 
     @app.get("/api/projects/{project_id}/derived-sets")
     def project_derived_sets(project_id: str) -> JSONResponse:
-        return JSONResponse(content=store().derived_sets(project_id=project_id))
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
+        return JSONResponse(
+            content=[
+                _public_derived_set(record)
+                for record in store().derived_sets(project_id=project_id)
+            ]
+        )
 
     @app.post("/api/projects/{project_id}/degradation-analyses", status_code=202)
     def start_degradation_analysis(project_id: str, request: DegradationAnalysisRequestBody) -> JSONResponse:
@@ -1670,12 +2471,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         try:
             matcher_manager().require_ready((request.matcher_id,))
             with job_lock:
                 require_project_not_purging_locked(project_id)
-                job = DegradationAnalysisJob(store=store(), registry=engine().registry, upstream=matcher_upstream(), repository_root=settings.repository_root, project=project, request=DegradationRequest(**request.model_dump()), job_root=settings.data_dir / "analyses", actor=projects().actor, runtime_manager=matcher_manager())
+                job = DegradationAnalysisJob(store=store(), registry=engine().registry, upstream=matcher_upstream(), repository_root=settings.repository_root, project=project, request=DegradationRequest(**request.model_dump()), job_root=settings.data_dir / "analyses", actor=projects().actor, execution_timeout_seconds=settings.native_execution_timeout_seconds, runtime_manager=matcher_manager())
+                request_sha256 = CanonicalJson.from_value(
+                    request.model_dump(mode="json")
+                ).sha256
                 operation, reservation = admit_scientific_operation(
                     operation_id=job.analysis_id,
                     operation_kind="DEGRADATION_ANALYSIS",
@@ -1684,15 +2488,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     output_path=job.directory,
                 )
                 if reservation is None:
-                    return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": operation["state"], "error": operation["error"], "already_recorded": True})
+                    return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": operation["state"], "error": _public_diagnostic(operation["error"]), "already_recorded": True})
                 degradations[job.analysis_id] = job
         except (DegradationAnalysisError, ContractValidationError, MatcherLifecycleError) as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
 
         def _run() -> None:
             try:
                 store().start_operation(job.analysis_id)
-                job.run()
+                job.run(request_sha256=request_sha256)
                 store().finish_operation(job.analysis_id, state="COMPLETED")
             except Exception as error:  # noqa: BLE001
                 detail = f"{type(error).__name__}: {error}"
@@ -1703,23 +2507,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         record_action(project_id, AuditEventType.RUN_STARTED, "DegradationAnalysis", job.analysis_id, {"derived_set_id": request.derived_set_id, "quality_job_id": request.quality_job_id, "matcher_id": request.matcher_id, "matcher_threshold": request.matcher_threshold})
         return JSONResponse(status_code=202, content={"analysis_id": job.analysis_id, "state": "RUNNING"})
 
-    @app.get("/api/degradation-analyses/{analysis_id}")
-    def degradation_analysis_status(analysis_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/degradation-analyses/{analysis_id}")
+    def degradation_analysis_status(project_id: str, analysis_id: str) -> JSONResponse:
         row = store().degradation_analysis(analysis_id)
+        operation = store().operation(analysis_id)
+        if row is not None and row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="degradation analysis is not recorded in this project")
+        if row is None and (operation is None or operation["project_id"] != project_id or operation["operation_kind"] != "DEGRADATION_ANALYSIS"):
+            raise HTTPException(status_code=404, detail="degradation analysis is not recorded in this project")
         with job_lock:
             live = degradations.get(analysis_id)
         if row is None:
             if live is None:
-                operation = store().operation(analysis_id)
-                if operation is None or operation["operation_kind"] != "DEGRADATION_ANALYSIS":
-                    raise HTTPException(status_code=404, detail="degradation analysis is not recorded")
-                return JSONResponse(content={"analysis_id": analysis_id, "state": operation["state"], "progress": {"phase": operation["state"].lower(), "detail": operation["error"] or ""}, "error": operation["error"]})
-            return JSONResponse(content={"analysis_id": analysis_id, "state": "FAILED" if live.progress["phase"] == "failed" else "RUNNING", "progress": live.progress, "error": live.progress["detail"] if live.progress["phase"] == "failed" else None})
+                return JSONResponse(content={"analysis_id": analysis_id, "state": operation["state"], "progress": {"phase": operation["state"].lower(), "detail": _public_diagnostic(operation["error"]) or ""}, "error": _public_diagnostic(operation["error"])})
+            return JSONResponse(content={"analysis_id": analysis_id, "state": "FAILED" if live.progress["phase"] == "failed" else "RUNNING", "progress": live.progress, "error": _public_diagnostic(live.progress["detail"]) if live.progress["phase"] == "failed" else None})
         return JSONResponse(content={"analysis_id": analysis_id, "state": "COMPLETED", "run_id": row["run_id"], "summary": json.loads(row["summary_json"]), "document": json.loads((Path(row["directory"]) / "degradation.json").read_text(encoding="utf-8")), "document_sha256": row["document_sha256"]})
 
     @app.get("/api/projects/{project_id}/degradation-analyses")
     def project_degradation_analyses(project_id: str) -> JSONResponse:
-        return JSONResponse(content=[{**json.loads(row["summary_json"]), "created_at": row["created_at"], "links": {"analysis": f"/api/degradation-analyses/{row['analysis_id']}", "run": f"/api/runs/{row['run_id']}"}} for row in store().degradation_analyses(project_id=project_id)])
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
+        return JSONResponse(content=[{**json.loads(row["summary_json"]), "created_at": row["created_at"], "links": {"analysis": f"/api/projects/{project_id}/degradation-analyses/{row['analysis_id']}", "run": f"/api/projects/{project_id}/runs/{row['run_id']}"}} for row in store().degradation_analyses(project_id=project_id)])
 
     # -- 1:N identification (QS-X60) ------------------------------------------------
 
@@ -1727,7 +2535,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def search_summary(row: dict[str, Any]) -> dict[str, Any]:
         summary = json.loads(row["summary_json"])
-        summary["links"] = {"search": f"/api/identification-searches/{row['search_id']}", "run": f"/api/runs/{row['run_id']}", "candidates": f"/api/identification-searches/{row['search_id']}/candidates", "protocol": f"/api/identification-protocols/{row['protocol_id']}"}
+        project_id = row["project_id"]
+        summary["links"] = {"search": f"/api/projects/{project_id}/identification-searches/{row['search_id']}", "run": f"/api/projects/{project_id}/runs/{row['run_id']}", "candidates": f"/api/projects/{project_id}/identification-searches/{row['search_id']}/candidates", "protocol": f"/api/projects/{project_id}/identification-protocols/{row['protocol_id']}"}
         summary["created_at"] = row["created_at"]
         return summary
 
@@ -1738,26 +2547,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         dataset = store().dataset(dataset_id)
         if dataset is None or dataset.project_id != project_id:
             raise HTTPException(status_code=404, detail="dataset is not recorded in this project")
         try:
             record = freeze_lfw_identification(store(), project=project, dataset=dataset, selection=request.selection, rank_depth=request.rank_depth, repository_root=settings.repository_root, actor=projects().actor)
         except IdentificationProtocolError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         record_action(project_id, AuditEventType.CONFIGURATION_CHANGED, "IdentificationProtocol", record["protocol_id"], {"selection": request.selection, "rank_depth": request.rank_depth, "gallery_count": record["gallery_count"], "mated_probe_count": record["mated_probe_count"], "nonmated_probe_count": record["nonmated_probe_count"], "manifest_sha256": record["manifest_sha256"]})
         return JSONResponse(status_code=201, content=record)
 
-    @app.get("/api/identification-protocols/{protocol_id}")
-    def identification_protocol_detail(protocol_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/identification-protocols/{protocol_id}")
+    def identification_protocol_detail(project_id: str, protocol_id: str) -> JSONResponse:
         record = store().identification_protocol(protocol_id)
-        if record is None:
-            raise HTTPException(status_code=404, detail="identification protocol is not recorded")
+        if record is None or record["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="identification protocol is not recorded in this project")
         return JSONResponse(content={**record, "entries": store().identification_entries(protocol_id)})
 
     @app.get("/api/projects/{project_id}/identification-protocols")
     def project_identification_protocols(project_id: str) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
         return JSONResponse(content=store().identification_protocols(project_id=project_id))
 
     @app.post("/api/projects/{project_id}/identification-protocols/{protocol_id}/search", status_code=202)
@@ -1767,7 +2578,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         protocol = store().identification_protocol(protocol_id)
         if protocol is None or protocol["project_id"] != project_id:
             raise HTTPException(status_code=404, detail="identification protocol is not recorded in this project")
@@ -1775,24 +2586,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             matcher_manager().require_ready((request.matcher_id,))
             with job_lock:
                 require_project_not_purging_locked(project_id)
-                job = IdentificationSearchJob(store=store(), registry=engine().registry, upstream=matcher_upstream(), repository_root=settings.repository_root, project=project, protocol=protocol, entries=store().identification_entries(protocol_id), matcher_id=request.matcher_id, condition_id=request.condition_id, job_root=settings.data_dir / "identification", actor=projects().actor, purpose_scope=request.purpose_scope, quality_job_id=request.quality_job_id, runtime_manager=matcher_manager())
+                job = IdentificationSearchJob(store=store(), registry=engine().registry, upstream=matcher_upstream(), repository_root=settings.repository_root, project=project, protocol=protocol, entries=store().identification_entries(protocol_id), matcher_id=request.matcher_id, condition_id=request.condition_id, job_root=settings.data_dir / "identification", actor=projects().actor, execution_timeout_seconds=settings.native_execution_timeout_seconds, purpose_scope=request.purpose_scope, quality_job_id=request.quality_job_id, runtime_manager=matcher_manager())
+                search_request = {
+                    "protocol_id": protocol_id,
+                    **request.model_dump(mode="json"),
+                }
+                request_sha256 = CanonicalJson.from_value(search_request).sha256
                 operation, reservation = admit_scientific_operation(
                     operation_id=job.search_id,
                     operation_kind="IDENTIFICATION_SEARCH",
                     project_id=project_id,
-                    request={"protocol_id": protocol_id, **request.model_dump(mode="json")},
+                    request=search_request,
                     output_path=job.directory,
                 )
                 if reservation is None:
-                    return JSONResponse(status_code=200, content={"search_id": job.search_id, "state": operation["state"], "error": operation["error"], "already_recorded": True})
+                    return JSONResponse(status_code=200, content={"search_id": job.search_id, "state": operation["state"], "error": _public_diagnostic(operation["error"]), "already_recorded": True})
                 searches[job.search_id] = job
         except (IdentificationSearchError, ContractValidationError, MatcherLifecycleError) as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
 
         def _run() -> None:
             try:
                 store().start_operation(job.search_id)
-                job.run()
+                job.run(request_sha256=request_sha256)
                 store().finish_operation(job.search_id, state="COMPLETED")
             except Exception as error:  # noqa: BLE001
                 detail = f"{type(error).__name__}: {error}"
@@ -1803,31 +2619,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         record_action(project_id, AuditEventType.RUN_STARTED, "IdentificationSearch", job.search_id, {"protocol_id": protocol_id, "matcher_id": request.matcher_id, "condition_id": request.condition_id})
         return JSONResponse(status_code=202, content={"search_id": job.search_id, "state": "RUNNING", "progress": job.progress})
 
-    @app.get("/api/identification-searches/{search_id}")
-    def identification_search_status(search_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/identification-searches/{search_id}")
+    def identification_search_status(project_id: str, search_id: str) -> JSONResponse:
         row = store().identification_search(search_id)
+        operation = store().operation(search_id)
+        if row is not None and row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="identification search is not recorded in this project")
+        if row is None and (operation is None or operation["project_id"] != project_id or operation["operation_kind"] != "IDENTIFICATION_SEARCH"):
+            raise HTTPException(status_code=404, detail="identification search is not recorded in this project")
         with job_lock:
             live = searches.get(search_id)
         if row is None:
             if live is None:
-                operation = store().operation(search_id)
-                if operation is None or operation["operation_kind"] != "IDENTIFICATION_SEARCH":
-                    raise HTTPException(status_code=404, detail="identification search is not recorded")
-                return JSONResponse(content={"search_id": search_id, "state": operation["state"], "progress": {"phase": operation["state"].lower(), "detail": operation["error"] or ""}, "error": operation["error"]})
-            return JSONResponse(content={"search_id": search_id, "state": "FAILED" if live.progress["phase"] == "failed" else "RUNNING", "progress": live.progress, "error": live.progress["detail"] if live.progress["phase"] == "failed" else None})
+                return JSONResponse(content={"search_id": search_id, "state": operation["state"], "progress": {"phase": operation["state"].lower(), "detail": _public_diagnostic(operation["error"]) or ""}, "error": _public_diagnostic(operation["error"])})
+            return JSONResponse(content={"search_id": search_id, "state": "FAILED" if live.progress["phase"] == "failed" else "RUNNING", "progress": live.progress, "error": _public_diagnostic(live.progress["detail"]) if live.progress["phase"] == "failed" else None})
         return JSONResponse(content={"search_id": search_id, "state": "COMPLETED", "run_id": row["run_id"], "summary": search_summary(row), "metrics": json.loads(row["metrics_json"]), "metrics_sha256": row["metrics_sha256"], "candidates_sha256": row["candidates_sha256"]})
 
     @app.get("/api/projects/{project_id}/identification-searches")
     def project_identification_searches(project_id: str) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
         return JSONResponse(content=[search_summary(row) for row in store().identification_searches(project_id=project_id)])
 
-    @app.get("/api/identification-searches/{search_id}/candidates")
-    def identification_candidates(search_id: str, probe_kind: str | None = Query(default=None), probe_sample_id: str | None = Query(default=None), rank_le: int | None = Query(default=None, ge=1), limit: int = Query(default=200, ge=1, le=100_000), offset: int = Query(default=0, ge=0)) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/identification-searches/{search_id}/candidates")
+    def identification_candidates(project_id: str, search_id: str, probe_kind: str | None = Query(default=None), probe_sample_id: str | None = Query(default=None), rank_le: int | None = Query(default=None, ge=1), limit: int = Query(default=200, ge=1, le=100_000), offset: int = Query(default=0, ge=0)) -> JSONResponse:
         import duckdb
 
         row = store().identification_search(search_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="identification search is not recorded")
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="identification search is not recorded in this project")
         parquet = row["candidates_parquet"].replace("'", "''")
         clauses, params = ["1=1"], []
         if probe_kind is not None:
@@ -1846,17 +2666,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             connection.close()
         for item in rows:
-            item["links"] = {"probe_sample": f"/api/samples/{item['probe_sample_id']}", "gallery_sample": f"/api/samples/{item['gallery_sample_id']}", "run": f"/api/runs/{row['run_id']}"}
+            item["links"] = {
+                "probe_sample": f"/api/projects/{project_id}/samples/{item['probe_sample_id']}",
+                "gallery_sample": f"/api/projects/{project_id}/samples/{item['gallery_sample_id']}",
+                "run": f"/api/projects/{project_id}/runs/{row['run_id']}",
+            }
         return JSONResponse(content={"search_id": search_id, "run_id": row["run_id"], "total": total, "offset": offset, "rows": rows})
 
-    @app.get("/api/matrices/{matrix_id}")
-    def matrix_status(matrix_id: str) -> JSONResponse:
-        with job_lock:
-            job = matrices.get(matrix_id)
+    @app.get("/api/projects/{project_id}/matrices/{matrix_id}")
+    def matrix_status(project_id: str, matrix_id: str) -> JSONResponse:
         rows = store().matcher_leaves(matrix_id=matrix_id)
         operation = store().operation(matrix_id)
+        if operation is not None:
+            operation = (
+                store().latest_operation_attempt(str(operation["request_id"]))
+                or operation
+            )
+        if rows and any(row["project_id"] != project_id for row in rows):
+            raise HTTPException(status_code=404, detail="matrix is not recorded in this project")
+        if operation is not None and operation["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="matrix is not recorded in this project")
+        with job_lock:
+            job = matrices.get(matrix_id)
         if job is None and not rows and operation is None:
-            raise HTTPException(status_code=404, detail="matrix is not recorded")
+            raise HTTPException(status_code=404, detail="matrix is not recorded in this project")
         if job is not None:
             expected_leaves = job.expected_leaf_count
         elif rows:
@@ -1866,20 +2699,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         persisted_state = operation["state"] if operation is not None else ("COMPLETED" if len(rows) == expected_leaves else "FAILED")
         persisted_progress = {
             "phase": persisted_state.lower(),
-            "detail": operation["error"] if operation is not None and operation["error"] else f"{len(rows)}/{expected_leaves} leaves recorded",
+            "detail": _public_diagnostic(operation["error"])
+            if operation is not None and operation["error"]
+            else f"{len(rows)}/{expected_leaves} leaves recorded",
         }
         live_state = "RUNNING" if job is not None and job.progress["phase"] not in {"completed", "failed"} else persisted_state
-        return JSONResponse(content={"matrix_id": matrix_id, "state": live_state, "error": operation["error"] if operation is not None else None, "expected_leaves": expected_leaves, "progress": job.progress if job else persisted_progress, "leaves": [leaf_summary(row) for row in rows]})
+        return JSONResponse(content={"matrix_id": matrix_id, "state": live_state, "error": _public_diagnostic(operation["error"]) if operation is not None else None, "expected_leaves": expected_leaves, "progress": job.progress if job else persisted_progress, "leaves": [leaf_summary(row) for row in rows]})
 
     @app.get("/api/projects/{project_id}/matcher-leaves")
     def project_matcher_leaves(project_id: str) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
         return JSONResponse(content=[leaf_summary(row) for row in store().matcher_leaves(project_id=project_id)])
 
-    @app.get("/api/matcher-runs/{run_id}/metrics")
-    def matcher_run_metrics(run_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/matcher-runs/{run_id}/metrics")
+    def matcher_run_metrics(project_id: str, run_id: str) -> JSONResponse:
         row = store().matcher_leaf(run_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="matcher run is not recorded")
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="matcher run is not recorded in this project")
         return JSONResponse(content={"run_id": run_id, "leaf_id": row["leaf_id"], "metrics_sha256": row["metrics_sha256"], "metrics": json.loads(row["metrics_json"])})
 
     def _comparison_rows(row: dict[str, Any], where: str, params: list[Any], limit: int, offset: int) -> tuple[int, list[dict[str, Any]]]:
@@ -1895,19 +2732,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             connection.close()
         for item in rows:
-            left = store().sample(item["left_sample_id"])
-            right = store().sample(item["right_sample_id"])
+            project_id = row["project_id"]
             item["links"] = {
-                "left_sample": f"/api/samples/{item['left_sample_id']}",
-                "right_sample": f"/api/samples/{item['right_sample_id']}",
-                "left_image": f"/api/samples/image?path={left.source_path}" if left else None,
-                "right_image": f"/api/samples/image?path={right.source_path}" if right else None,
-                "run": f"/api/runs/{row['run_id']}",
+                "left_sample": f"/api/projects/{project_id}/samples/{item['left_sample_id']}",
+                "right_sample": f"/api/projects/{project_id}/samples/{item['right_sample_id']}",
+                "left_image": f"/api/projects/{project_id}/samples/{item['left_sample_id']}/image",
+                "right_image": f"/api/projects/{project_id}/samples/{item['right_sample_id']}/image",
+                "run": f"/api/projects/{project_id}/runs/{row['run_id']}",
             }
         return total, rows
 
-    @app.get("/api/matcher-runs/{run_id}/comparisons")
+    @app.get("/api/projects/{project_id}/matcher-runs/{run_id}/comparisons")
     def matcher_run_comparisons(
+        project_id: str,
         run_id: str,
         label: str | None = Query(default=None),
         failed_only: bool = Query(default=False),
@@ -1917,8 +2754,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         offset: int = Query(default=0, ge=0),
     ) -> JSONResponse:
         row = store().matcher_leaf(run_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="matcher run is not recorded")
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="matcher run is not recorded in this project")
         clauses, params = ["1=1"], []
         if label is not None:
             clauses.append("label = ?"); params.append(label)
@@ -1931,8 +2768,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         total, rows = _comparison_rows(row, " AND ".join(clauses), params, limit, offset)
         return JSONResponse(content={"run_id": run_id, "leaf_id": row["leaf_id"], "matcher_id": row["matcher_id"], "condition_id": row["condition_id"], "total": total, "offset": offset, "rows": rows})
 
-    @app.get("/api/matcher-runs/{run_id}/errors")
+    @app.get("/api/projects/{project_id}/matcher-runs/{run_id}/errors")
     def matcher_run_errors(
+        project_id: str,
         run_id: str,
         threshold: float | None = Query(default=None, allow_inf_nan=ANALYSIS_PARAMETER_CONTRACTS["matcher_threshold"]["allow_inf_nan"]),
         policy: Literal["EXCLUDE_FAILED_TRIALS", "FAILURES_AS_REJECT"] = Query(default="EXCLUDE_FAILED_TRIALS"),
@@ -1941,8 +2779,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """False matches and false non-matches at a threshold (default: the recorded EER threshold)."""
 
         row = store().matcher_leaf(run_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="matcher run is not recorded")
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="matcher run is not recorded in this project")
         metrics = json.loads(row["metrics_json"])
         chosen = threshold if threshold is not None else metrics["by_policy"][policy]["eer"]["threshold"]
         _, false_matches = _comparison_rows(row, "label = 'NON_MATED' AND score IS NOT NULL AND score >= ?", [chosen], limit, 0)
@@ -1957,8 +2795,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "counts": {"false_matches": len(false_matches), "false_non_matches": len(false_non_matches), "processing_failures": len(failed)},
         })
 
-    @app.get("/api/matcher-runs/{run_id}/erc")
+    @app.get("/api/projects/{project_id}/matcher-runs/{run_id}/erc")
     def matcher_run_erc(
+        project_id: str,
         run_id: str,
         quality_job_id: str = Query(min_length=1),
         policy: str = Query(default="pair.quality.min"),
@@ -1978,11 +2817,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from ..metrics.utility import ErcInputs, PairQualityPolicy, compute_erc
 
         leaf = store().matcher_leaf(run_id)
-        if leaf is None:
-            raise HTTPException(status_code=404, detail="matcher run is not recorded")
+        if leaf is None or leaf["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="matcher run is not recorded in this project")
         job = store().job(quality_job_id)
-        if job is None or not job["parquet_path"]:
-            raise HTTPException(status_code=404, detail="quality job is not recorded")
+        if job is None or job["project_id"] != project_id or not job["parquet_path"]:
+            raise HTTPException(status_code=404, detail="quality job is not recorded in this project")
         try:
             chosen_policy = PairQualityPolicy(policy)
         except ValueError as error:
@@ -2024,7 +2863,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def analysis_summary(row: dict[str, Any]) -> dict[str, Any]:
         summary = json.loads(row["summary_json"])
-        summary["links"] = {"analysis": f"/api/utility-analyses/{row['analysis_id']}", "run": f"/api/runs/{row['run_id']}", "pairs": f"/api/utility-analyses/{row['analysis_id']}/pairs", "matcher_run": f"/api/runs/{row['matcher_run_id']}", "quality_job": f"/api/jobs/{row['quality_job_id']}"}
+        project_id = row["project_id"]
+        summary["links"] = {"analysis": f"/api/projects/{project_id}/utility-analyses/{row['analysis_id']}", "run": f"/api/projects/{project_id}/runs/{row['run_id']}", "pairs": f"/api/projects/{project_id}/utility-analyses/{row['analysis_id']}/pairs", "matcher_run": f"/api/projects/{project_id}/runs/{row['matcher_run_id']}", "quality_job": f"/api/projects/{project_id}/jobs/{row['quality_job_id']}"}
         summary["created_at"] = row["created_at"]
         return summary
 
@@ -2035,13 +2875,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         try:
             job = UtilityAnalysisJob(store=store(), repository_root=settings.repository_root, project=project, actor=projects().actor, request=UtilityRequest(**request.model_dump()), job_root=settings.data_dir / "analyses")
+            request_sha256 = CanonicalJson.from_value(
+                request.model_dump(mode="json")
+            ).sha256
         except UtilityAnalysisError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         existing = store().utility_analysis(job.analysis_id)
         if existing is not None:
+            return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": "COMPLETED", "already_recorded": True, "summary": analysis_summary(existing)})
+        recovered_operation = store().reconcile_prepared_operation(job.analysis_id)
+        if recovered_operation is not None and recovered_operation["state"] == "COMPLETED":
+            existing = store().utility_analysis(job.analysis_id)
+            if existing is None:
+                raise HTTPException(status_code=409, detail="prepared utility analysis could not be recorded atomically")
+            with job_lock:
+                analyses.pop(job.analysis_id, None)
             return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": "COMPLETED", "already_recorded": True, "summary": analysis_summary(existing)})
         with job_lock:
             require_project_not_purging_locked(project_id)
@@ -2055,7 +2906,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 output_path=job.directory,
             )
             if reservation is None:
-                return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": operation["state"], "error": operation["error"], "already_recorded": True})
+                return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": operation["state"], "error": _public_diagnostic(operation["error"]), "already_recorded": True})
             analyses[job.analysis_id] = {"state": "QUEUED", "error": None, "project_id": project_id}
 
         def _run() -> None:
@@ -2063,7 +2914,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 store().start_operation(job.analysis_id)
                 with job_lock:
                     analyses[job.analysis_id] = {"state": "RUNNING", "error": None, "project_id": project_id}
-                job.run()
+                job.run(request_sha256=request_sha256)
                 store().finish_operation(job.analysis_id, state="COMPLETED")
                 with job_lock:
                     analyses[job.analysis_id] = {"state": "COMPLETED", "error": None, "project_id": project_id}
@@ -2079,20 +2930,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/projects/{project_id}/utility-analyses")
     def project_utility_analyses(project_id: str) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
         return JSONResponse(content=[analysis_summary(row) for row in store().utility_analyses(project_id=project_id)])
 
-    @app.get("/api/utility-analyses/{analysis_id}")
-    def utility_analysis(analysis_id: str, include: Literal["summary", "full"] = Query(default="full")) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/utility-analyses/{analysis_id}")
+    def utility_analysis(project_id: str, analysis_id: str, include: Literal["summary", "full"] = Query(default="full")) -> JSONResponse:
         row = store().utility_analysis(analysis_id)
+        operation = store().operation(analysis_id)
+        if row is not None and row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="utility analysis is not recorded in this project")
+        if row is None and (operation is None or operation["project_id"] != project_id or operation["operation_kind"] != "UTILITY_ANALYSIS"):
+            raise HTTPException(status_code=404, detail="utility analysis is not recorded in this project")
         with job_lock:
             live = analyses.get(analysis_id)
         if row is None:
             if live is None:
-                operation = store().operation(analysis_id)
-                if operation is None or operation["operation_kind"] != "UTILITY_ANALYSIS":
-                    raise HTTPException(status_code=404, detail="utility analysis is not recorded")
-                return JSONResponse(content={"analysis_id": analysis_id, "state": operation["state"], "error": operation["error"]})
-            return JSONResponse(content={"analysis_id": analysis_id, "state": live["state"], "error": live["error"]})
+                return JSONResponse(content={"analysis_id": analysis_id, "state": operation["state"], "error": _public_diagnostic(operation["error"])})
+            if live["project_id"] != project_id:
+                raise HTTPException(status_code=404, detail="utility analysis is not recorded in this project")
+            return JSONResponse(content={"analysis_id": analysis_id, "state": live["state"], "error": _public_diagnostic(live["error"])})
         content: dict[str, Any] = {"analysis_id": analysis_id, "state": "COMPLETED", "error": None, "summary": analysis_summary(row)}
         if include == "full":
             directory = Path(row["directory"])
@@ -2101,8 +2958,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content["artifact_sha256"] = {"utility.json": row["utility_sha256"], "policy.json": row["policy_sha256"], "pair_quality.parquet": row["pair_table_sha256"]}
         return JSONResponse(content=content)
 
-    @app.get("/api/utility-analyses/{analysis_id}/pairs")
+    @app.get("/api/projects/{project_id}/utility-analyses/{analysis_id}/pairs")
     def utility_analysis_pairs(
+        project_id: str,
         analysis_id: str,
         label: str | None = Query(default=None),
         retained: bool | None = Query(default=None),
@@ -2113,8 +2971,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         import duckdb
 
         row = store().utility_analysis(analysis_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="utility analysis is not recorded")
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="utility analysis is not recorded in this project")
         parquet = str(Path(row["directory"]) / "pair_quality.parquet").replace("'", "''")
         clauses, params = ["1=1"], []
         if label is not None:
@@ -2133,20 +2991,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             connection.close()
         for item in rows:
-            left = store().sample(item["left_sample_id"])
-            right = store().sample(item["right_sample_id"])
-            item["links"] = {"left_sample": f"/api/samples/{item['left_sample_id']}", "right_sample": f"/api/samples/{item['right_sample_id']}", "left_image": f"/api/samples/image?path={left.source_path}" if left else None, "right_image": f"/api/samples/image?path={right.source_path}" if right else None, "left_quality": f"/api/samples/{item['left_sample_id']}/quality", "right_quality": f"/api/samples/{item['right_sample_id']}/quality", "run": f"/api/runs/{row['run_id']}"}
+            item["links"] = {
+                "left_sample": f"/api/projects/{project_id}/samples/{item['left_sample_id']}",
+                "right_sample": f"/api/projects/{project_id}/samples/{item['right_sample_id']}",
+                "left_image": f"/api/projects/{project_id}/samples/{item['left_sample_id']}/image",
+                "right_image": f"/api/projects/{project_id}/samples/{item['right_sample_id']}/image",
+                "left_quality": f"/api/projects/{project_id}/samples/{item['left_sample_id']}/quality",
+                "right_quality": f"/api/projects/{project_id}/samples/{item['right_sample_id']}/quality",
+                "run": f"/api/projects/{project_id}/runs/{row['run_id']}",
+            }
         return JSONResponse(content={"analysis_id": analysis_id, "run_id": row["run_id"], "total": total, "offset": offset, "rows": rows})
 
     # -- cross-matcher contrasts and the failure workbench (QS-E40–QS-E42) --------
 
     cross_jobs: dict[str, dict[str, Any]] = {}
 
-    @app.get("/api/matrices/{matrix_id}/sets")
-    def matrix_sets(matrix_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/matrices/{matrix_id}/sets")
+    def matrix_sets(project_id: str, matrix_id: str) -> JSONResponse:
         rows = store().matcher_leaves(matrix_id=matrix_id)
-        if not rows:
-            raise HTTPException(status_code=404, detail="matrix is not recorded")
+        if not rows or any(row["project_id"] != project_id for row in rows):
+            raise HTTPException(status_code=404, detail="matrix is not recorded in this project")
         sets = matcher_sets(rows)
         registry = engine().registry
         sets["matcher_rights"] = {row["matcher_id"]: registry.raw_resource(row["matcher_id"])["state"] for row in rows}
@@ -2154,7 +3018,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def cross_summary(row: dict[str, Any]) -> dict[str, Any]:
         summary = json.loads(row["summary_json"])
-        summary["links"] = {"analysis": f"/api/cross-matcher/{row['analysis_id']}", "run": f"/api/runs/{row['run_id']}", "pairs": f"/api/cross-matcher/{row['analysis_id']}/pairs", "matrix": f"/api/matrices/{row['matrix_id']}", "quality_job": f"/api/jobs/{row['quality_job_id']}"}
+        project_id = row["project_id"]
+        summary["links"] = {"analysis": f"/api/projects/{project_id}/cross-matcher/{row['analysis_id']}", "run": f"/api/projects/{project_id}/runs/{row['run_id']}", "pairs": f"/api/projects/{project_id}/cross-matcher/{row['analysis_id']}/pairs", "matrix": f"/api/projects/{project_id}/matrices/{row['matrix_id']}", "quality_job": f"/api/projects/{project_id}/jobs/{row['quality_job_id']}"}
         summary["created_at"] = row["created_at"]
         return summary
 
@@ -2165,13 +3030,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         try:
             job = CrossMatcherJob(store=store(), registry=engine().registry, repository_root=settings.repository_root, project=project, actor=projects().actor, request=CrossMatcherRequest(**request.model_dump()), job_root=settings.data_dir / "analyses")
+            request_sha256 = CanonicalJson.from_value(
+                request.model_dump(mode="json")
+            ).sha256
         except CrossMatcherError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         existing = store().cross_matcher_analysis(job.analysis_id)
         if existing is not None:
+            return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": "COMPLETED", "already_recorded": True, "summary": cross_summary(existing)})
+        recovered_operation = store().reconcile_prepared_operation(job.analysis_id)
+        if recovered_operation is not None and recovered_operation["state"] == "COMPLETED":
+            existing = store().cross_matcher_analysis(job.analysis_id)
+            if existing is None:
+                raise HTTPException(status_code=409, detail="prepared cross-matcher analysis could not be recorded atomically")
+            with job_lock:
+                cross_jobs.pop(job.analysis_id, None)
             return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": "COMPLETED", "already_recorded": True, "summary": cross_summary(existing)})
         with job_lock:
             require_project_not_purging_locked(project_id)
@@ -2185,7 +3061,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 output_path=job.directory,
             )
             if reservation is None:
-                return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": operation["state"], "error": operation["error"], "already_recorded": True})
+                return JSONResponse(status_code=200, content={"analysis_id": job.analysis_id, "state": operation["state"], "error": _public_diagnostic(operation["error"]), "already_recorded": True})
             cross_jobs[job.analysis_id] = {"state": "QUEUED", "error": None, "project_id": project_id}
 
         def _run() -> None:
@@ -2193,7 +3069,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 store().start_operation(job.analysis_id)
                 with job_lock:
                     cross_jobs[job.analysis_id] = {"state": "RUNNING", "error": None, "project_id": project_id}
-                job.run()
+                job.run(request_sha256=request_sha256)
                 store().finish_operation(job.analysis_id, state="COMPLETED")
                 with job_lock:
                     cross_jobs[job.analysis_id] = {"state": "COMPLETED", "error": None, "project_id": project_id}
@@ -2209,28 +3085,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/projects/{project_id}/cross-matcher")
     def project_cross_matcher(project_id: str) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
         return JSONResponse(content=[cross_summary(row) for row in store().cross_matcher_analyses(project_id=project_id)])
 
-    @app.get("/api/cross-matcher/{analysis_id}")
-    def cross_matcher_analysis(analysis_id: str, include: Literal["summary", "full"] = Query(default="full")) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/cross-matcher/{analysis_id}")
+    def cross_matcher_analysis(project_id: str, analysis_id: str, include: Literal["summary", "full"] = Query(default="full")) -> JSONResponse:
         row = store().cross_matcher_analysis(analysis_id)
+        operation = store().operation(analysis_id)
+        if row is not None and row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="cross-matcher analysis is not recorded in this project")
+        if row is None and (operation is None or operation["project_id"] != project_id or operation["operation_kind"] != "CROSS_MATCHER_ANALYSIS"):
+            raise HTTPException(status_code=404, detail="cross-matcher analysis is not recorded in this project")
         with job_lock:
             live = cross_jobs.get(analysis_id)
         if row is None:
             if live is None:
-                operation = store().operation(analysis_id)
-                if operation is None or operation["operation_kind"] != "CROSS_MATCHER_ANALYSIS":
-                    raise HTTPException(status_code=404, detail="cross-matcher analysis is not recorded")
-                return JSONResponse(content={"analysis_id": analysis_id, "state": operation["state"], "error": operation["error"]})
-            return JSONResponse(content={"analysis_id": analysis_id, "state": live["state"], "error": live["error"]})
+                return JSONResponse(content={"analysis_id": analysis_id, "state": operation["state"], "error": _public_diagnostic(operation["error"])})
+            if live["project_id"] != project_id:
+                raise HTTPException(status_code=404, detail="cross-matcher analysis is not recorded in this project")
+            return JSONResponse(content={"analysis_id": analysis_id, "state": live["state"], "error": _public_diagnostic(live["error"])})
         content: dict[str, Any] = {"analysis_id": analysis_id, "state": "COMPLETED", "error": None, "summary": cross_summary(row)}
         if include == "full":
             content["document"] = json.loads((Path(row["directory"]) / "crossmatcher.json").read_text(encoding="utf-8"))
             content["artifact_sha256"] = {"crossmatcher.json": row["document_sha256"], "contrast_pairs.parquet": row["pairs_sha256"]}
         return JSONResponse(content=content)
 
-    @app.get("/api/cross-matcher/{analysis_id}/pairs")
+    @app.get("/api/projects/{project_id}/cross-matcher/{analysis_id}/pairs")
     def cross_matcher_pairs(
+        project_id: str,
         analysis_id: str,
         contrast_id: str = Query(min_length=1),
         category: str | None = Query(default=None),
@@ -2241,8 +3124,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         import duckdb
 
         row = store().cross_matcher_analysis(analysis_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="cross-matcher analysis is not recorded")
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="cross-matcher analysis is not recorded in this project")
         document = json.loads((Path(row["directory"]) / "crossmatcher.json").read_text(encoding="utf-8"))
         contrast = next((c for c in document["contrasts"] if c["contrast_id"] == contrast_id), None)
         if contrast is None:
@@ -2266,40 +3149,61 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for note in store().annotations(project_id=row["project_id"]):
             annotations_by_pair.setdefault(note["subject_id"], []).append(note)
         for item in rows:
-            left = store().sample(item["left_sample_id"])
-            right = store().sample(item["right_sample_id"])
             item["annotations"] = annotations_by_pair.get(item["pair_id"], [])
-            item["links"] = {"left_sample": f"/api/samples/{item['left_sample_id']}", "right_sample": f"/api/samples/{item['right_sample_id']}", "left_image": f"/api/samples/image?path={left.source_path}" if left else None, "right_image": f"/api/samples/image?path={right.source_path}" if right else None,
-                             "left_quality": f"/api/samples/{item['left_sample_id']}/quality", "right_quality": f"/api/samples/{item['right_sample_id']}/quality", "run_a": f"/api/runs/{contrast['a']['run_id']}", "run_b": f"/api/runs/{contrast['b']['run_id']}", "analysis_run": f"/api/runs/{row['run_id']}"}
+            item["links"] = {
+                "left_sample": f"/api/projects/{project_id}/samples/{item['left_sample_id']}",
+                "right_sample": f"/api/projects/{project_id}/samples/{item['right_sample_id']}",
+                "left_image": f"/api/projects/{project_id}/samples/{item['left_sample_id']}/image",
+                "right_image": f"/api/projects/{project_id}/samples/{item['right_sample_id']}/image",
+                "left_quality": f"/api/projects/{project_id}/samples/{item['left_sample_id']}/quality",
+                "right_quality": f"/api/projects/{project_id}/samples/{item['right_sample_id']}/quality",
+                "run_a": f"/api/projects/{project_id}/runs/{contrast['a']['run_id']}",
+                "run_b": f"/api/projects/{project_id}/runs/{contrast['b']['run_id']}",
+                "analysis_run": f"/api/projects/{project_id}/runs/{row['run_id']}",
+            }
         return JSONResponse(content={"analysis_id": analysis_id, "contrast": {"contrast_id": contrast_id, "kind": contrast["kind"], "a": contrast["a"], "b": contrast["b"], "held_fixed": contrast["held_fixed"]}, "total": total, "offset": offset, "rows": rows})
 
-    @app.post("/api/annotations", status_code=201)
-    def create_annotation(request: AnnotationCreate) -> JSONResponse:
+    @app.post("/api/projects/{project_id}/annotations", status_code=201)
+    def create_annotation(project_id: str, request: AnnotationCreate) -> JSONResponse:
         with job_lock:
-            require_project_not_purging_locked(request.project_id)
-            active_project_mutations[request.project_id] = active_project_mutations.get(request.project_id, 0) + 1
+            require_project_not_purging_locked(project_id)
+            active_project_mutations[project_id] = active_project_mutations.get(project_id, 0) + 1
         try:
             try:
-                projects().require_writable(request.project_id)
+                projects().require_writable(project_id)
             except KeyError as error:
                 raise HTTPException(status_code=404, detail="project is not recorded") from error
             except ProjectLifecycleError as error:
-                raise HTTPException(status_code=409, detail=str(error)) from error
-            note = store().record_annotation(project_id=request.project_id, subject_type=request.subject_type, subject_id=request.subject_id, actor_id=projects().actor, text=request.text, context=request.context)
-            record_action(request.project_id, AuditEventType.ANNOTATION_MODIFIED, request.subject_type, request.subject_id, {"annotation_id": note["annotation_id"], "evidence_sha256": note["evidence_sha256"]})
+                raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
+            try:
+                subject_owned = store().annotation_subject_owned_by_project(
+                    project_id=project_id,
+                    subject_type=request.subject_type,
+                    subject_id=request.subject_id,
+                )
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=422, detail="annotation subject type is not supported"
+                ) from error
+            if not subject_owned:
+                raise HTTPException(
+                    status_code=404,
+                    detail="annotation subject is not recorded in this project",
+                )
+            note = store().record_annotation(project_id=project_id, subject_type=request.subject_type, subject_id=request.subject_id, actor_id=projects().actor, text=request.text, context=request.context)
             return JSONResponse(status_code=201, content=note)
         finally:
             with job_lock:
-                remaining = active_project_mutations[request.project_id] - 1
+                remaining = active_project_mutations[project_id] - 1
                 if remaining:
-                    active_project_mutations[request.project_id] = remaining
+                    active_project_mutations[project_id] = remaining
                 else:
-                    del active_project_mutations[request.project_id]
+                    del active_project_mutations[project_id]
 
-    @app.get("/api/annotations")
-    def list_annotations(subject_id: str | None = Query(default=None), project_id: str | None = Query(default=None)) -> JSONResponse:
-        if subject_id is None and project_id is None:
-            raise HTTPException(status_code=422, detail="subject_id or project_id is required")
+    @app.get("/api/projects/{project_id}/annotations")
+    def list_annotations(project_id: str, subject_id: str | None = Query(default=None)) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
         return JSONResponse(content=store().annotations(subject_id=subject_id, project_id=project_id))
 
     # -- Phase 5: figures, dashboards, reports, exports, bundles, reproduction ------
@@ -2314,8 +3218,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def figure_summary(row: dict[str, Any]) -> dict[str, Any]:
         provenance = json.loads(row["provenance_json"])
-        return {"figure_id": row["figure_id"], "kind": row["kind"], "title": row["title"], "created_at": row["created_at"], "source_run_ids": json.loads(row["source_run_ids_json"]), "provenance_sha256": figure_provenance_file_sha256(row, provenance),
-                "files": {name: f"/api/figures/{row['figure_id']}/file?format={name}" for name in ("png", "svg", "pdf", "csv", "provenance")}, "sha256": {name: item["sha256"] for name, item in provenance["files"].items()}, "metric_definitions": provenance["metric_definitions"], "thresholds": provenance["thresholds"]}
+        project_id = row["project_id"]
+        return {"figure_id": row["figure_id"], "project_id": project_id, "kind": row["kind"], "title": row["title"], "created_at": row["created_at"], "source_run_ids": json.loads(row["source_run_ids_json"]), "provenance_sha256": figure_provenance_file_sha256(row, provenance),
+                "files": {name: f"/api/projects/{project_id}/figures/{row['figure_id']}/file?format={name}" for name in ("png", "svg", "pdf", "csv", "provenance")}, "sha256": {name: item["sha256"] for name, item in provenance["files"].items()}, "metric_definitions": provenance["metric_definitions"], "thresholds": provenance["thresholds"]}
 
     def require_recorded_file(path: Path, expected_sha256: str, label: str) -> str:
         if not path.is_file():
@@ -2334,7 +3239,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except FileNotFoundError as error:
             raise HTTPException(status_code=410, detail=f"{label} file is missing") from error
         except OSError as error:
-            raise HTTPException(status_code=409, detail=f"{label} file cannot be opened safely: {error}") from error
+            raise HTTPException(status_code=409, detail=f"{label} file cannot be opened safely") from error
         source = os.fdopen(descriptor, "rb")
         snapshot = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
         try:
@@ -2404,12 +3309,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"state": "VERIFIED", "reason": None, "href": href}
 
     def report_summary(row: dict[str, Any]) -> dict[str, Any]:
+        project_id = row["project_id"]
         downloads = {
             format_name: recorded_download(
                 Path(row["directory"]) / f"report.{format_name}",
                 row[f"{format_name}_sha256"],
                 f"report {format_name}",
-                f"/api/reports/{row['report_id']}/file?format={format_name}",
+                f"/api/projects/{project_id}/reports/{row['report_id']}/file?format={format_name}",
             )
             for format_name in ("html", "pdf", "json")
         }
@@ -2430,11 +3336,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     def bundle_summary(row: dict[str, Any]) -> dict[str, Any]:
-        href = f"/api/bundles/{row['bundle_id']}/file"
+        href = f"/api/projects/{row['project_id']}/bundles/{row['bundle_id']}/file"
         download = recorded_download(Path(row["path"]), row["sha256"], "bundle", href)
         return {
-            **{key: value for key, value in row.items() if key != "manifest_json"},
-            "manifest": json.loads(row["manifest_json"]),
+            "bundle_id": row["bundle_id"],
+            "project_id": row["project_id"],
+            "run_id": row["run_id"],
+            "created_at": row["created_at"],
+            "sha256": row["sha256"],
             "download": download,
             "links": {"download": href} if download["href"] is not None else {},
         }
@@ -2448,30 +3357,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         except figure_module.FigureError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        store().record_figure(record)
-        record_action(project_id, AuditEventType.ARTIFACT_EXPORTED, "Figure", record["figure_id"], {"kind": request.kind, "source_run_ids": record["source_run_ids"], "files": {name: item["sha256"] for name, item in record["files"].items()}})
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
+        store().record_reporting_publication(
+            "FIGURE",
+            record,
+            reporting_publication_audit_event(
+                "FIGURE", record, actor_id=settings.actor
+            ),
+        )
         row = store().figure(record["figure_id"])
         return JSONResponse(status_code=201, content=figure_summary(row))
 
     @app.get("/api/projects/{project_id}/figures")
     def project_figures(project_id: str) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
         return JSONResponse(content=[figure_summary(row) for row in store().figures(project_id=project_id)])
 
-    @app.get("/api/figures/{figure_id}")
-    def figure_detail(figure_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/figures/{figure_id}")
+    def figure_detail(project_id: str, figure_id: str) -> JSONResponse:
         row = store().figure(figure_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="figure is not recorded")
-        return JSONResponse(content={**figure_summary(row), "provenance": json.loads(row["provenance_json"])})
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="figure is not recorded in this project")
+        return JSONResponse(content=figure_summary(row))
 
-    @app.get("/api/figures/{figure_id}/file")
-    def figure_file(figure_id: str, format: Literal["png", "svg", "pdf", "csv", "provenance"] = Query(default="png")) -> StreamingResponse:
+    @app.get("/api/projects/{project_id}/figures/{figure_id}/file")
+    def figure_file(project_id: str, figure_id: str, format: Literal["png", "svg", "pdf", "csv", "provenance"] = Query(default="png")) -> StreamingResponse:
         row = store().figure(figure_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="figure is not recorded")
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="figure is not recorded in this project")
         provenance = json.loads(row["provenance_json"])
         if format == "provenance":
             path = Path(row["directory"]) / "figure.provenance.json"
@@ -2489,7 +3405,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 snapshot.seek(0)
             except (UnicodeDecodeError, ValueError) as error:
                 snapshot.close()
-                raise HTTPException(status_code=409, detail=f"figure provenance is unreadable: {error}") from error
+                raise HTTPException(status_code=409, detail=redact_private_paths(f"figure provenance is unreadable: {error}")) from error
             if observed_record != provenance:
                 snapshot.close()
                 raise HTTPException(status_code=409, detail="figure provenance content drifted from its recorded evidence")
@@ -2505,48 +3421,58 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         except DashboardError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         record_action(project_id, AuditEventType.CONFIGURATION_CHANGED, "Dashboard", record["dashboard_id"], {"name": request.name, "template": request.template, "version": record["version"], "layout_sha256": record["layout_sha256"], "panel_run_ids": record["panel_run_ids"]})
         return JSONResponse(status_code=201, content={k: v for k, v in record.items() if k != "layout_text"})
 
     @app.get("/api/projects/{project_id}/dashboards")
     def project_dashboards(project_id: str) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
         return JSONResponse(content=[{"dashboard_id": row["dashboard_id"], "name": row["name"], "template": row["template"], "version": row["version"], "supersedes": row["supersedes"], "created_at": row["created_at"], "layout_sha256": row["evidence_sha256"], "panels": len(json.loads(row["layout_json"])["panels"]), "panel_run_ids": json.loads(row["panel_run_ids_json"])} for row in store().dashboards(project_id=project_id)])
 
-    @app.get("/api/dashboards/{dashboard_id}")
-    def dashboard_detail(dashboard_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/dashboards/{dashboard_id}")
+    def dashboard_detail(project_id: str, dashboard_id: str) -> JSONResponse:
         try:
-            return JSONResponse(content=load_dashboard(store(), dashboard_id))
+            return JSONResponse(content=load_dashboard(store(), project_id, dashboard_id))
         except DashboardError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from error
+            raise HTTPException(status_code=404, detail=redact_private_paths(str(error))) from error
 
     @app.post("/api/projects/{project_id}/reports", status_code=201)
     def create_report(project_id: str, request: ReportCreate) -> JSONResponse:
         try:
             projects().require_writable(project_id)
             builder = ReportBuilder(store=store(), registry=engine().registry, repository_root=settings.repository_root, project_id=project_id, spec=request.spec, actor=projects().actor, root=settings.data_dir / "reports")
-            record = builder.build()
+            record = builder.build(record_publication=False)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         except ReportError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        record_action(project_id, AuditEventType.ARTIFACT_EXPORTED, "Report", record["report_id"], {"title": record["title"], "image_policy": record["image_policy"], "images_embedded": record["images_embedded"], "images_withheld": record["images_withheld"], "html_sha256": record["files"]["html"]["sha256"], "pdf_sha256": record["files"]["pdf"]["sha256"]})
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
+        store().record_reporting_publication(
+            "REPORT",
+            record,
+            reporting_publication_audit_event(
+                "REPORT", record, actor_id=settings.actor
+            ),
+        )
         summary = report_summary(store().report(record["report_id"]))
-        return JSONResponse(status_code=201, content={**record, "dataset_id": record["spec"].get("dataset_id"), "downloads": summary["downloads"], "links": summary["links"]})
+        return JSONResponse(status_code=201, content=summary)
 
     @app.get("/api/projects/{project_id}/reports")
     def project_reports(project_id: str) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
         return JSONResponse(content=[report_summary(row) for row in store().reports(project_id=project_id)])
 
-    @app.get("/api/reports/{report_id}/file")
-    def report_file(report_id: str, format: Literal["html", "pdf", "json", "provenance"] = Query(default="html")) -> StreamingResponse:
+    @app.get("/api/projects/{project_id}/reports/{report_id}/file")
+    def report_file(project_id: str, report_id: str, format: Literal["html", "pdf", "json", "provenance"] = Query(default="html")) -> StreamingResponse:
         row = store().report(report_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="report is not recorded")
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="report is not recorded in this project")
         name = {"html": "report.html", "pdf": "report.pdf", "json": "report.json", "provenance": "report.provenance.json"}[format]
         path = Path(row["directory"]) / name
         media = {"html": "text/html", "pdf": "application/pdf", "json": "application/json", "provenance": "application/json"}[format]
@@ -2565,7 +3491,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 snapshot.seek(0)
             except (UnicodeDecodeError, ValueError) as error:
                 snapshot.close()
-                raise HTTPException(status_code=409, detail=f"report provenance is unreadable: {error}") from error
+                raise HTTPException(status_code=409, detail=redact_private_paths(f"report provenance is unreadable: {error}")) from error
             if provenance_record.get("report_id") != row["report_id"] or provenance_record.get("project_id") != row["project_id"]:
                 snapshot.close()
                 raise HTTPException(status_code=409, detail="report provenance identity drifted from its database record")
@@ -2592,18 +3518,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return ref
         return None
 
-    @app.get("/api/exports/{category}")
-    def export_category(category: str, ref: str = Query(min_length=1), format: Literal["csv", "json", "parquet"] = Query(default="csv")) -> StreamingResponse:
-        try:
-            record = export_table(store(), category=category, ref=ref, fmt=format, root=settings.data_dir / "exports")
-        except ExportError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        media = {"csv": "text/csv", "json": "application/json", "parquet": "application/vnd.apache.parquet"}[format]
-        project_of_export = record["source"].get("project_id") or _project_of_ref(category, ref)
-        if project_of_export:
-            record_action(project_of_export, AuditEventType.ARTIFACT_EXPORTED, "Export", record["export_id"], {"category": category, "ref": ref, "format": format, "rows": record["rows"], "sha256": record["sha256"], "classification": record["classification"]})
-        snapshot, observed_sha256 = open_recorded_snapshot(Path(record["path"]), record["sha256"], "export")
-        return recorded_snapshot_response(snapshot, media_type=media, filename=f"{category}-{ref[-12:]}.{format}", headers={"X-QualSight-Export-Id": record["export_id"], "X-QualSight-Export-Sha256": observed_sha256, "X-QualSight-Export-Rows": str(record["rows"]), "X-QualSight-Classification": record["classification"]})
+    @app.post("/api/projects/{project_id}/exports/{category}")
+    def export_category(project_id: str, category: str, ref: str = Query(min_length=1), format: Literal["csv", "json", "parquet"] = Query(default="csv")) -> StreamingResponse:
+        with admitted_mutation(project_id):
+            if store().project(project_id) is None or _project_of_ref(category, ref) != project_id:
+                raise HTTPException(status_code=404, detail="export source is not recorded in this project")
+            try:
+                record = export_table(store(), category=category, ref=ref, fmt=format, root=settings.data_dir / "exports")
+            except ExportError as error:
+                raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
+            media = {"csv": "text/csv", "json": "application/json", "parquet": "application/vnd.apache.parquet"}[format]
+            project_of_export = record["source"].get("project_id") or _project_of_ref(category, ref)
+            if project_of_export != project_id:
+                raise HTTPException(status_code=404, detail="export source is not recorded in this project")
+            store().record_reporting_publication(
+                "TABULAR_EXPORT",
+                record,
+                reporting_publication_audit_event(
+                    "TABULAR_EXPORT", record, actor_id=settings.actor
+                ),
+            )
+            snapshot, observed_sha256 = open_recorded_snapshot(Path(record["path"]), record["sha256"], "export")
+            return recorded_snapshot_response(snapshot, media_type=media, filename=f"{category}-{ref[-12:]}.{format}", headers={"X-QualSight-Export-Id": record["export_id"], "X-QualSight-Export-Sha256": observed_sha256, "X-QualSight-Export-Rows": str(record["rows"]), "X-QualSight-Classification": record["classification"]})
 
     @app.post("/api/projects/{project_id}/bundles", status_code=201)
     def create_bundle(project_id: str, request: BundleCreate) -> JSONResponse:
@@ -2611,42 +3547,99 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if found is None or found[0].project_id != project_id:
             raise HTTPException(status_code=404, detail="run is not recorded in this project")
         try:
-            record = bundle_module.export_bundle(store(), run_id=request.run_id, root=settings.data_dir / "bundles", repository_root=settings.repository_root)
+            record = bundle_module.export_bundle(store(), run_id=request.run_id, root=settings.data_dir / "bundles", repository_root=settings.repository_root, record_publication=False)
         except bundle_module.BundleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        record_action(project_id, AuditEventType.ARTIFACT_EXPORTED, "Bundle", record["bundle_id"], {"run_id": request.run_id, "sha256": record["sha256"], "size_bytes": record["size_bytes"]})
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
+        store().record_reporting_publication(
+            "EXPERIMENT_BUNDLE",
+            record,
+            reporting_publication_audit_event(
+                "EXPERIMENT_BUNDLE", record, actor_id=settings.actor
+            ),
+        )
         summary = bundle_summary(next(row for row in store().experiment_bundles(project_id=project_id) if row["bundle_id"] == record["bundle_id"]))
-        return JSONResponse(status_code=201, content={**record, "download": summary["download"], "links": summary["links"]})
+        return JSONResponse(status_code=201, content=summary)
 
     @app.get("/api/projects/{project_id}/bundles")
     def project_bundles(project_id: str) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
         return JSONResponse(content=[bundle_summary(row) for row in store().experiment_bundles(project_id=project_id)])
 
-    @app.get("/api/bundles/{bundle_id}/file")
-    def bundle_file(bundle_id: str) -> StreamingResponse:
-        rows = [row for row in store().experiment_bundles() if row["bundle_id"] == bundle_id]
+    @app.get("/api/projects/{project_id}/bundles/{bundle_id}/file")
+    def bundle_file(project_id: str, bundle_id: str) -> StreamingResponse:
+        rows = [row for row in store().experiment_bundles(project_id=project_id) if row["bundle_id"] == bundle_id]
         if not rows:
             raise HTTPException(status_code=404, detail="bundle is not recorded")
         path = Path(rows[0]["path"])
         snapshot, observed_sha256 = open_recorded_snapshot(path, rows[0]["sha256"], "bundle")
         return recorded_snapshot_response(snapshot, media_type="application/zip", filename=path.name, headers={"X-QualSight-Sha256": observed_sha256})
 
-    @app.post("/api/reproductions", status_code=201)
-    def reproduce(request: ReproduceRequest) -> JSONResponse:
-        path = Path(request.bundle_path)
-        if not path.exists():
-            raise HTTPException(status_code=404, detail="bundle file does not exist")
-        with admitted_mutation(None):
-            result = bundle_module.reproduce_bundle(path, store=store(), registry=engine().registry, repository_root=settings.repository_root, work_root=settings.data_dir / "reproductions", project_service=projects(), engine=engine())
-            original = store().run(result.original_run_id)
-            if original is not None:
-                record_action(original[0].project_id, AuditEventType.RUN_COMPLETED, "Reproduction", result.reproduction_id, {"original_run_id": result.original_run_id, "state": result.state, "compared_values": result.compared_values, "bundle_sha256": result.bundle_sha256})
-            return JSONResponse(status_code=201, content=asdict(result))
+    @app.post("/api/projects/{project_id}/reproductions", status_code=201)
+    def reproduce(project_id: str, request: ReproduceRequest) -> JSONResponse:
+        rows = [row for row in store().experiment_bundles(project_id=project_id) if row["bundle_id"] == request.bundle_id]
+        if not rows:
+            raise HTTPException(status_code=404, detail="bundle is not recorded in this project")
+        bundle = rows[0]
+        snapshot, _ = open_recorded_snapshot(Path(bundle["path"]), bundle["sha256"], "bundle")
+        try:
+            try:
+                with zipfile.ZipFile(snapshot) as archive:
+                    manifest = json.loads(archive.read("manifest.json"))
+                    experiment_record = json.loads(archive.read("experiment.yaml"))
+            except (KeyError, ValueError, zipfile.BadZipFile, json.JSONDecodeError) as error:
+                raise HTTPException(status_code=409, detail="recorded bundle structure is invalid") from error
+            recorded_run_id = str(bundle["run_id"])
+            recorded_run = store().run(recorded_run_id)
+            if (
+                manifest.get("run_id") != recorded_run_id
+                or experiment_record.get("run", {}).get("project_id") != project_id
+                or recorded_run is None
+                or recorded_run[0].project_id != project_id
+            ):
+                raise HTTPException(status_code=409, detail="recorded bundle identity is not bound to this project")
+            snapshot.seek(0)
+            with admitted_mutation(project_id), tempfile.NamedTemporaryFile(
+                dir=settings.data_dir,
+                prefix="reproduction-snapshot-",
+                suffix=".qsexp",
+            ) as immutable_bundle:
+                while chunk := snapshot.read(1024 * 1024):
+                    immutable_bundle.write(chunk)
+                immutable_bundle.flush()
+                os.fsync(immutable_bundle.fileno())
+                result = bundle_module.reproduce_bundle(
+                    Path(immutable_bundle.name),
+                    store=store(),
+                    registry=engine().registry,
+                    repository_root=settings.repository_root,
+                    work_root=settings.data_dir / "reproductions",
+                    project_service=projects(),
+                    engine=engine(),
+                    execution_timeout_seconds=settings.native_execution_timeout_seconds,
+                )
+        finally:
+            snapshot.close()
+        original = store().run(result.original_run_id)
+        if original is None or original[0].project_id != project_id:
+            raise HTTPException(status_code=409, detail="reproduction result is not bound to the bundle project")
+        record_action(project_id, AuditEventType.RUN_COMPLETED, "Reproduction", result.reproduction_id, {"original_run_id": result.original_run_id, "state": result.state, "compared_values": result.compared_values, "bundle_sha256": result.bundle_sha256})
+        return JSONResponse(
+            status_code=201,
+            content=_public_reproduction_result(asdict(result)),
+        )
 
-    @app.get("/api/reproductions")
-    def list_reproductions(original_run_id: str | None = Query(default=None), project_id: str | None = Query(default=None)) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/reproductions")
+    def list_reproductions(project_id: str, original_run_id: str | None = Query(default=None)) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
         rows = store().reproductions(original_run_id=original_run_id, project_id=project_id)
-        return JSONResponse(content=[json.loads(row["report_json"]) for row in rows])
+        return JSONResponse(
+            content=[
+                _public_reproduction_result(json.loads(row["report_json"]))
+                for row in rows
+            ]
+        )
 
     @app.get("/api/projects/{project_id}/versions")
     def project_versions(project_id: str) -> JSONResponse:
@@ -2654,7 +3647,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not versions:
             raise HTTPException(status_code=404, detail="project has no recorded versions")
         return JSONResponse(
-            content=[{"version": version, "project": project.model_dump(mode="json")} for version, project in versions]
+            content=[
+                {
+                    "version": version,
+                    "project": _public_projection(
+                        project.model_dump(mode="json"),
+                        omit_location_keys=True,
+                    ),
+                }
+                for version, project in versions
+            ]
         )
 
     @app.get("/api/projects/{project_id}/audit")
@@ -2662,7 +3664,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         events = store().audit_events_for_project(project_id)
         if not events:
             raise HTTPException(status_code=404, detail="no audit event is recorded for this project")
-        return JSONResponse(content=[event.model_dump(mode="json") for event in events])
+        return JSONResponse(
+            content=[
+                _public_projection(
+                    event.model_dump(mode="json"), omit_location_keys=True
+                )
+                for event in events
+            ]
+        )
 
     @app.get("/api/health", response_model=HealthOut)
     def health() -> HealthOut:
@@ -2675,7 +3684,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             registry_sha256=eng.registry.file_identity.sha256,
             registry_id=eng.registry.registry_id,
             engine=_resource_out(eng, eng.runtime.resource_id),
-            database_path=str(settings.database_path),
             actor_id=settings.actor,
             network_guard=guard_status(),
         )
@@ -2691,7 +3699,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(
             content={
                 "contract_version": API_CONTRACT_VERSION,
-                "compatibility": "all /api routes in this beta implement contract version 1.0.0",
+                "compatibility": (
+                    "all /api routes in this beta implement contract version "
+                    f"{API_CONTRACT_VERSION}"
+                ),
             }
         )
 
@@ -2727,13 +3738,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         checks: dict[str, Any] = {}
         ready_state = not bool(state.get("shutting_down", False))
         checks["shutdown"] = {"ok": ready_state}
+        lease = state.get("data_directory_lease")
+        checks["data_directory_lease"] = (
+            lease.public_status()
+            if isinstance(lease, DataDirectoryLease)
+            else {
+                "state": "UNAVAILABLE",
+                "owner": None,
+                "pid": None,
+                "acquired_at": None,
+                "expires_at": None,
+                "release_condition": "PROCESS_SHUTDOWN",
+            }
+        )
+        if checks["data_directory_lease"]["state"] != "HELD":
+            ready_state = False
         try:
             database = store().operational_status()
             checks["database"] = {"ok": True, **database}
             if database["unresolved_purges"]:
                 ready_state = False
-        except Exception as error:  # noqa: BLE001 - dependency failure belongs in readiness
-            checks["database"] = {"ok": False, "error": f"{type(error).__name__}: {error}"}
+        except Exception:  # noqa: BLE001 - dependency failure belongs in readiness
+            checks["database"] = {
+                "ok": False,
+                "error_code": "DATABASE_UNAVAILABLE",
+            }
             ready_state = False
 
         try:
@@ -2742,13 +3771,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             storage_ok = settings.data_dir.is_dir() and stat.S_IMODE(data_status.st_mode) == 0o700
             checks["storage"] = {
                 "ok": storage_ok,
-                "path": str(settings.data_dir),
                 "mode": oct(stat.S_IMODE(data_status.st_mode)),
                 "available_bytes": file_system.f_bavail * file_system.f_frsize,
             }
             ready_state = ready_state and storage_ok
-        except OSError as error:
-            checks["storage"] = {"ok": False, "error": f"{type(error).__name__}: {error}"}
+        except OSError:
+            checks["storage"] = {
+                "ok": False,
+                "error_code": "STORAGE_UNAVAILABLE",
+            }
             ready_state = False
 
         runtime_artifacts: list[dict[str, Any]] = []
@@ -2758,11 +3789,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             artifact_path = Path(identity.path or "")
             try:
                 artifact_status = artifact_path.stat()
-                artifact_ok = artifact_path.is_file() and artifact_status.st_size == identity.size_bytes
+                artifact_ok = (
+                    artifact_path.is_file()
+                    and artifact_status.st_size == identity.size_bytes
+                    and sha256_file(artifact_path) == identity.sha256
+                )
             except OSError:
                 artifact_ok = False
             runtime_ok = runtime_ok and artifact_ok
-            runtime_artifacts.append({"role": role, "path": str(artifact_path), "ok": artifact_ok})
+            runtime_artifacts.append(
+                {
+                    "role": role,
+                    "resource_id": engine().runtime.resource_id,
+                    "sha256": identity.sha256,
+                    "ok": artifact_ok,
+                }
+            )
         checks["core_runtime"] = {"ok": runtime_ok, "artifacts": runtime_artifacts}
         ready_state = ready_state and runtime_ok
 
@@ -2782,17 +3824,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/matcher-assets")
     def matcher_assets() -> JSONResponse:
-        return JSONResponse(content=matcher_manager().catalog())
+        return JSONResponse(
+            content=_public_projection(
+                matcher_manager().catalog(), omit_location_keys=True
+            )
+        )
 
     @app.get("/api/addons")
     def addons() -> JSONResponse:
         """Closed allowlist of executable and importable beta capabilities."""
 
         return JSONResponse(
-            content=addon_catalog(
-                engine().registry,
-                matcher_manager().catalog(),
-                settings.data_dir,
+            content=_public_projection(
+                addon_catalog(
+                    engine().registry,
+                    matcher_manager().catalog(),
+                    settings.data_dir,
+                ),
+                omit_location_keys=True,
             )
         )
 
@@ -2818,25 +3867,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "reason": str(error),
                     },
                 )
-                raise HTTPException(status_code=409, detail=str(error)) from error
-            status = dataset_store.status(addon_id, verify_images=True)
-            event = record_system_action(
-                "VERIFICATION_DATASET_ACQUISITION_COMPLETED",
-                addon_id,
-                {
-                    "request_event_id": request_event["system_event_id"],
-                    "receipt_id": receipt["receipt_id"],
-                    "archive_sha256": receipt["archive"]["sha256"],
-                    "archive_size_bytes": receipt["archive"]["size_bytes"],
-                    "protocol_state": status["runtime_state"],
-                },
-            )
+                raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
+            try:
+                status = dataset_store.status(addon_id, verify_images=True)
+                event = record_system_action(
+                    "VERIFICATION_DATASET_ACQUISITION_COMPLETED",
+                    addon_id,
+                    {
+                        "request_event_id": request_event["system_event_id"],
+                        "receipt_id": receipt["receipt_id"],
+                        "archive_sha256": receipt["archive"]["sha256"],
+                        "archive_size_bytes": receipt["archive"]["size_bytes"],
+                        "protocol_state": status["runtime_state"],
+                    },
+                )
+            except Exception as completion_error:
+                try:
+                    dataset_store.rollback_acquisition(receipt)
+                except DatasetAcquisitionError as rollback_error:
+                    raise RuntimeError(
+                        "verification dataset completion evidence failed and "
+                        f"acquisition rollback failed: {rollback_error}"
+                    ) from completion_error
+                raise
             dataset = next(
                 item
                 for item in dataset_addons(engine().registry, settings.data_dir)
                 if item["addon_id"] == addon_id
             )
-            return JSONResponse(content={"dataset": dataset, "receipt": receipt, "event": event})
+            return JSONResponse(
+                content=_public_projection(
+                    {"dataset": dataset, "receipt": receipt, "event": event},
+                    omit_location_keys=True,
+                )
+            )
 
     @app.post(
         "/api/projects/{project_id}/dataset-assets/{addon_id}/import",
@@ -2848,7 +3912,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         with admitted_mutation(project_id):
             importer = AcquiredVerificationDatasetImporter(
                 verification_dataset_store(),
@@ -2858,14 +3922,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 result = importer.import_addon(project, addon_id)
             except VerificationDatasetImportError as error:
-                raise HTTPException(status_code=409, detail=str(error)) from error
+                raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         return JSONResponse(
             status_code=201,
             content={
                 "dataset": dataset_out(result.dataset, result.statistics_sha256).model_dump(
                     mode="json"
                 ),
-                "protocol": result.protocol.model_dump(mode="json"),
+                "protocol": _public_projection(
+                    result.protocol.model_dump(mode="json"),
+                    omit_location_keys=True,
+                ),
                 "samples": result.samples,
                 "pairs": result.pairs,
             },
@@ -2873,7 +3940,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/preprocessing-profiles")
     def matcher_preprocessing_profiles() -> JSONResponse:
-        return JSONResponse(content=preprocessing_profiles(engine().registry))
+        return JSONResponse(
+            content=_public_projection(
+                preprocessing_profiles(engine().registry),
+                omit_location_keys=True,
+            )
+        )
 
     def capture_architecture_sources(matcher_id: str) -> list[dict[str, Any]]:
         snapshots: list[dict[str, Any]] = []
@@ -2884,7 +3956,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 continue
             current = path.lstat()
             if path.is_symlink() or not stat.S_ISREG(current.st_mode):
-                raise HTTPException(status_code=409, detail=f"architecture source is not a regular file: {path}")
+                raise HTTPException(
+                    status_code=409,
+                    detail="architecture source target is not a regular file",
+                )
             snapshots.append({"path": path, "bytes": path.read_bytes(), "mode": stat.S_IMODE(current.st_mode)})
         return snapshots
 
@@ -2960,7 +4035,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     status = matcher_manager().pull_architecture_sources(matcher_id)
             except MatcherLifecycleError as error:
                 record_system_action("MATCHER_ARCHITECTURE_SOURCES_PULL_FAILED", matcher_id, {"request_event_id": request_event["system_event_id"], "reason": str(error)})
-                raise HTTPException(status_code=409, detail=str(error)) from error
+                raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
             try:
                 event = record_system_action(
                     "MATCHER_ARCHITECTURE_SOURCES_PULLED",
@@ -2975,7 +4050,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         f"source-pull completion event failed and source rollback failed: {rollback_error}"
                     ) from event_error
                 raise
-            return JSONResponse(content={"asset": status, "event": event})
+            return JSONResponse(
+                content=_public_projection(
+                    {"asset": status, "event": event},
+                    omit_location_keys=True,
+                )
+            )
 
     @app.post("/api/matcher-assets/{matcher_id}/pull-checkpoint")
     def pull_matcher_checkpoint(matcher_id: str) -> JSONResponse:
@@ -3002,7 +4082,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "reason": str(error),
                     },
                 )
-                raise HTTPException(status_code=409, detail=str(error)) from error
+                raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
             receipt = result["receipt"]
             try:
                 event = record_system_action(
@@ -3030,7 +4110,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ) from event_error
                 raise
             return JSONResponse(
-                content={"asset": result["asset"], "receipt": receipt, "event": event}
+                content=_public_projection(
+                    {"asset": result["asset"], "receipt": receipt, "event": event},
+                    omit_location_keys=True,
+                )
             )
 
     @app.post("/api/matcher-assets/{matcher_id}/load")
@@ -3042,7 +4125,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status = matcher_manager().load(matcher_id)
             except MatcherLifecycleError as error:
                 record_system_action("MATCHER_LOAD_FAILED", matcher_id, {"request_event_id": request_event["system_event_id"], "reason": str(error)})
-                raise HTTPException(status_code=409, detail=str(error)) from error
+                raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
             try:
                 event = record_system_action(
                     "MATCHER_LOADED",
@@ -3058,7 +4141,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             f"matcher load completion event failed and runtime rollback failed: {rollback_error}"
                         ) from event_error
                 raise
-            return JSONResponse(content={"asset": status, "event": event})
+            return JSONResponse(
+                content=_public_projection(
+                    {"asset": status, "event": event},
+                    omit_location_keys=True,
+                )
+            )
 
     @app.post("/api/matcher-assets/{matcher_id}/unload")
     def unload_matcher_asset(matcher_id: str) -> JSONResponse:
@@ -3069,7 +4157,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status = matcher_manager().unload(matcher_id)
             except MatcherLifecycleError as error:
                 record_system_action("MATCHER_UNLOAD_FAILED", matcher_id, {"request_event_id": request_event["system_event_id"], "reason": str(error)})
-                raise HTTPException(status_code=409, detail=str(error)) from error
+                raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
             try:
                 event = record_system_action("MATCHER_UNLOADED", matcher_id, {"request_event_id": request_event["system_event_id"], "runtime_state": status["runtime"]["state"]})
             except Exception as event_error:
@@ -3081,11 +4169,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             f"matcher unload completion event failed and runtime rollback failed: {rollback_error}"
                         ) from event_error
                 raise
-            return JSONResponse(content={"asset": status, "event": event})
+            return JSONResponse(
+                content=_public_projection(
+                    {"asset": status, "event": event},
+                    omit_location_keys=True,
+                )
+            )
 
     @app.get("/api/system-events")
     def system_events(limit: int = Query(default=100, ge=1, le=1000)) -> JSONResponse:
-        return JSONResponse(content=store().system_events(limit=limit))
+        return JSONResponse(
+            content=[
+                _public_system_event(record)
+                for record in store().system_events(limit=limit)
+            ]
+        )
 
     @app.get("/api/projects/{project_id}/embeddings")
     def project_embeddings(project_id: str) -> JSONResponse:
@@ -3145,9 +4243,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "dimension": dimension,
                     "created_at": artifact.created_at.isoformat(),
                     "links": {
-                        "run": f"/api/runs/{leaf['run_id']}",
-                        "export_parquet": f"/api/exports/embeddings?ref={leaf['run_id']}&format=parquet",
-                        "export_json": f"/api/exports/embeddings?ref={leaf['run_id']}&format=json",
+                        "run": f"/api/projects/{project_id}/runs/{leaf['run_id']}",
                     },
                 }
             )
@@ -3155,9 +4251,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/projects/{project_id}/purge-scope")
     def project_purge_scope(project_id: str) -> JSONResponse:
+        from ..security.purge import public_purge_scope
+
         if store().project(project_id) is None:
             raise HTTPException(status_code=404, detail="project is not recorded")
-        return JSONResponse(content={"project_id": project_id, "scope": SCOPE_STATEMENT, "targets": purge_targets(store(), settings.data_dir, project_id)})
+        targets = purge_targets(store(), settings.data_dir, project_id)
+        return JSONResponse(content=public_purge_scope(project_id, targets))
 
     def active_work_for_project_locked(project_id: str) -> list[str]:
         active: list[str] = []
@@ -3171,10 +4270,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         active.extend(f"identification search {job.search_id}" for job in searches.values() if job.project.project_id == project_id and job.progress["phase"] not in {"completed", "failed"})
         active.extend(f"utility analysis {analysis_id}" for analysis_id, item in analyses.items() if item.get("project_id") == project_id and item["state"] == "RUNNING")
         active.extend(f"cross-matcher analysis {analysis_id}" for analysis_id, item in cross_jobs.items() if item.get("project_id") == project_id and item["state"] == "RUNNING")
+        active.extend(
+            f"direct pair comparison {comparison_id}"
+            for comparison_id, job in direct_pair_jobs.items()
+            if job.pair.project_id == project_id
+        )
         return active
 
     @app.post("/api/projects/{project_id}/purge", status_code=201)
     def project_purge(project_id: str, request: PurgeRequest) -> JSONResponse:
+        from ..security.purge import public_purge_record
+
+        def release_purge_fence() -> None:
+            with job_lock:
+                purging_projects.discard(project_id)
+
         with job_lock:
             if project_id in purging_projects:
                 raise HTTPException(status_code=409, detail="project purge is already in progress")
@@ -3182,22 +4292,51 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if active:
                 raise HTTPException(status_code=409, detail="purge refused while project work is active: " + "; ".join(active))
             purging_projects.add(project_id)
+        release_after_response = False
         try:
             try:
                 record = purge_project(store(), data_dir=settings.data_dir, project_id=project_id, actor=settings.actor, confirm=request.confirm)
             except PurgeError as error:
-                raise HTTPException(status_code=409, detail=str(error)) from error
+                safe_detail = str(error)
+                if safe_detail not in {
+                    "purge confirmation must repeat the project id",
+                    "project is not recorded",
+                }:
+                    safe_detail = "purge request could not be completed"
+                raise HTTPException(status_code=409, detail=safe_detail) from error
+            public_record = public_purge_record(record)
+            if not record["verified"]:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        **public_record,
+                        "message": "purge did not verify; inspect the private local failure evidence",
+                    },
+                )
+            record_action(project_id, AuditEventType.DATASET_PURGED, "Project", project_id, {"purge_id": record["purge_id"], "deleted": len(record["deleted"]), "already_absent": len(record["already_absent"]), "reconciled_after_deletion_intent": len(record.get("reconciled_after_deletion_intent", [])), "failed": len(record["failed"]), "verified": record["verified"], "scope": SCOPE_STATEMENT})
+            response = JSONResponse(
+                status_code=201,
+                content=public_record,
+                background=BackgroundTask(release_purge_fence),
+            )
+            release_after_response = True
+            return response
         finally:
-            with job_lock:
-                purging_projects.discard(project_id)
-        if not record["verified"]:
-            raise HTTPException(status_code=409, detail={"message": "purge did not verify; inspect the recorded failure evidence", "record": record})
-        record_action(project_id, AuditEventType.DATASET_PURGED, "Project", project_id, {"purge_id": record["purge_id"], "deleted": len(record["deleted"]), "already_absent": len(record["already_absent"]), "failed": len(record["failed"]), "verified": record["verified"], "scope": SCOPE_STATEMENT})
-        return JSONResponse(status_code=201, content=record)
+            if not release_after_response:
+                release_purge_fence()
 
     @app.get("/api/projects/{project_id}/purges")
     def project_purges(project_id: str) -> JSONResponse:
-        return JSONResponse(content=store().purges(project_id=project_id))
+        from ..security.purge import public_purge_record
+
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
+        return JSONResponse(
+            content=[
+                public_purge_record(record)
+                for record in store().purges(project_id=project_id)
+            ]
+        )
 
     @app.get("/api/resources", response_model=list[ResourceOut])
     def resources() -> list[ResourceOut]:
@@ -3216,94 +4355,211 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             detector_holder["detector"] = SCRFDDetector(Path(model.path), model.sha256)
         return detector_holder["detector"]
 
-    def _resolve_evidence_sample(sample_id: str | None, path: str | None) -> tuple[str, str]:
-        if sample_id:
-            sample = store().sample(sample_id)
-            if sample is None:
-                raise HTTPException(status_code=404, detail="sample is not recorded")
-            return sample.source_path, sample.sha256
-        if path:
-            eng = engine()
-            for resource in eng.input_resources:
-                for artifact in resource.artifacts:
-                    if artifact.role == "DATA" and artifact.identity.path == path:
-                        return path, artifact.identity.sha256
-            owner = store().owner_supplied_by_path(path)
-            if owner is not None:
-                return path, owner["sha256"]
-            raise HTTPException(status_code=404, detail="path is neither a registered DATA artifact, a recorded sample, nor an admitted owner-supplied input")
-        raise HTTPException(status_code=422, detail="sample_id or path is required")
+    def _registered_sample_records() -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        for resource in engine().input_resources:
+            for artifact in resource.artifacts:
+                if artifact.role != "DATA" or artifact.identity.path is None:
+                    continue
+                identity = artifact.identity
+                digest = hashlib.sha256(
+                    "\0".join(
+                        (
+                            "registered-sample",
+                            resource.resource_id,
+                            artifact.role,
+                            identity.sha256,
+                        )
+                    ).encode("utf-8")
+                ).hexdigest()
+                records.append(
+                    {
+                        "registered_sample_id": f"registered-sample:sha256:{digest}",
+                        "resource_id": resource.resource_id,
+                        "resource_state": resource.state,
+                        "approved_scopes": tuple(resource.approved_scopes),
+                        "display_name": Path(identity.path).name,
+                        "role": "DATA",
+                        "sha256": identity.sha256,
+                        "size_bytes": identity.size_bytes,
+                        "media_type": mimetypes.guess_type(identity.path)[0]
+                        or "application/octet-stream",
+                        "private_path": identity.path,
+                    }
+                )
+        return records
+
+    def _registered_evidence_image(
+        registered_sample_id: str,
+    ) -> tuple[str, str, dict[str, Any]]:
+        record = next(
+            (
+                item
+                for item in _registered_sample_records()
+                if item["registered_sample_id"] == registered_sample_id
+            ),
+            None,
+        )
+        if record is None:
+            raise HTTPException(
+                status_code=404, detail="registered image is not recorded"
+            )
+        return record["private_path"], record["sha256"], record
+
+    def _project_sample(project_id: str, sample_id: str) -> Sample:
+        sample = store().sample(sample_id)
+        dataset = store().dataset(sample.dataset_id) if sample is not None else None
+        if sample is None or dataset is None or dataset.project_id != project_id:
+            raise HTTPException(
+                status_code=404, detail="sample is not recorded in this project"
+            )
+        return sample
+
+    _PRIVATE_SAMPLE_METADATA_KEYS = {"original_name"}
+    _OMIT_PUBLIC_METADATA = object()
+
+    def _public_sample_metadata(value: Any) -> Any:
+        if isinstance(value, dict):
+            public: dict[str, Any] = {}
+            for key, item in value.items():
+                normalized = str(key).lower()
+                if (
+                    normalized in _PRIVATE_SAMPLE_METADATA_KEYS
+                    or "path" in normalized
+                    or "directory" in normalized
+                ):
+                    continue
+                projected = _public_sample_metadata(item)
+                if projected is not _OMIT_PUBLIC_METADATA:
+                    public[str(key)] = projected
+            return public
+        if isinstance(value, list):
+            return [
+                projected
+                for item in value
+                if (projected := _public_sample_metadata(item))
+                is not _OMIT_PUBLIC_METADATA
+            ]
+        if isinstance(value, str) and Path(value).is_absolute():
+            return _OMIT_PUBLIC_METADATA
+        return value
+
+    def _public_sample(project_id: str, sample: Sample) -> dict[str, Any]:
+        return {
+            "sample_id": sample.sample_id,
+            "dataset_id": sample.dataset_id,
+            "subject_id": sample.subject_id.value,
+            "media_type": sample.media_type,
+            "sha256": sample.sha256,
+            "size_bytes": sample.size_bytes,
+            "metadata": _public_sample_metadata(json.loads(sample.metadata.text)),
+            "links": {
+                "image": f"/api/projects/{project_id}/samples/{sample.sample_id}/image",
+                "detection": f"/api/projects/{project_id}/samples/{sample.sample_id}/detection",
+                "ofiq_landmarks": f"/api/projects/{project_id}/samples/{sample.sample_id}/ofiq-landmarks",
+                "quality": f"/api/projects/{project_id}/samples/{sample.sample_id}/quality",
+            },
+        }
+
+    def _detection_response(
+        source_path: str, sha256: str, condition_id: str | None
+    ) -> JSONResponse:
+        try:
+            payload = detection_geometry(detector(), source_path, sha256, condition_id)
+        except EvidenceError as error:
+            raise HTTPException(status_code=422, detail=redact_private_paths(str(error))) from error
+        return JSONResponse(content=payload)
+
+    def _ofiq_landmark_response(source_path: str, sha256: str) -> JSONResponse:
+        try:
+            payload = ofiq_landmarks(engine().registry, source_path, sha256)
+        except EvidenceError as error:
+            raise HTTPException(status_code=422, detail=redact_private_paths(str(error))) from error
+        return JSONResponse(content=payload)
 
     @app.get("/api/detection")
     def sample_detection_endpoint(
-        sample_id: str | None = Query(default=None),
-        path: str | None = Query(default=None),
+        registered_sample_id: str = Query(
+            min_length=len("registered-sample:sha256:") + 64,
+            max_length=len("registered-sample:sha256:") + 64,
+            pattern=r"^registered-sample:sha256:[0-9a-f]{64}$",
+        ),
         condition_id: str | None = Query(default=None),
     ) -> JSONResponse:
-        """QS-Y85: matcher-pipeline SCRFD detection geometry for a recorded or registered sample."""
+        """QS-Y85: SCRFD geometry for an exact globally registered input image."""
 
-        source_path, sha = _resolve_evidence_sample(sample_id, path)
-        try:
-            payload = detection_geometry(detector(), source_path, sha, condition_id)
-        except EvidenceError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
-        return JSONResponse(content=payload)
+        source_path, sha, _ = _registered_evidence_image(registered_sample_id)
+        return _detection_response(source_path, sha, condition_id)
+
+    @app.get("/api/projects/{project_id}/samples/{sample_id}/detection")
+    def project_sample_detection(
+        project_id: str,
+        sample_id: str,
+        condition_id: str | None = Query(default=None),
+    ) -> JSONResponse:
+        sample = _project_sample(project_id, sample_id)
+        return _detection_response(sample.source_path, sample.sha256, condition_id)
 
     @app.get("/api/ofiq-landmarks")
     def ofiq_landmarks_endpoint(
-        sample_id: str | None = Query(default=None),
-        path: str | None = Query(default=None),
+        registered_sample_id: str = Query(
+            min_length=len("registered-sample:sha256:") + 64,
+            max_length=len("registered-sample:sha256:") + 64,
+            pattern=r"^registered-sample:sha256:[0-9a-f]{64}$",
+        ),
     ) -> JSONResponse:
-        """QS-Z90: OFIQ's own ADNet-98 landmarks through the registered auxiliary binary."""
+        """QS-Z90: OFIQ ADNet-98 landmarks for a globally registered input."""
 
-        source_path, sha = _resolve_evidence_sample(sample_id, path)
-        try:
-            payload = ofiq_landmarks(engine().registry, source_path, sha)
-        except EvidenceError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
-        return JSONResponse(content=payload)
+        source_path, sha, _ = _registered_evidence_image(registered_sample_id)
+        return _ofiq_landmark_response(source_path, sha)
 
-    @app.get("/api/matcher-runs/{run_id}/pairs/{pair_id}/evidence")
-    def matcher_pair_evidence(run_id: str, pair_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/samples/{sample_id}/ofiq-landmarks")
+    def project_sample_ofiq_landmarks(
+        project_id: str, sample_id: str
+    ) -> JSONResponse:
+        sample = _project_sample(project_id, sample_id)
+        return _ofiq_landmark_response(sample.source_path, sample.sha256)
+
+    @app.get("/api/projects/{project_id}/matcher-runs/{run_id}/pairs/{pair_id}/evidence")
+    def matcher_pair_evidence(project_id: str, run_id: str, pair_id: str) -> JSONResponse:
         """QS-Y87: recorded match evidence for one compared pair, with population context."""
 
         row = store().matcher_leaf(run_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="matcher Run is not recorded")
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="matcher Run is not recorded in this project")
         try:
             payload = pair_evidence(store(), row, pair_id)
         except EvidenceError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from error
+            raise HTTPException(status_code=404, detail=redact_private_paths(str(error))) from error
         for side in ("left", "right"):
             info = payload["sides"][side]
-            if info["path"]:
+            info.pop("path", None)
+            if info.get("sample_id"):
                 info["links"] = {
-                    "image": f"/api/samples/image?path={info['path']}",
-                    "crop": f"/api/matcher-runs/{run_id}/pairs/{pair_id}/crops/{side}",
-                    "detection": f"/api/detection?sample_id={info['sample_id']}&condition_id={row['condition_id']}",
+                    "image": f"/api/projects/{row['project_id']}/samples/{info['sample_id']}/image",
+                    "crop": f"/api/projects/{project_id}/matcher-runs/{run_id}/pairs/{pair_id}/crops/{side}",
+                    "detection": f"/api/projects/{row['project_id']}/samples/{info['sample_id']}/detection?condition_id={row['condition_id']}",
                 }
         return JSONResponse(content=payload)
 
-    @app.get("/api/matcher-runs/{run_id}/pairs/{pair_id}/crops/{side}")
-    def matcher_pair_crop(run_id: str, pair_id: str, side: Literal["left", "right"]) -> Response:
+    @app.get("/api/projects/{project_id}/matcher-runs/{run_id}/pairs/{pair_id}/crops/{side}")
+    def matcher_pair_crop(project_id: str, run_id: str, pair_id: str, side: Literal["left", "right"]) -> Response:
         """QS-Y86: the aligned 112x112 crop actually compared, recomputed under the recorded frozen condition."""
 
         row = store().matcher_leaf(run_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="matcher Run is not recorded")
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="matcher Run is not recorded in this project")
         import pyarrow.parquet as pq
 
         rows = pq.read_table(row["comparisons_parquet"]).to_pylist()
         target = next((item for item in rows if item["pair_id"] == pair_id), None)
         if target is None:
             raise HTTPException(status_code=404, detail="pair is not part of this Run")
-        sample = store().sample(target[f"{side}_sample_id"])
-        if sample is None:
-            raise HTTPException(status_code=404, detail="sample is not recorded")
+        sample = _project_sample(project_id, target[f"{side}_sample_id"])
         try:
             crop, crop_sha = recompute_crop(detector(), sample.source_path, sample.sha256, row["condition_id"])
         except EvidenceError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
+            raise HTTPException(status_code=422, detail=redact_private_paths(str(error))) from error
         ok, encoded = cv2.imencode(".png", crop)
         if not ok:
             raise HTTPException(status_code=500, detail="crop encoding failed")
@@ -3311,53 +4567,88 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/samples/registered", response_model=list[RegisteredSample])
     def registered_samples() -> list[RegisteredSample]:
-        eng = engine()
-        items: list[RegisteredSample] = []
-        for resource in eng.input_resources:
-            for artifact in resource.artifacts:
-                if artifact.role != "DATA" or artifact.identity.path is None:
-                    continue
-                media_type = mimetypes.guess_type(artifact.identity.path)[0] or "application/octet-stream"
-                items.append(
-                    RegisteredSample(
-                        resource_id=resource.resource_id,
-                        resource_state=resource.state,
-                        approved_scopes=tuple(resource.approved_scopes),
-                        path=artifact.identity.path,
-                        sha256=artifact.identity.sha256,
-                        size_bytes=artifact.identity.size_bytes,
-                        media_type=media_type,
-                    )
-                )
-        return items
+        return [
+            RegisteredSample(**{key: value for key, value in record.items() if key != "private_path"})
+            for record in _registered_sample_records()
+        ]
 
     @app.get("/api/samples/image")
-    def sample_image(path: str = Query(min_length=1)) -> StreamingResponse:
-        """Serve a registered image or a recorded dataset sample to the local console.
+    def sample_image(
+        registered_sample_id: str = Query(
+            min_length=len("registered-sample:sha256:") + 64,
+            max_length=len("registered-sample:sha256:") + 64,
+            pattern=r"^registered-sample:sha256:[0-9a-f]{64}$",
+        ),
+    ) -> StreamingResponse:
+        """Serve only a globally registered DATA artifact by opaque identity."""
 
-        Only bytes that are either registered DATA artifacts or samples recorded
-        by a dataset import (whose digest was verified against the registered
-        manifest) are served, and only after re-hashing them.
-        """
-
-        eng = engine()
-        expected_sha256: str | None = None
-        try:
-            _, identity = eng.registered_image(path)
-            expected_sha256 = identity.sha256
-        except ContractValidationError:
-            recorded = store().sample_by_source_path(path)
-            if recorded is None:
-                raise HTTPException(status_code=404, detail="path is neither a registered image nor a recorded dataset sample")
-            expected_sha256 = recorded.sha256
-        media_type = mimetypes.guess_type(path)[0]
+        path, expected_sha256, record = _registered_evidence_image(registered_sample_id)
+        media_type = record["media_type"]
         if media_type is None or not media_type.startswith("image/"):
             raise HTTPException(status_code=415, detail="artifact is not a displayable image")
         snapshot, observed_sha256 = open_recorded_snapshot(Path(path), expected_sha256, "image")
         return recorded_snapshot_response(snapshot, media_type=media_type, filename=None, headers={"Cache-Control": "no-store", "X-QualSight-Sha256": observed_sha256})
 
+    @app.get("/api/projects/{project_id}/samples/{sample_id}/image")
+    def project_sample_image(project_id: str, sample_id: str) -> StreamingResponse:
+        """Serve one recorded sample only through its owning project identity."""
+
+        sample = _project_sample(project_id, sample_id)
+        if not sample.media_type.startswith("image/"):
+            raise HTTPException(status_code=415, detail="sample is not a displayable image")
+        snapshot, observed_sha256 = open_recorded_snapshot(
+            Path(sample.source_path), sample.sha256, "sample image"
+        )
+        return recorded_snapshot_response(
+            snapshot,
+            media_type=sample.media_type,
+            filename=None,
+            headers={
+                "Cache-Control": "no-store",
+                "X-QualSight-Sha256": observed_sha256,
+            },
+        )
+
     def _assess(request: AssessRequest) -> AssessResponse | JSONResponse:
         eng = engine()
+        image_path, _, _ = _registered_evidence_image(
+            request.registered_sample_id
+        )
+
+        def recorded_failure(
+            *,
+            engine_version: str,
+            exit_code: int,
+            reason_code: Literal[
+                "ENGINE_EXECUTION_FAILED", "ENGINE_RETURNED_NO_MEASURES"
+            ],
+            message: str,
+            reason: str,
+            stderr: str,
+        ) -> AssessmentFailure:
+            event = record_system_action(
+                "QUALITY_ASSESSMENT_FAILED",
+                request.registered_sample_id,
+                {
+                    "registered_sample_id": request.registered_sample_id,
+                    "image_path": image_path,
+                    "engine_version": engine_version,
+                    "exit_code": exit_code,
+                    "reason_code": reason_code,
+                    "reason": reason,
+                    "stderr": stderr,
+                },
+            )
+            return AssessmentFailure(
+                registered_sample_id=request.registered_sample_id,
+                engine_version=engine_version,
+                exit_code=exit_code,
+                reason_code=reason_code,
+                message=message,
+                failure_event_id=event["system_event_id"],
+                failure_evidence_sha256=event["evidence_sha256"],
+            )
+
         target_project = None
         if request.project_id is not None:
             try:
@@ -3365,30 +4656,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except KeyError as error:
                 raise HTTPException(status_code=404, detail="project is not recorded") from error
             except ProjectLifecycleError as error:
-                raise HTTPException(status_code=409, detail=str(error)) from error
+                raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         try:
-            result: OFIQSingleSampleResult = eng.assess(request.image_path, request.purpose_scope)
+            result: OFIQSingleSampleResult = eng.assess(image_path, request.purpose_scope)
         except ContractValidationError as error:
             message = str(error)
             status = 403 if "approved scope" in message else 404 if "not a registered" in message else 400
-            raise HTTPException(status_code=status, detail=message) from error
+            raise HTTPException(status_code=status, detail=redact_private_paths(message)) from error
         except ExecutionOutcomeError as error:
             record = error.record
-            failure = AssessmentFailure(
-                image_path=request.image_path,
+            failure = recorded_failure(
                 engine_version=eng.runtime.version or "",
                 exit_code=int(record.exit_code),
+                reason_code="ENGINE_EXECUTION_FAILED",
+                message="The registered engine failed before usable quality measures were recorded.",
                 reason=str(error),
                 stderr=record.stderr.content.decode("utf-8", errors="replace"),
             )
             return JSONResponse(status_code=422, content=failure.model_dump())
         except OFIQEngineError as error:
-            raise HTTPException(status_code=502, detail=str(error)) from error
+            raise HTTPException(status_code=502, detail=redact_private_paths(str(error))) from error
         if not result.succeeded:
-            failure = AssessmentFailure(
-                image_path=request.image_path,
+            failure = recorded_failure(
                 engine_version=result.assessment.engine_version,
                 exit_code=int(result.record.exit_code),
+                reason_code="ENGINE_RETURNED_NO_MEASURES",
+                message="The registered engine completed without usable quality measures.",
                 reason=result.row.failure_reason or "engine reported no measures",
                 stderr=result.record.stderr.content.decode("utf-8", errors="replace"),
             )
@@ -3396,11 +4689,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             bundle = eng.build_run(result, purpose_scope=request.purpose_scope, project=target_project)
         except OFIQEngineError as error:
-            raise HTTPException(status_code=502, detail=str(error)) from error
+            raise HTTPException(status_code=502, detail=redact_private_paths(str(error))) from error
         try:
             evidence_sha256 = store().record_bundle(bundle)
         except ImmutableRecordConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         run = bundle.run
         return AssessResponse(
             run_id=run.run_id,
@@ -3409,23 +4702,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             engine_version=run.quality_engine.version,
             engine_state=run.quality_engine.registry_state,
             purpose_scope=request.purpose_scope,
-            image_path=bundle.sample.source_path,
+            registered_sample_id=request.registered_sample_id,
             image_sha256=bundle.sample.sha256,
             initialization_ms=run.initialization_ms,
             assessment_ms=run.assessment_ms,
             runtime_seconds=run.runtime_seconds,
             measures=tuple(
-                MeasureOut(name=m.name, native=m.native, scalar=m.scalar, failed=m.failed)
+                MeasureOut(
+                    name=m.name,
+                    native=m.native,
+                    native_unit=native_measure_metadata(m.name).unit,
+                    native_semantics=native_measure_metadata(m.name).semantics,
+                    scalar=m.scalar,
+                    failed=m.failed,
+                    failure_reason=observed_measure_failure_reason(
+                        name=m.name,
+                        native=m.native,
+                        scalar=m.scalar,
+                        failed=m.failed,
+                    ),
+                )
                 for m in result.row.measures
             ),
             failed_measures=result.row.failed_measure_names,
             warnings=run.warnings,
             provenance=ProvenanceLinks(
-                run=f"/api/runs/{run.run_id}",
+                run=f"/api/projects/{run.project_id}/runs/{run.run_id}",
                 project=f"/api/projects/{run.project_id}",
-                experiment=f"/api/experiments/{run.experiment_id}",
-                sample=f"/api/samples/{bundle.sample.sample_id}",
-                audit_events=f"/api/runs/{run.run_id}/audit",
+                experiment=f"/api/projects/{run.project_id}/experiments/{run.experiment_id}",
+                sample=f"/api/projects/{run.project_id}/samples/{bundle.sample.sample_id}",
+                audit_events=f"/api/projects/{run.project_id}/runs/{run.run_id}/audit",
             ),
         )
 
@@ -3456,16 +4762,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
 
         def _process() -> dict[str, Any]:
             importer = OwnerSuppliedImporter(store(), settings.data_dir, projects().actor)
+            operation: dict[str, Any] | None = None
             try:
                 admitted = importer.admission.admit_bytes(data, filename, project_id)
                 dataset, sample = importer.import_admitted_single(project, admitted, f"Uploaded photo {filename}")
             except OwnerSuppliedError as error:
-                raise HTTPException(status_code=422, detail=str(error)) from error
+                raise HTTPException(status_code=422, detail=redact_private_paths(str(error))) from error
             try:
+                selection_rule = (
+                    "the single operator-uploaded owner-supplied image (decision 30)"
+                )
                 job = OFIQBatchJob(
                     engine=engine(),
                     store=store(),
@@ -3475,15 +4785,58 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     purpose_scope=purpose_scope,
                     job_root=settings.data_dir / "jobs",
                     chunks=1,
-                    selection_rule="the single operator-uploaded owner-supplied image (decision 30)",
+                    selection_rule=selection_rule,
+                )
+                operation_request = {
+                    "dataset_id": dataset.dataset_id,
+                    "sample_id": sample.sample_id,
+                    "purpose_scope": purpose_scope,
+                    "chunks": 1,
+                    "execution": "host",
+                    "sample_count": 1,
+                    "selection_rule": selection_rule,
+                    "source_sha256": admitted.sha256,
+                }
+                operation, created = store().admit_operation(
+                    operation_id=job.job_id,
+                    operation_kind="QUALITY_BATCH",
+                    project_id=project_id,
+                    request=operation_request,
+                    output_path=job.job_dir,
+                    result_id=job.job_id,
+                )
+                if not created:
+                    raise BatchJobError(
+                        "the synchronous upload quality operation identity already exists"
+                    )
+                job.bind_operation_request_sha256(
+                    CanonicalJson.from_value(operation_request).sha256
                 )
                 with job_lock:
                     jobs[job.job_id] = job
+                store().start_operation(str(operation["operation_id"]))
                 job.run()
             except BatchJobError as error:
-                raise HTTPException(status_code=422, detail=str(error)) from error
+                raise HTTPException(status_code=422, detail=redact_private_paths(str(error))) from error
             finally:
                 if "job" in locals():
+                    if operation is not None:
+                        terminal_state = (
+                            job.state
+                            if job.state in {"COMPLETED", "FAILED", "CANCELLED"}
+                            else "FAILED"
+                        )
+                        terminal_error = job.error if terminal_state == "FAILED" else None
+                        if terminal_state == "FAILED" and not terminal_error:
+                            terminal_error = (
+                                "synchronous upload quality batch ended from "
+                                f"nonterminal state {job.state}"
+                            )
+                        store().finish_operation(
+                            str(operation["operation_id"]),
+                            state=terminal_state,
+                            error=terminal_error,
+                        )
                     store().finish_job(job.job_id, job.ended_at.isoformat() if job.ended_at else "", job.state)
             if job.state != "COMPLETED" or not job.run_id:
                 raise HTTPException(status_code=422, detail=f"the engine did not complete on the uploaded image (state {job.state})")
@@ -3499,8 +4852,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 {
                     "name": name,
                     "native": row[f"{name}.native"],
+                    "native_unit": native_measure_metadata(name).unit,
+                    "native_semantics": native_measure_metadata(name).semantics,
                     "scalar": row[f"{name}.scalar"],
                     "failed": bool(row[f"{name}.failed"]),
+                    "failure_reason": observed_measure_failure_reason(
+                        name=name,
+                        native=row[f"{name}.native"],
+                        scalar=row[f"{name}.scalar"],
+                        failed=bool(row[f"{name}.failed"]),
+                    ),
                 }
                 for name in MEASURE_NAMES
             ]
@@ -3518,15 +4879,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "sample_id": sample.sample_id,
                 "source_kind": OWNER_SOURCE_KIND,
                 "image_sha256": admitted.sha256,
-                "stored_path": admitted.path,
                 "original_name": filename,
                 "width": admitted.width,
                 "height": admitted.height,
                 "measures": measures,
                 "failed_measures": [m["name"] for m in measures if m["failed"]],
                 "provenance": {
-                    "run": f"/api/runs/{job.run_id}",
-                    "sample_image": f"/api/samples/image?path={admitted.path}",
+                    "run": f"/api/projects/{project_id}/runs/{job.run_id}",
+                    "sample": f"/api/projects/{project_id}/samples/{sample.sample_id}",
+                    "sample_image": f"/api/projects/{project_id}/samples/{sample.sample_id}/image",
                     "statement": "OWNER_SUPPLIED_LOCAL_INPUT: operator-supplied bytes admitted by hash under decision 30; not a registered, rights-reviewed dataset.",
                 },
             }
@@ -3547,12 +4908,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         importer = OwnerSuppliedImporter(store(), settings.data_dir, projects().actor)
         try:
             result = importer.import_directory(project, Path(request.root), request.name)
         except (OwnerSuppliedError, OSError) as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
+            logging.getLogger(__name__).warning(
+                "owner directory import refused for project %s: %s",
+                project_id,
+                error,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="owner directory import was refused; review the private local diagnostic log",
+            ) from error
         record_action(project_id, AuditEventType.DATASET_IMPORTED, "Dataset", result.dataset.dataset_id, {"source_kind": OWNER_SOURCE_KIND, "samples": result.sample_count, "subjects": result.subject_count})
         return JSONResponse(status_code=201, content={
             "dataset_id": result.dataset.dataset_id,
@@ -3561,6 +4930,675 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "source_kind": OWNER_SOURCE_KIND,
             "statistics_sha256": result.statistics_sha256,
         })
+
+    @app.post("/api/projects/{project_id}/owner-pair-admissions", status_code=201)
+    def admit_owner_pair(
+        project_id: str,
+        request: OwnerPairAdmissionRequest,
+    ) -> JSONResponse:
+        try:
+            projects().require_writable(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
+        with admitted_mutation(project_id):
+            try:
+                record, created = store().record_owner_pair_admission(
+                    project_id=project_id,
+                    left_sample_id=request.left_sample_id,
+                    right_sample_id=request.right_sample_id,
+                    relationship=request.relationship,
+                    actor_id=projects().actor,
+                )
+            except OwnerPairNotFound as error:
+                raise HTTPException(
+                    status_code=404,
+                    detail="owner-supplied sample is not recorded for this project",
+                ) from error
+            except OwnerPairIntegrityError as error:
+                raise HTTPException(
+                    status_code=409,
+                    detail="owner-supplied pair evidence failed integrity verification",
+                ) from error
+            except OwnerPairValidationError as error:
+                raise HTTPException(status_code=422, detail=redact_private_paths(str(error))) from error
+        return JSONResponse(
+            status_code=201 if created else 200,
+            content=_public_projection(
+                record.model_dump(mode="json"), omit_location_keys=True
+            ),
+        )
+
+    def _direct_comparison_links(
+        project_id: str, comparison_id: str, run_id: str
+    ) -> dict[str, str]:
+        root = (
+            f"/api/projects/{project_id}/owner-pair-comparisons/{comparison_id}"
+        )
+        return {
+            "self": root,
+            "evidence": f"{root}/evidence",
+            "run": f"/api/projects/{project_id}/direct-pair-runs/{run_id}",
+            "raw_manifest": f"{root}/raw",
+        }
+
+    def _direct_comparison_status(operation: dict[str, Any]) -> dict[str, Any]:
+        state_value = (
+            "INTERRUPTED"
+            if operation["state"] in {"CANCELLED", "INTERRUPTED"}
+            else operation["state"]
+        )
+        request_value = json.loads(operation["request_json"])
+        comparison_id = str(operation["request_id"])
+        terminal = state_value in {"COMPLETED", "FAILED", "INTERRUPTED"}
+        return {
+            "schema_version": "1.0",
+            "comparison_id": comparison_id,
+            "run_id": operation["result_id"],
+            "project_id": operation["project_id"],
+            "pair_id": request_value["pair_id"],
+            "state": state_value,
+            "links": _direct_comparison_links(
+                operation["project_id"],
+                comparison_id,
+                operation["result_id"],
+            ),
+            "poll_after_ms": None if terminal else 500,
+        }
+
+    def _verified_direct_comparison(project_id: str, comparison_id: str):
+        operation = store().operation(comparison_id)
+        if (
+            operation is None
+            or operation["operation_kind"] != "DIRECT_PAIR_COMPARISON"
+            or operation["project_id"] != project_id
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail="direct pair comparison is not recorded in this project",
+            )
+        try:
+            run_record = store().direct_pair_comparison(comparison_id)
+        except ImmutableRecordConflict as error:
+            raise HTTPException(
+                status_code=409,
+                detail="recorded direct comparison evidence failed integrity verification",
+            ) from error
+        if run_record is None or run_record.project_id != project_id:
+            raise HTTPException(
+                status_code=404,
+                detail="direct pair comparison is not recorded in this project",
+            )
+        expected_directory = (
+            settings.data_dir
+            / "direct-pair-comparisons"
+            / comparison_id.replace(":", "_")
+        )
+        try:
+            if (
+                Path(run_record.output_directory).is_symlink()
+                or Path(run_record.output_directory).resolve(strict=True)
+                != expected_directory.resolve(strict=True)
+            ):
+                raise ValueError("output directory identity differs")
+            pair_record = store().owner_pair(run_record.project_id, run_record.pair_id)
+            if (
+                pair_record.left_sample_id != run_record.left_sample_id
+                or pair_record.right_sample_id != run_record.right_sample_id
+                or pair_record.relationship is not run_record.relationship
+            ):
+                raise ValueError("pair identity differs")
+            samples = {
+                "left": store().sample(run_record.left_sample_id),
+                "right": store().sample(run_record.right_sample_id),
+            }
+            if samples["left"] is None or samples["right"] is None:
+                raise ValueError("sample identity is absent")
+            for side_name, side in (
+                ("left", run_record.left),
+                ("right", run_record.right),
+            ):
+                sample_record = samples[side_name]
+                assert sample_record is not None
+                for artifact in side.artifacts:
+                    path = Path(artifact.path)
+                    if path.is_symlink() or not path.is_file():
+                        raise ValueError("artifact is absent")
+                    if (
+                        path.stat().st_size != artifact.size_bytes
+                        or sha256_file(path) != artifact.sha256
+                    ):
+                        raise ValueError("artifact hash differs")
+                    if artifact.artifact == f"{side_name}-source":
+                        if path.resolve(strict=True) != Path(sample_record.source_path).resolve(
+                            strict=True
+                        ):
+                            raise ValueError("source identity differs")
+                    elif not path.resolve(strict=True).is_relative_to(
+                        expected_directory.resolve(strict=True)
+                    ):
+                        raise ValueError("derived artifact escaped its Run directory")
+        except (OSError, ValueError, OwnerPairIntegrityError, OwnerPairNotFound) as error:
+            raise HTTPException(
+                status_code=409,
+                detail="recorded direct comparison artifacts failed integrity verification",
+            ) from error
+        return run_record
+
+    def _direct_side_evidence(
+        project_id: str, comparison_id: str, side
+    ) -> dict[str, Any]:
+        artifacts = {item.artifact: item for item in side.artifacts}
+        prefix = side.side
+        raw_root = (
+            f"/api/projects/{project_id}/owner-pair-comparisons/"
+            f"{comparison_id}/raw"
+        )
+        crop = artifacts.get(f"{prefix}-crop")
+        detection_artifact = artifacts.get(f"{prefix}-detection")
+        embedding = artifacts.get(f"{prefix}-embedding")
+        return {
+            "sample_id": side.sample_id,
+            "dataset_id": side.dataset_id,
+            "sha256": side.source_sha256,
+            "face_count": side.face_count,
+            "detection": (
+                None
+                if side.detection is None
+                else {
+                    "state": "RECORDED",
+                    **json.loads(side.detection.text),
+                    "sha256": detection_artifact.sha256
+                    if detection_artifact is not None
+                    else None,
+                }
+            ),
+            "crop": (
+                None
+                if crop is None
+                else {
+                    "state": "RECORDED",
+                    "sha256": crop.sha256,
+                    "pixel_sha256": side.crop_pixel_sha256,
+                    "width": 112,
+                    "height": 112,
+                }
+            ),
+            "embedding": (
+                None
+                if embedding is None
+                else {
+                    "state": "RECORDED",
+                    "sha256": embedding.sha256,
+                    "value_sha256": side.embedding_value_sha256,
+                    "shape": list(side.embedding_shape or ()),
+                    "dtype": side.embedding_dtype,
+                }
+            ),
+            "failure": (
+                None
+                if side.failure is None
+                else {
+                    "kind": side.failure,
+                    "detail": "this side did not produce a comparable template",
+                }
+            ),
+            "quality": None if side.quality is None else json.loads(side.quality.text),
+            "links": {
+                "source": f"{raw_root}/{prefix}-source",
+                "crop": None if crop is None else f"{raw_root}/{prefix}-crop",
+                "detection": (
+                    None
+                    if detection_artifact is None
+                    else f"{raw_root}/{prefix}-detection"
+                ),
+                "embedding": (
+                    None if embedding is None else f"{raw_root}/{prefix}-embedding"
+                ),
+                "quality": (
+                    None
+                    if side.quality is None
+                    else f"/api/projects/{project_id}/samples/{side.sample_id}/quality"
+                ),
+            },
+        }
+
+    def _direct_evidence(run_record) -> dict[str, Any]:
+        comparison_label = {
+            OwnerPairRelationship.SAME_PERSON: "MATED",
+            OwnerPairRelationship.DIFFERENT_PEOPLE: "NON_MATED",
+            OwnerPairRelationship.NOT_RECORDED: None,
+        }[run_record.relationship]
+        links = _direct_comparison_links(
+            run_record.project_id, run_record.comparison_id, run_record.run_id
+        )
+        return {
+            "schema_version": "1.0",
+            "comparison_id": run_record.comparison_id,
+            "run_id": run_record.run_id,
+            "state": "COMPLETED",
+            "project_id": run_record.project_id,
+            "pair": {
+                "pair_id": run_record.pair_id,
+                "relationship": run_record.relationship.value,
+                "comparison_label": comparison_label,
+                "relationship_assertion": run_record.relationship_assertion.model_dump(
+                    mode="json"
+                ),
+            },
+            "execution": {
+                "matcher_id": run_record.matcher_id,
+                "preprocessing_id": run_record.preprocessing_id,
+                "threshold": run_record.threshold.model_dump(mode="json"),
+                "matcher_checkpoint_sha256": run_record.matcher_checkpoint_sha256,
+                "matcher_architecture_sha256": list(
+                    run_record.matcher_architecture_sha256
+                ),
+                "matcher_device": run_record.matcher_device,
+                "preprocessing_definition_sha256": run_record.preprocessing_definition_sha256,
+                "detector_sha256": run_record.detector_sha256,
+                "application_version": run_record.application_version,
+                "started_at": run_record.started_at.isoformat(),
+                "ended_at": run_record.ended_at.isoformat(),
+                "runtime_seconds": run_record.runtime_seconds,
+            },
+            "result": run_record.result.model_dump(mode="json"),
+            "claim_boundary": {
+                "population_error_claims_allowed": False,
+                "outcome_correctness_allowed": run_record.outcome_correctness_allowed,
+                "ground_truth_authority": False,
+                "prohibited": list(run_record.prohibited_claims),
+            },
+            "sides": {
+                "left": _direct_side_evidence(
+                    run_record.project_id,
+                    run_record.comparison_id,
+                    run_record.left,
+                ),
+                "right": _direct_side_evidence(
+                    run_record.project_id,
+                    run_record.comparison_id,
+                    run_record.right,
+                ),
+            },
+            "links": {
+                "self": links["evidence"],
+                "status": links["self"],
+                "run": links["run"],
+                "raw_manifest": links["raw_manifest"],
+            },
+        }
+
+    @app.post(
+        "/api/projects/{project_id}/owner-pair-comparisons", status_code=202
+    )
+    def start_direct_pair_comparison(
+        project_id: str, request: DirectPairComparisonRequest
+    ) -> JSONResponse:
+        try:
+            projects().require_writable(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project is not recorded") from error
+        except ProjectLifecycleError as error:
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
+        try:
+            matcher_id = MatcherId(request.matcher_id)
+            preprocessing_id = ConditionId(request.preprocessing_id)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail="matcher_id and preprocessing_id must name registered add-ons",
+            ) from error
+        if preprocessing_id not in SCRFD_CONDITIONS:
+            raise HTTPException(
+                status_code=409,
+                detail="preprocessing add-on is incompatible with owner-supplied source images",
+            )
+        threshold = DirectPairThreshold.model_validate(
+            {
+                **request.threshold.model_dump(),
+                "rule": "MATCH_WHEN_SCORE_GE_THRESHOLD",
+            }
+        )
+        comparison_id, run_id, request_identity = direct_comparison_identity(
+            pair_id=request.pair_id,
+            matcher_id=matcher_id,
+            preprocessing_id=preprocessing_id,
+            threshold=threshold,
+        )
+        existing = store().operation(comparison_id)
+        if existing is not None:
+            if existing["project_id"] != project_id:
+                raise HTTPException(
+                    status_code=404,
+                    detail="owner pair is not recorded for this project",
+                )
+            existing = store().reconcile_prepared_operation(comparison_id) or existing
+            if existing["state"] == "COMPLETED":
+                _verified_direct_comparison(project_id, comparison_id)
+            return JSONResponse(
+                status_code=(
+                    200
+                    if existing["state"]
+                    in {"COMPLETED", "FAILED", "CANCELLED", "INTERRUPTED"}
+                    else 202
+                ),
+                content=_direct_comparison_status(existing),
+            )
+        try:
+            pair_record = store().owner_pair(project_id, request.pair_id)
+        except OwnerPairNotFound as error:
+            raise HTTPException(
+                status_code=404,
+                detail="owner pair is not recorded for this project",
+            ) from error
+        except OwnerPairIntegrityError as error:
+            raise HTTPException(
+                status_code=409,
+                detail="owner-supplied pair evidence failed integrity verification",
+            ) from error
+        left = store().sample(pair_record.left_sample_id)
+        right = store().sample(pair_record.right_sample_id)
+        if left is None or right is None:
+            raise HTTPException(
+                status_code=409,
+                detail="owner-supplied pair evidence failed integrity verification",
+            )
+        profiles = {
+            item["addon_id"]: item for item in preprocessing_profiles(engine().registry)
+        }
+        profile = profiles.get(preprocessing_id.value)
+        if (
+            profile is None
+            or profile["runtime_state"] != "READY"
+            or profile["input_representation"]
+            != "SOURCE_IMAGE_REQUIRING_DETECTION"
+            or matcher_id.value not in profile["compatible_matcher_ids"]
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="preprocessing add-on is unavailable or incompatible",
+            )
+        try:
+            matcher_manager().require_ready((matcher_id,))
+            scrfd = detector()
+        except (MatcherLifecycleError, OSError, ValueError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail="matcher or preprocessing dependencies are not ready",
+            ) from error
+        with job_lock:
+            require_project_not_purging_locked(project_id)
+        # Lock order: short API purge check, owner-file serialization, final API
+        # purge recheck, then the store writer used by durable admission.
+        with serialized_owner_file_mutation():
+            try:
+                pair_record = store().owner_pair(project_id, request.pair_id)
+                left = store().sample(pair_record.left_sample_id)
+                right = store().sample(pair_record.right_sample_id)
+                if left is None or right is None:
+                    raise OwnerPairNotFound(
+                        "owner pair samples are no longer recorded"
+                    )
+            except (OwnerPairNotFound, OwnerPairIntegrityError) as error:
+                operations_logger.warning(
+                    "direct pair comparison admission refused after source evidence was removed",
+                    extra={
+                        "comparison_id": comparison_id,
+                        "pair_id": request.pair_id,
+                        "project_id": project_id,
+                    },
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail="owner-supplied pair was removed before comparison admission",
+                ) from error
+            output_root = settings.data_dir / "direct-pair-comparisons"
+            job = DirectPairComparisonJob(
+                store=store(),
+                pair=pair_record,
+                left=left,
+                right=right,
+                matcher_id=matcher_id,
+                preprocessing_id=preprocessing_id,
+                threshold=threshold,
+                matcher_manager=matcher_manager(),
+                detector=scrfd,
+                output_root=output_root,
+                repository_root=settings.repository_root,
+                actor_id=projects().actor,
+                execution_timeout_seconds=settings.native_execution_timeout_seconds,
+            )
+            if (
+                job.comparison_id != comparison_id
+                or job.run_id != run_id
+                or job.request != request_identity
+            ):
+                raise HTTPException(
+                    status_code=409, detail="direct comparison request identity changed"
+                )
+            with job_lock:
+                require_project_not_purging_locked(project_id)
+                try:
+                    operation, reservation = admit_scientific_operation(
+                        operation_id=comparison_id,
+                        operation_kind="DIRECT_PAIR_COMPARISON",
+                        project_id=project_id,
+                        request=json.loads(request_identity.text),
+                        output_path=job.directory,
+                        result_id=run_id,
+                    )
+                except HTTPException as error:
+                    if error.status_code == 503:
+                        raise HTTPException(status_code=429, detail=error.detail) from error
+                    raise
+                if reservation is None:
+                    return JSONResponse(
+                        status_code=200
+                        if operation["state"]
+                        in {"COMPLETED", "FAILED", "CANCELLED", "INTERRUPTED"}
+                        else 202,
+                        content=_direct_comparison_status(operation),
+                    )
+                direct_pair_jobs[comparison_id] = job
+
+        def _run_direct_comparison() -> None:
+            try:
+                job.run()
+            except Exception:
+                operations_logger.exception(
+                    "direct pair comparison execution failed",
+                    extra={
+                        "comparison_id": comparison_id,
+                        "project_id": project_id,
+                    },
+                )
+                current = store().operation(comparison_id)
+                if current is not None and current["state"] in {"QUEUED", "RUNNING"}:
+                    store().finish_operation(
+                        comparison_id,
+                        state="FAILED",
+                        error="direct pair comparison execution failed; inspect registered dependency and input integrity",
+                    )
+            finally:
+                with job_lock:
+                    direct_pair_jobs.pop(comparison_id, None)
+
+        reservation.submit(_run_direct_comparison)
+        return JSONResponse(
+            status_code=202, content=_direct_comparison_status(operation)
+        )
+
+    @app.get("/api/projects/{project_id}/owner-pair-comparisons/{comparison_id}")
+    def direct_pair_comparison_status(
+        project_id: str, comparison_id: str
+    ) -> JSONResponse:
+        operation = store().operation(comparison_id)
+        if (
+            operation is None
+            or operation["operation_kind"] != "DIRECT_PAIR_COMPARISON"
+            or operation["project_id"] != project_id
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail="direct pair comparison is not recorded in this project",
+            )
+        latest = store().latest_operation_attempt(str(operation["request_id"]))
+        if latest is not None:
+            operation = latest
+        if operation["state"] == "COMPLETED":
+            _verified_direct_comparison(project_id, comparison_id)
+        return JSONResponse(content=_direct_comparison_status(operation))
+
+    @app.get("/api/projects/{project_id}/owner-pair-comparisons")
+    def project_direct_pair_comparisons(project_id: str) -> JSONResponse:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
+        rows = [
+            row
+            for row in store().operations_for_project(project_id)
+            if row["operation_kind"] == "DIRECT_PAIR_COMPARISON"
+        ]
+        latest_by_request = {
+            str(row["request_id"]): row
+            for row in sorted(rows, key=lambda item: int(item["attempt"]))
+        }
+        return JSONResponse(
+            content=[
+                _direct_comparison_status(row)
+                for row in latest_by_request.values()
+            ]
+        )
+
+    @app.get(
+        "/api/projects/{project_id}/owner-pair-comparisons/{comparison_id}/evidence"
+    )
+    def direct_pair_comparison_evidence(
+        project_id: str, comparison_id: str
+    ) -> JSONResponse:
+        run_record = _verified_direct_comparison(project_id, comparison_id)
+        return JSONResponse(content=_direct_evidence(run_record))
+
+    @app.get("/api/projects/{project_id}/direct-pair-runs/{run_id}")
+    def direct_pair_run(project_id: str, run_id: str) -> JSONResponse:
+        try:
+            run_record = store().direct_pair_comparison_by_run(run_id)
+        except ImmutableRecordConflict as error:
+            raise HTTPException(
+                status_code=409,
+                detail="recorded direct comparison evidence failed integrity verification",
+            ) from error
+        if run_record is None or run_record.project_id != project_id:
+            raise HTTPException(
+                status_code=404,
+                detail="direct pair Run is not recorded in this project",
+            )
+        run_record = _verified_direct_comparison(
+            project_id, run_record.comparison_id
+        )
+        return JSONResponse(content=_direct_evidence(run_record))
+
+    @app.get(
+        "/api/projects/{project_id}/owner-pair-comparisons/{comparison_id}/raw"
+    )
+    def direct_pair_comparison_raw_manifest(
+        project_id: str, comparison_id: str
+    ) -> JSONResponse:
+        run_record = _verified_direct_comparison(project_id, comparison_id)
+        artifacts = []
+        for side in (run_record.left, run_record.right):
+            for artifact in side.artifacts:
+                artifacts.append(
+                    {
+                        "artifact": artifact.artifact,
+                        "sha256": artifact.sha256,
+                        "size_bytes": artifact.size_bytes,
+                        "media_type": artifact.media_type,
+                        "link": f"/api/projects/{project_id}/owner-pair-comparisons/{comparison_id}/raw/{artifact.artifact}",
+                    }
+                )
+        execution = json.dumps(
+            _direct_evidence(run_record),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        artifacts.append(
+            {
+                "artifact": "execution-record",
+                "sha256": hashlib.sha256(execution).hexdigest(),
+                "size_bytes": len(execution),
+                "media_type": "application/json",
+                "link": f"/api/projects/{project_id}/owner-pair-comparisons/{comparison_id}/raw/execution-record",
+            }
+        )
+        return JSONResponse(
+            content={"comparison_id": comparison_id, "artifacts": artifacts}
+        )
+
+    @app.get(
+        "/api/projects/{project_id}/owner-pair-comparisons/{comparison_id}/raw/{artifact_name}"
+    )
+    def direct_pair_comparison_raw_artifact(
+        project_id: str,
+        comparison_id: str,
+        artifact_name: Literal[
+            "left-source",
+            "right-source",
+            "left-crop",
+            "right-crop",
+            "left-detection",
+            "right-detection",
+            "left-embedding",
+            "right-embedding",
+            "execution-record",
+        ],
+    ) -> Response:
+        run_record = _verified_direct_comparison(project_id, comparison_id)
+        if artifact_name == "execution-record":
+            body = json.dumps(
+                _direct_evidence(run_record),
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+            digest = hashlib.sha256(body).hexdigest()
+            media_type = "application/json"
+        else:
+            available = {
+                artifact.artifact: artifact
+                for side in (run_record.left, run_record.right)
+                for artifact in side.artifacts
+            }
+            artifact = available.get(artifact_name)
+            if artifact is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="artifact is unavailable because the recorded side did not produce it",
+                )
+            snapshot, digest = open_recorded_snapshot(
+                Path(artifact.path),
+                artifact.sha256,
+                "direct comparison artifact",
+            )
+            return recorded_snapshot_response(
+                snapshot,
+                media_type=artifact.media_type,
+                filename=None,
+                headers={
+                    "Cache-Control": "no-store",
+                    "X-QualSight-SHA256": digest,
+                },
+            )
+        return Response(
+            content=body,
+            media_type=media_type,
+            headers={
+                "Cache-Control": "no-store",
+                "X-QualSight-SHA256": digest,
+            },
+        )
 
     @app.post("/api/projects/{project_id}/datasets/import-owner-manifest", status_code=201)
     def import_owner_manifest(project_id: str, request: OwnerManifestImportRequest) -> JSONResponse:
@@ -3571,7 +5609,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         mapping = request.mapping
         if mapping is None:
             if not request.mapping_name:
@@ -3583,7 +5621,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             result = importer.import_manifest(project, Path(request.manifest_path), name=request.name, mapping=mapping)
         except (OwnerSuppliedError, OSError) as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
+            logging.getLogger(__name__).warning(
+                "owner manifest import refused for project %s: %s",
+                project_id,
+                error,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="owner manifest import was refused; review the private local diagnostic log",
+            ) from error
         if request.mapping_name and request.mapping is not None:
             store().record_import_mapping(request.mapping_name, mapping, projects().actor, datetime.now(timezone.utc).astimezone().isoformat())
         record_action(project_id, AuditEventType.DATASET_IMPORTED, "Dataset", result.dataset.dataset_id, {"source_kind": OWNER_SOURCE_KIND, "samples": result.sample_count, "subjects": result.subject_count, "mapping": mapping})
@@ -3609,22 +5655,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
         except ProjectLifecycleError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=409, detail=redact_private_paths(str(error))) from error
         dataset = store().dataset(dataset_id)
         if dataset is None or dataset.project_id != project_id:
             raise HTTPException(status_code=404, detail="dataset is not recorded in this project")
+        capacity_request = {
+            "dataset_id": dataset_id,
+            "max_mated_pairs_per_subject": request.max_mated_pairs_per_subject,
+            "max_pairs": OWNER_PAIR_MAX_OUTPUT_PAIRS,
+            "nonmated_multiple": request.nonmated_multiple,
+            "project_id": project_id,
+            "seed": request.seed,
+        }
         try:
-            record = freeze_owner_pairs(
-                store(), project, dataset,
-                data_dir=settings.data_dir,
-                actor_id=projects().actor,
-                seed=request.seed,
-                max_mated_pairs_per_subject=request.max_mated_pairs_per_subject,
-                nonmated_multiple=request.nonmated_multiple,
-            )
+            with admitted_mutation(project_id):
+                reservation = reserve_scientific_work(
+                    f"owner-pairs:sha256:{CanonicalJson.from_value(capacity_request).sha256}"
+                )
+                record = reservation.submit(
+                    freeze_owner_pairs,
+                    store(),
+                    project,
+                    dataset,
+                    data_dir=settings.data_dir,
+                    actor_id=projects().actor,
+                    seed=request.seed,
+                    max_pairs=OWNER_PAIR_MAX_OUTPUT_PAIRS,
+                    max_mated_pairs_per_subject=request.max_mated_pairs_per_subject,
+                    nonmated_multiple=request.nonmated_multiple,
+                ).result()
+                record_action(project_id, AuditEventType.CONFIGURATION_CHANGED, "VerificationProtocol", record.protocol_id, {"pairs": record.pair_count, "seed": request.seed, "pairs_sha256": record.pairs_sha256})
         except OwnerSuppliedError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        record_action(project_id, AuditEventType.CONFIGURATION_CHANGED, "VerificationProtocol", record.protocol_id, {"pairs": record.pair_count, "seed": request.seed, "pairs_sha256": record.pairs_sha256})
+            raise HTTPException(status_code=400, detail=redact_private_paths(str(error))) from error
         return JSONResponse(status_code=201, content={
             "protocol_id": record.protocol_id,
             "pair_count": record.pair_count,
@@ -3635,36 +5697,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "limitations": list(record.limitations),
         })
 
-    @app.get("/api/runs", response_model=list[RunSummaryOut])
+    @app.get("/api/projects/{project_id}/runs", response_model=list[RunSummaryOut])
     def runs(
-        project_id: str = Query(min_length=1),
+        project_id: str,
         limit: int = Query(default=200, ge=1, le=10_000),
     ) -> list[RunSummaryOut]:
+        if store().project(project_id) is None:
+            raise HTTPException(status_code=404, detail="project is not recorded")
         return [
             RunSummaryOut(**asdict(item))
             for item in store().run_summaries(limit, project_id=project_id)
         ]
 
-    @app.get("/api/runs/{run_id}")
-    def run(run_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/runs/{run_id}")
+    def run(project_id: str, run_id: str) -> JSONResponse:
         found = store().run(run_id)
-        if found is None:
-            raise HTTPException(status_code=404, detail="run is not recorded")
+        if found is None or found[0].project_id != project_id:
+            raise HTTPException(status_code=404, detail="run is not recorded in this project")
         completed, evidence_sha256 = found
         return JSONResponse(
             content={
                 "evidence_sha256": evidence_sha256,
                 "sample_id": store().sample_id_for_run(run_id),
-                "run": completed.model_dump(mode="json"),
+                "run": _public_run(completed),
             }
         )
 
-    @app.get("/api/runs/{run_id}/audit")
-    def run_audit(run_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/runs/{run_id}/audit")
+    def run_audit(project_id: str, run_id: str) -> JSONResponse:
+        found = store().run(run_id)
+        if found is None or found[0].project_id != project_id:
+            raise HTTPException(status_code=404, detail="run is not recorded in this project")
         events = store().audit_events_for(run_id)
         if not events:
             raise HTTPException(status_code=404, detail="no audit event is recorded for this run")
-        return JSONResponse(content=[event.model_dump(mode="json") for event in events])
+        return JSONResponse(
+            content=[
+                _public_projection(
+                    event.model_dump(mode="json"), omit_location_keys=True
+                )
+                for event in events
+            ]
+        )
 
     @app.get("/api/projects/{project_id}", response_model=ProjectOut)
     def project(project_id: str) -> ProjectOut:
@@ -3673,19 +5747,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=404, detail="project is not recorded") from error
 
-    @app.get("/api/experiments/{experiment_id}")
-    def experiment(experiment_id: str) -> JSONResponse:
+    @app.get("/api/projects/{project_id}/experiments/{experiment_id}")
+    def experiment(project_id: str, experiment_id: str) -> JSONResponse:
         found = store().experiment(experiment_id)
-        if found is None:
-            raise HTTPException(status_code=404, detail="experiment is not recorded")
-        return JSONResponse(content=found.model_dump(mode="json"))
+        if found is None or found.project_id != project_id:
+            raise HTTPException(status_code=404, detail="experiment is not recorded in this project")
+        return JSONResponse(
+            content=_public_projection(
+                found.model_dump(mode="json"), omit_location_keys=True
+            )
+        )
 
-    @app.get("/api/samples/{sample_id}")
-    def sample(sample_id: str) -> JSONResponse:
-        found = store().sample(sample_id)
-        if found is None:
-            raise HTTPException(status_code=404, detail="sample is not recorded")
-        return JSONResponse(content=found.model_dump(mode="json"))
+    @app.get("/api/projects/{project_id}/samples/{sample_id}")
+    def sample(project_id: str, sample_id: str) -> JSONResponse:
+        found = _project_sample(project_id, sample_id)
+        return JSONResponse(content=_public_sample(project_id, found))
+
+    @app.api_route(
+        "/api/{retired_path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        include_in_schema=False,
+    )
+    def retired_or_unknown_api_route(retired_path: str) -> None:
+        """Fail closed instead of allowing retired API paths to reach the UI mount."""
+
+        raise HTTPException(status_code=404, detail="API route is not available")
 
     # Shipped console: serve the built frontend from the same local origin when it exists (offline product; API routes take precedence).
     dist = settings.repository_root / "frontend" / "dist"

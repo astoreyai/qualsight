@@ -1,0 +1,1035 @@
+{
+  "api_log_tail": "",
+  "api_url": "http://127.0.0.1:8480",
+  "browser": "chromium 145.0.7632.6",
+  "console_project": null,
+  "console_url": "http://127.0.0.1:5181",
+  "exit_code": 0,
+  "health": {
+    "actor_id": "local-user:aaron",
+    "application_version": "0.1.0b3",
+    "database_path": "/tmp/qualsight-observe-lhb7yqai/qualsight.sqlite3",
+    "engine": {
+      "approved_scopes": [
+        "REPRODUCE_OFIQ_CONFORMANCE_TESTS",
+        "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+      ],
+      "consumers": [
+        "QS-A06",
+        "QS-A07",
+        "QS-A08",
+        "QS-A10",
+        "QS-B12"
+      ],
+      "data_classification": "RESTRICTED",
+      "kind": "ENGINE_RUNTIME",
+      "name": "OFIQ 1.1.2 installed runtime (isolated no-sudo build from the official tag)",
+      "research_use_status": "OWNER_APPROVED_LOCAL_NONCOMMERCIAL_RESEARCH_MIT_ENGINE_WITH_BUNDLED_MODEL_LICENSES",
+      "resource_id": "ofiq-v1-1-2-linux-runtime",
+      "state": "APPROVED_LOCAL_RESEARCH_USE",
+      "third_party_rights_status": "VERIFIED_LICENSE",
+      "version": "1.1.2"
+    },
+    "network_guard": {
+      "authorized_setup_connections": 0,
+      "installed": true,
+      "refused_attempts": []
+    },
+    "registry_id": "qualsight-local-resources",
+    "registry_sha256": "ce34349c8c9474eae236bcfd771b4195fc95ca7cdea088df982080696dec5f05",
+    "status": "ok"
+  },
+  "kind": "QUALSIGHT_CONSOLE_RUNTIME_OBSERVATION",
+  "observed_at": "2026-09-01T18:51:30-0500",
+  "persisted_run": {
+    "UnifiedQualityScore.native": 26.390884,
+    "UnifiedQualityScore.scalar": 79,
+    "evidence_sha256": "e5454eb0d2f70db2f860bafd3ef81fbd7174051be100c3398bec5a0933c4b3e4",
+    "metric_count": 56,
+    "run_id": "run:sha256:74eb1dc12b5316d78ea59e6a783cb1fb9e1d33e51f3b8fcc0c6560ed7e650cc3"
+  },
+  "schema_version": "1.0.0",
+  "screenshot": {
+    "note": "restricted-image evidence in an untracked project directory; never commit or redistribute",
+    "path": "/tmp/qualsight-beta3-post-adversarial-screens/qualsight-console-observation.png",
+    "sha256": "8643cc82ad2582caa56ac7890600f629e51dcf0322fe8fa251a5403afc83038d",
+    "size_bytes": 557306
+  },
+  "steps": [
+    {
+      "escape_returned_focus": true,
+      "focus_wrapped_to_first": true,
+      "focus_wrapped_to_last": true,
+      "initial": {
+        "documentWidth": 390,
+        "expanded": "false",
+        "viewportWidth": 390,
+        "visibleLinks": 0
+      },
+      "open": {
+        "closeFocused": true,
+        "documentWidth": 390,
+        "undersizedLinks": 0,
+        "viewportWidth": 390,
+        "visibleLinks": 10
+      },
+      "screenshot": "/tmp/qualsight-beta3-post-adversarial-screens/qualsight-mobile-drawer.png",
+      "step": "mobile-navigation-drawer"
+    },
+    {
+      "addon_ids_match_api": true,
+      "first_keyboard_focus": {
+        "href": "#main-content",
+        "text": "Skip to main content"
+      },
+      "fresh_store_empty_recovery": "#/projects",
+      "fresh_store_empty_state": "QUALITY \u2192 UTILITY \u00b7 ERC, RISK-COVERAGE, POLICY ANALYSIS\nSelect a project to analyze matcher utility.\nUtility analysis requires recorded matcher Runs and a completed quality batch in the same project.\n",
+      "manifest": "/manifest.webmanifest",
+      "primary_nav_links": 10,
+      "primary_nav_unique_views": 10,
+      "routes": [
+        {
+          "current_links": [
+            {
+              "label": "Manage system",
+              "view": "system"
+            }
+          ],
+          "view": "system",
+          "visible_views": [
+            "system"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Analyze utility",
+              "view": "utility"
+            }
+          ],
+          "view": "utility",
+          "visible_views": [
+            "utility"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Results",
+              "view": "cross"
+            }
+          ],
+          "view": "cross",
+          "visible_views": [
+            "cross"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Evidence & reports",
+              "view": "reports"
+            }
+          ],
+          "view": "reports",
+          "visible_views": [
+            "reports"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Stress test",
+              "view": "advanced"
+            }
+          ],
+          "view": "advanced",
+          "visible_views": [
+            "advanced"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Compare",
+              "view": "matchers"
+            }
+          ],
+          "view": "matchers",
+          "visible_views": [
+            "matchers"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Inputs",
+              "view": "data"
+            }
+          ],
+          "view": "data",
+          "visible_views": [
+            "data"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Inspect quality",
+              "view": "assess"
+            }
+          ],
+          "view": "assess",
+          "visible_views": [
+            "assess"
+          ]
+        },
+        {
+          "current_links": [
+            {
+              "label": "Projects",
+              "view": "projects"
+            }
+          ],
+          "view": "projects",
+          "visible_views": [
+            "projects"
+          ]
+        }
+      ],
+      "step": "load",
+      "system_panel_connection_policy": "No API connections are admitted in this beta.No real API provider, credential reference contract, approved egress origin, or authorization to transmit biometric images or embeddings is registered. Registered external score files remain inert imports marked EXTERNALLY_COMPUTED.\nBackend-published admission requirements\na named real provider and versioned protocol driver\napproved HTTPS origins and OS-enforced egress policy\nenvironment-only secret references with redaction\ndata-use authorization for every transmitted classification\ndurable request/response provenance and exact reproduction semantics\nAdditional contract gaps\nBounded request and response schema is not registered.\nProvider retention and deletion terms are not registered.",
+      "system_panel_dataset_addons": 4,
+      "system_panel_matcher_assets": 6,
+      "system_panel_preprocessing_addons": 3,
+      "system_panel_resources": 13,
+      "system_panel_transform_addons": 7,
+      "system_tabs": [
+        "Add-ons",
+        "Processing profiles",
+        "Connections",
+        "Runtime & storage",
+        "Audit"
+      ],
+      "title": "QualSight"
+    },
+    {
+      "step": "engine-badge",
+      "text": "ENGINE\nOFIQ 1.1.2 installed runtime (isolated no-sudo build from the official tag) \u00b7 v1.1.2 \u00b7 APPROVED_LOCAL_RESEARCH_USE\nREGISTRY\nqualsight-local-resources \u00b7 ce34349c8c94\u2026"
+    },
+    {
+      "all_lifecycle_buttons_disabled_during_load": true,
+      "assets": 6,
+      "checkpoint_event_message": "ElasticFace-Arc R100 MS1MV2 local checkpoint: matcher checkpoint acquisition completed \u00b7 evidence 25b228c984b5\u2026",
+      "elasticface_managed_checkpoint": true,
+      "lifecycle_buttons_during_load": [
+        {
+          "disabled": true,
+          "label": "Install managed checkpoint"
+        },
+        {
+          "disabled": true,
+          "label": "Load matcher"
+        },
+        {
+          "disabled": true,
+          "label": "Unload matcher"
+        }
+      ],
+      "loaded_runtime": "LOADED \u00b7 cuda \u00b7 65,150,912 parameters",
+      "real_load_observed": true,
+      "sources_verified": true,
+      "step": "matcher-lifecycle",
+      "unload_observed": true,
+      "unloaded_runtime": "UNLOADED \u00b7 not resident"
+    },
+    {
+      "natural_size_ok": true,
+      "step": "image-rendered"
+    },
+    {
+      "boxes": 1,
+      "labelled_as_matcher_pipeline": true,
+      "landmark_points": 5,
+      "step": "detection-overlay"
+    },
+    {
+      "faces": 1,
+      "labelled_as_ofiq_internal": true,
+      "landmark_points": 98,
+      "step": "ofiq-landmarks"
+    },
+    {
+      "context": "PROJECT\nConsole lifecycle observation \u2014 2026-09-01-console-beta3-post-adversarial\nNEW \u00b7 v1\nDATASET\nNo dataset selected\nChoose or import an input collection\nWORKING SAMPLE\nr-01-frontal.png\nRegistered workstation input\nPROTOCOL\nNo protocol selected\nFreeze or select a comparison protocol\nMATCHER LEAF\nNo matcher leaf selected\nSelect a recorded matcher result\nEVIDENCE / RUN\nNo active Run\nComplete an assessment or comparison\nSelect or import a dataset",
+      "message": "Created Console lifecycle observation \u2014 2026-09-01-console-beta3-post-adversarial (v1, NEW)\nDismiss",
+      "step": "project-created"
+    },
+    {
+      "banner": "ENGINE MEASUREMENTpolicy: none applied\nofiq-v1-1-2-linux-runtime \u00b7 v1.1.2 \u00b7 init 2511 ms \u00b7 assess 305 ms",
+      "measure_rows": 28,
+      "provenance_text": "RECORDED EVIDENCE\n\nRun provenance\nCOMPLETED\nPROJECT & RUN\nProject\nproject:sha256:c78d9d0cb29b8e7c621b76cf79b807bca227ed58ee4b7b5dcb908c81edf63787\nExperiment\nexperiment:sha256:b5cebcd9d25126903fe39253f51980cda569de77a16ab13ee3fcd931ba792fef\nRun\nrun:sha256:74eb1dc12b5316d78ea59e6a783cb1fb9e1d33e51f3b8fcc0c6560ed7e650cc3\nEvidence SHA-256\ne5454eb0d2f70db2f860bafd3ef81fbd7174051be100c3398bec5a0933c4b3e4\nDATASET\nRecorded dataset\ndataset:sha256:8c5fe9d86de896780eb185778900662a332c570f2e357cf14a9c7d8d589a5e1f\nSAMPLE\nRecorded sample\nsample:sha256:b23f0b04a160bd77837ae2d21c7fa61015709a1276d7b6984ac6efd89c79617e\nSubject identity\nNot recorded\nImage SHA-256\n3c3655e6ac9f16bc6909b6f71d7c5ec385008aa6d2352167bdb77acd61d8c947\nSize\n13436071\nMedia type\nimage/png\nPurpose scope\nREPRODUCE_OFIQ_CONFORMANCE_TESTS\nQUALITY ENGINE\nResource\nofiq-v1-1-2-linux-runtime\nVersion\n1.1.2\nRegistry state\nAPPROVED_LOCAL_RESEARCH_USE\nCONFIGURATION FILE IDENTITY\nMODELS (12)\nTIMING\nStarted\n2026-09-01T18:52:00.191872-05:00\nEnded\n2026-09-01T18:52:04.449502-05:00\nRuntime seconds\n4.257615923997946\nInitialization ms\n2511\nAssessment ms\n305\nARTIFACTS (1)\nWARNINGS (0)\nPROVENANCE LIMITS (6)\nREPOSITORY IDENTITY\nAUDIT LINEAGE (1)",
+      "run_link": "/api/runs/run:sha256:74eb1dc12b5316d78ea59e6a783cb1fb9e1d33e51f3b8fcc0c6560ed7e650cc3",
+      "step": "assessment",
+      "unified_quality_score_row": [
+        "UnifiedQualityScore",
+        "79",
+        "Measured"
+      ]
+    },
+    {
+      "rows": 1,
+      "step": "run-list"
+    },
+    {
+      "file": "evaluator_photo.jpg",
+      "run_link_present": true,
+      "source_kind_shown": true,
+      "step": "owner-supplied-upload",
+      "unified_quality_score": "41"
+    },
+    {
+      "api_run_count": 2,
+      "context": "PROJECT\nConsole lifecycle observation \u2014 2026-09-01-console-beta3-post-adversarial\nNEW \u00b7 v1\nDATASET\nNo dataset selected\nChoose or import an input collection\nWORKING SAMPLE\nevaluator_photo.jpg\nOwner-supplied local input\nPROTOCOL\nNo protocol selected\nFreeze or select a comparison protocol\nMATCHER LEAF\nNo matcher leaf selected\nSelect a recorded matcher result\nEVIDENCE / RUN\nRun 7680d3551b26\u2026\nQuality assessment evidence\nReview Run context",
+      "run_table_rows": 2,
+      "step": "owner-upload-global-refresh"
+    },
+    {
+      "project_id": "project:sha256:72b8983d607d3cb64a9587356065ed0de62ca97026b3a4b86c500702e5e7aff1",
+      "run_count": 1,
+      "step": "second-project-real-run"
+    },
+    {
+      "restored_project_id": "project:sha256:c78d9d0cb29b8e7c621b76cf79b807bca227ed58ee4b7b5dcb908c81edf63787",
+      "restored_run_count": 2,
+      "scope_violations": [],
+      "step": "project-run-switch-isolation",
+      "switched_to_project_id": "project:sha256:72b8983d607d3cb64a9587356065ed0de62ca97026b3a4b86c500702e5e7aff1",
+      "switched_to_run_count": 1
+    },
+    {
+      "messages": [
+        "save: Console lifecycle observation \u2014 2026-09-01-console-beta3-post-adversarial is now v2 SAVED\nDismiss",
+        "close: Console lifecycle observation \u2014 2026-09-01-console-beta3-post-adversarial is now v3 SAVED\nDismiss",
+        "open: Console lifecycle observation \u2014 2026-09-01-console-beta3-post-adversarial is now v4 OPEN\nDismiss",
+        "archive: Console lifecycle observation \u2014 2026-09-01-console-beta3-post-adversarial is now v5 ARCHIVED\nDismiss"
+      ],
+      "step": "project-transitions"
+    },
+    {
+      "step": "project-facts",
+      "text": "Lifecycle\nARCHIVED \u00b7 v5\nRuns\n2\nEngine\nofiq-v1-1-2-linux-runtime v1.1.2\nEvidence\n7afb7fb9f8ef16ae\u2026"
+    },
+    {
+      "context": "PROJECT\nConsole lifecycle observation \u2014 2026-09-01-console-beta3-post-adversarial\nOPEN \u00b7 v6\nDATASET\nLocal LFW funneled image collection\n13,233 samples \u00b7 5,749 subjects\nWORKING SAMPLE\nr-01-frontal.png\nRegistered workstation input\nPROTOCOL\nNo protocol selected\nFreeze or select a comparison protocol\nMATCHER LEAF\nNo matcher leaf selected\nSelect a recorded matcher result\nEVIDENCE / RUN\nRun 7680d3551b26\u2026\nLatest recorded project workflow\nReview Run context",
+      "facts": "Name\nLocal LFW funneled image collection\nSamples\n13,233 \u00b7 5,749 subjects\nRights\nNO_EXPLICIT_LICENSE_PUBLIC_RESEARCH_DATASET\nScope\nQUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1\nManifest\nf0d8e9c49ea048d6\u2026\nPairs\n3,000 mated \u00b7 3,000 non-mated\nCompleteness\nmissing 0 \u00b7 unreadable 0 \u00b7 hash mismatches 0 \u00b7 dup hashes 0",
+      "step": "dataset-imported"
+    },
+    {
+      "progress": "COMPLETED \u00b7 16/16 \u00b7 failures 0 \u00b7 not assessed 0\n\nrun 4192159b2eddcff8\u2026",
+      "step": "batch"
+    },
+    {
+      "api_run_count": 3,
+      "context": "PROJECT\nConsole lifecycle observation \u2014 2026-09-01-console-beta3-post-adversarial\nOPEN \u00b7 v6\nDATASET\nLocal LFW funneled image collection\n13,233 samples \u00b7 5,749 subjects\nWORKING SAMPLE\nr-01-frontal.png\nRegistered workstation input\nPROTOCOL\nNo protocol selected\nFreeze or select a comparison protocol\nMATCHER LEAF\nNo matcher leaf selected\nSelect a recorded matcher result\nEVIDENCE / RUN\nRun 4192159b2edd\u2026\nLatest recorded project workflow\nReview Run context",
+      "run_table_rows": 3,
+      "step": "batch-terminal-global-refresh"
+    },
+    {
+      "catalog_selection": {
+        "controls": 8,
+        "one_leaf_selection_observed": true,
+        "selected_matchers": 1,
+        "selected_preprocessing_profiles": 1
+      },
+      "context": {
+        "leaf_id": "QS-C22.AS",
+        "protocol_id": "protocol:sha256:d0e77ed9d477ab1d89b72c5319bda42627e70cdbfae51a4295ae8df9b18bbe7a",
+        "run_id": "run:sha256:86da8579195c6ac036241171fdb539920cd26ce312054585533c31e1a186100a",
+        "visible": "PROJECT\nConsole lifecycle observation \u2014 2026-09-01-console-beta3-post-adversarial\nOPEN \u00b7 v6\nDATASET\nLocal LFW funneled image collection\n13,233 samples \u00b7 5,749 subjects\nWORKING SAMPLE\nr-01-frontal.png\nRegistered workstation input\nPROTOCOL\nLFW View 2 (10-fold, 6,000 pairs) \u2014 registered local pair manifest \u00b7 6,000 pairs (3,000 mated)\nImmutable comparison protocol\nMATCHER LEAF\nAdaFace IR-101 WebFace4M local checkpoint \u00b7 Shared adaptive SCRFD crop \u00b7 JPEG 95\nSelected matcher \u00d7 preprocessing result\nEVIDENCE / RUN\nRun 86da8579195c\u2026\nMatcher comparison evidence\nReview Run context"
+      },
+      "det_polylines": 1,
+      "error_pairs_at_0_9": [
+        "lfw-local-fold-01-mated-0001 \u00b7 fold 1 \u00b7 MATED\nAbel_Pacheco vs Abel_Pacheco\nscore 0.7126\nimage\nimage\nmatch evidence",
+        "lfw-local-fold-01-mated-0002 \u00b7 fold 1 \u00b7 MATED\nAkhmed_Zakayev vs Akhmed_Zakayev\nscore 0.8464\nimage\nimage\nmatch evidence",
+        "lfw-local-fold-01-mated-0003 \u00b7 fold 1 \u00b7 MATED\nAkhmed_Zakayev vs Akhmed_Zakayev\nscore 0.7822\nimage\nimage\nmatch evidence",
+        "lfw-local-fold-01-mated-0004 \u00b7 fold 1 \u00b7 MATED\nAmber_Tamblyn vs Amber_Tamblyn\nscore 0.7235\nimage\nimage\nmatch evidence",
+        "lfw-local-fold-01-mated-0005 \u00b7 fold 1 \u00b7 MATED\nAnders_Fogh_Rasmussen vs Anders_Fogh_Rasmussen\nscore 0.7737\nimage\nimage\nmatch evidence"
+      ],
+      "leaf_cells": [
+        "QS-C22.AS\nEER 0.00 %\nFNMR@FMR\u22640.1 % 0.00 %\n10-fold acc \u2014\n10/10 scored \u00b7 0 failed"
+      ],
+      "matrix_progress": "matrix 2266f99cad4f\u2026 \u00b7 completed 1/1 leaves recorded \u00b7 1/1 leaves",
+      "protocol": "LFW View 2 (10-fold, 6,000 pairs) \u2014 registered local pair manifest \u00b7 6,000 pairs (3,000 mated)",
+      "step": "matchers"
+    },
+    {
+      "attribution_shown": true,
+      "compared_crops_112": [
+        true,
+        false
+      ],
+      "decisions": [
+        "EER threshold\t0.712610\tACCEPT",
+        "FMR <= 0.1\t0.712610\tACCEPT",
+        "FMR <= 0.01\t0.712610\tACCEPT",
+        "FMR <= 0.001\t0.712610\tACCEPT"
+      ],
+      "score_marker": true,
+      "statement_present": true,
+      "step": "match-evidence"
+    },
+    {
+      "api_run_count": 4,
+      "context": "PROJECT\nConsole lifecycle observation \u2014 2026-09-01-console-beta3-post-adversarial\nOPEN \u00b7 v6\nDATASET\nLocal LFW funneled image collection\n13,233 samples \u00b7 5,749 subjects\nWORKING SAMPLE\nr-01-frontal.png\nRegistered workstation input\nPROTOCOL\nLFW View 2 (10-fold, 6,000 pairs) \u2014 registered local pair manifest \u00b7 6,000 pairs (3,000 mated)\nImmutable comparison protocol\nMATCHER LEAF\nAdaFace IR-101 WebFace4M local checkpoint \u00b7 Shared adaptive SCRFD crop \u00b7 JPEG 95\nSelected matcher \u00d7 preprocessing result\nEVIDENCE / RUN\nRun 86da8579195c\u2026\nMatcher comparison evidence\nReview Run context",
+      "run_table_rows": 4,
+      "step": "matcher-terminal-global-refresh"
+    },
+    {
+      "bins": [
+        0,
+        0,
+        36.666666666666664,
+        73.33333333333333,
+        36.666666666666664,
+        73.33333333333333,
+        36.666666666666664,
+        0,
+        0,
+        36.666666666666664,
+        36.666666666666664,
+        36.666666666666664,
+        0,
+        36.666666666666664,
+        36.666666666666664,
+        110,
+        0,
+        36.666666666666664,
+        0,
+        0
+      ],
+      "drilldown_samples_shown": 3,
+      "sample_facts": "Subject\nAkhmed_Zakayev\nMedia\nimage/jpeg \u00b7 19,138 bytes\nSHA-256\n40ce429381dd20e6243e\u2026\nOutcome\nMEASURED\nRun\n4192159b2eddcff8\u2026\nAudit\naudit trail",
+      "sample_measure_rows": 28,
+      "selected_bin": 15,
+      "step": "explorer",
+      "thumbnail_rendered": true
+    },
+    {
+      "analysis_rows": [
+        "1d74b44831\u2026\n\tQS-C22.AS \u00b7 Shared adaptive SCRFD crop \u00b7 JPEG 95\tSharpness \u00b7 min\t0.7126\t40\t0.00000\t0.00000\t0.00 % \u2192 0.00 %\t60.0 %\t0 (\u22124 good)"
+      ],
+      "conditioned_bins": 10,
+      "detail_heading": "Analysis 1d74b44831c9e8\u2026 \u00b7 Run da4f7e0c501971\u2026 \u00b7 QS-C22.AS \u00b7 Sharpness \u00b7 pair.quality.min",
+      "erc_polylines": 1,
+      "measure_catalog_count": 28,
+      "per_measure_rows": 28,
+      "policy_table": "Fixed-threshold quality-policy effects\nPOLICY MEASURE\tRECORDED VALUE\nRetention rate\t60.00 % (6 of 10)\nRejection rate\t40.00 % (4 rejected)\nFNMR before \u2192 after\t0.00 % \u2192 0.00 % [0.00 %, 60.24 %]\nFMR before \u2192 after\t0.000 % \u2192 0.000 %\nErrors prevented\t0 (0 FNM \u00b7 0 FM)\nSuccessful comparisons removed\t4 (1 mated \u00b7 3 non-mated)\nExcluded\t0 processing failures \u00b7 0 missing quality",
+      "rejected_pairs": [
+        "lfw-local-fold-01-non-mated-0001 \u00b7 fold 1 \u00b7 NON_MATED\nmatch evidence\nq 77 / 11 \u2192 pair 11 \u00b7 score 0.0365\nleft quality\nright quality\nrun",
+        "lfw-local-fold-01-non-mated-0005 \u00b7 fold 1 \u00b7 NON_MATED\nmatch evidence\nq 40 / 15 \u2192 pair 15 \u00b7 score 0.0539\nleft quality\nright quality\nrun",
+        "lfw-local-fold-01-non-mated-0004 \u00b7 fold 1 \u00b7 NON_MATED\nmatch evidence\nq 65 / 17 \u2192 pair 17 \u00b7 score -0.0850\nleft quality\nright quality\nrun",
+        "lfw-local-fold-01-mated-0003 \u00b7 fold 1 \u00b7 MATED\nmatch evidence\nq 18 / 85 \u2192 pair 18 \u00b7 score 0.7822\nleft quality\nright quality\nrun"
+      ],
+      "selected_quality_measure": "Sharpness",
+      "step": "utility"
+    },
+    {
+      "api_run_count": 5,
+      "context": "PROJECT\nConsole lifecycle observation \u2014 2026-09-01-console-beta3-post-adversarial\nOPEN \u00b7 v6\nDATASET\nLocal LFW funneled image collection\n13,233 samples \u00b7 5,749 subjects\nWORKING SAMPLE\nr-01-frontal.png\nRegistered workstation input\nPROTOCOL\nLFW View 2 (10-fold, 6,000 pairs) \u2014 registered local pair manifest \u00b7 6,000 pairs (3,000 mated)\nImmutable comparison protocol\nMATCHER LEAF\nAdaFace IR-101 WebFace4M local checkpoint \u00b7 Shared adaptive SCRFD crop \u00b7 JPEG 95\nSelected matcher \u00d7 preprocessing result\nEVIDENCE / RUN\nRun da4f7e0c5019\u2026\nLatest recorded project workflow\nReview Run context",
+      "run_table_rows": 5,
+      "step": "utility-terminal-global-refresh"
+    },
+    {
+      "contrast_rows": 0,
+      "matrix": "2266f99cad4f\u2026 \u00b7 1 recorded leaf",
+      "message": "The selected matrix has 1 recorded leaf; at least two are required for a contrast.",
+      "step": "cross-matcher-reduced-matrix-disabled"
+    },
+    {
+      "dashboard_message": "Dashboard d338d159643b\u2026 saved with 4 panels and reloaded (layout identical)\nDismiss",
+      "dashboard_panel_run_ids": [
+        "run:sha256:86da8579195c6ac036241171fdb539920cd26ce312054585533c31e1a186100a",
+        "run:sha256:da4f7e0c501971e55128633671ee2eab7779f4013f4103e82e84a58ef9ad8599"
+      ],
+      "dashboard_panels": 4,
+      "figure_facts": "Figure\nfigure:sha256:2d677c79e705781c8277e124c2ecf491a4424e6728d952b9eb6ca9115c3582de\nSource Runs\nda4f7e0c50\u2026\nMetric definitions\nbiometric.quality.utility.erc@1.0.0, biometric.quality.utility.au-erc@1.0.0\nThresholds\n1 recorded (kind MATCHER_THRESHOLD)\nExport\nPNG\nSVG\nPDF\nCSV\nprovenance",
+      "figures": 2,
+      "report_dataset_id": "dataset:sha256:5a82ed2bc5d8f21a246345fecf3baa57a8b4e00f6ce3539cc640717a4987f52c",
+      "report_rows": [
+        "9170f138d1\u2026\tQualSight console report\t\nHTML\nPDF\nJSON"
+      ],
+      "reproduction_states": [
+        "EXACT"
+      ],
+      "step": "reports"
+    },
+    {
+      "degradation_tables": [
+        "jpeg response by quality\nJPEG (QUALITY)\tUQS MEAN\tSHARPNESS MEAN\tMATED SCORE MEAN\tFNMR\tFMR\tTEMPLATE FAILURES\nbaseline (originals)\t47.9\t64.1\t0.757\t85.71 %\t0.000 %\t\u2014\n80\t46.5\t68.3\t0.755\t85.71 % [42.13 %, 99.64 %]\t0.000 %\t0\n50\t42.5\t68.8\t0.734\t85.71 % [42.13 %, 99.64 %]\t0.000 %\t0\n20\t29.1\t77.8\t0.707\t85.71 % [42.13 %, 99.64 %]\t0.000 %\t0\nFNMR slope/level -0.0000 \u00b7 area 1.7143 \u00b7 crossing at \u2014 \u00b7 failure onse"
+      ],
+      "derived_set_transform": {
+        "jpeg_parameters": "80,50,20",
+        "selected": [
+          "transform-select-jpeg"
+        ]
+      },
+      "identification_rows": [
+        "b9d08bcdeb\u2026\n\tAdaFace IR-101 WebFace4M local checkpoint \u00b7 Shared adaptive SCRFD crop \u00b7 JPEG 95 \u00b7 cuda\t4\t5 / 7\t100.00 %\t\u2014"
+      ],
+      "step": "advanced"
+    },
+    {
+      "api_run_count": 8,
+      "context": "PROJECT\nConsole lifecycle observation \u2014 2026-09-01-console-beta3-post-adversarial\nOPEN \u00b7 v6\nDATASET\nLocal LFW funneled image collection\n13,233 samples \u00b7 5,749 subjects\nWORKING SAMPLE\nr-01-frontal.png\nRegistered workstation input\nPROTOCOL\nLFW View 2 (10-fold, 6,000 pairs) \u2014 registered local pair manifest \u00b7 6,000 pairs (3,000 mated)\nImmutable comparison protocol\nMATCHER LEAF\nAdaFace IR-101 WebFace4M local checkpoint \u00b7 Shared adaptive SCRFD crop \u00b7 JPEG 95\nSelected matcher \u00d7 preprocessing result\nEVIDENCE / RUN\nRun c8e218c5148f\u2026\nLatest recorded project workflow\nReview Run context",
+      "run_table_rows": 8,
+      "step": "advanced-terminal-global-refresh"
+    },
+    {
+      "measure_count": 28,
+      "project_id": "project:sha256:c78d9d0cb29b8e7c621b76cf79b807bca227ed58ee4b7b5dcb908c81edf63787",
+      "recent_records": [
+        {
+          "kind": "run",
+          "recordedAt": "2026-09-01T18:53:08.578310-05:00"
+        },
+        {
+          "kind": "degradation",
+          "recordedAt": "2026-09-01T18:53:08.578310-05:00"
+        },
+        {
+          "kind": "run",
+          "recordedAt": "2026-09-01T18:53:04.255674-05:00"
+        },
+        {
+          "kind": "run",
+          "recordedAt": "2026-09-01T18:52:41.304277-05:00"
+        },
+        {
+          "kind": "bundle",
+          "recordedAt": "2026-09-01T18:52:39.632638-05:00"
+        },
+        {
+          "kind": "report",
+          "recordedAt": "2026-09-01T18:52:39.481414-05:00"
+        }
+      ],
+      "run_count": 8,
+      "screenshot": "/tmp/qualsight-beta3-post-adversarial-screens/qualsight-home-populated.png",
+      "step": "guided-home-populated",
+      "task_count": 7
+    },
+    {
+      "routes": [
+        {
+          "contrast_failures": [],
+          "dialogs": 0,
+          "disabled_unexplained": [],
+          "duplicate_ids": [],
+          "heading_jumps": [],
+          "headings": [
+            {
+              "level": 2,
+              "text": "Projects"
+            },
+            {
+              "level": 2,
+              "text": "Recorded runs"
+            }
+          ],
+          "images_without_alt": [],
+          "interactive_controls": 17,
+          "invalid_dialogs": [],
+          "invalid_tables": [],
+          "nonsemantic_buttons": [],
+          "unfocusable": [],
+          "unlabeled": [],
+          "unnamed": [],
+          "view": "projects"
+        },
+        {
+          "contrast_failures": [],
+          "dialogs": 0,
+          "disabled_unexplained": [],
+          "duplicate_ids": [],
+          "heading_jumps": [],
+          "headings": [
+            {
+              "level": 2,
+              "text": "Dataset \u00b7 Batch \u00b7 Explorer"
+            },
+            {
+              "level": 3,
+              "text": "Dataset"
+            },
+            {
+              "level": 3,
+              "text": "Batch quality"
+            },
+            {
+              "level": 3,
+              "text": "Quality explorer"
+            },
+            {
+              "level": 4,
+              "text": "Akhmed_Zakayev"
+            }
+          ],
+          "images_without_alt": [],
+          "interactive_controls": 42,
+          "invalid_dialogs": [],
+          "invalid_tables": [],
+          "nonsemantic_buttons": [],
+          "unfocusable": [],
+          "unlabeled": [],
+          "unnamed": [],
+          "view": "data"
+        },
+        {
+          "contrast_failures": [],
+          "dialogs": 0,
+          "disabled_unexplained": [],
+          "duplicate_ids": [],
+          "heading_jumps": [],
+          "headings": [
+            {
+              "level": 2,
+              "text": "Registered samples"
+            },
+            {
+              "level": 2,
+              "text": "Assess your own photo"
+            },
+            {
+              "level": 2,
+              "text": "Sample"
+            },
+            {
+              "level": 2,
+              "text": "Quality measures"
+            }
+          ],
+          "images_without_alt": [],
+          "interactive_controls": 6,
+          "invalid_dialogs": [],
+          "invalid_tables": [],
+          "nonsemantic_buttons": [],
+          "unfocusable": [],
+          "unlabeled": [],
+          "unnamed": [],
+          "view": "assess"
+        },
+        {
+          "contrast_failures": [],
+          "dialogs": 0,
+          "disabled_unexplained": [],
+          "duplicate_ids": [],
+          "heading_jumps": [],
+          "headings": [
+            {
+              "level": 2,
+              "text": "Inspect and compare"
+            },
+            {
+              "level": 2,
+              "text": "Verification \u00b7 matcher \u00d7 preprocessing matrix"
+            },
+            {
+              "level": 3,
+              "text": "QS-C22.AS errors at threshold 0.9000 (EXCLUDE_FAILED_TRIALS; ACCEPT_WHEN_SCORE_GE_THRESHOLD) \u00b7 condition SCRFD10G_ADAPTIVE_LARGEST_ARCFACE112_JPEG95_V1 \u00b7 transform ADAFACE_IR101_BGR_NEG1_POS1_L2_V1 \u00b7 run 86da8579195c6a\u2026"
+            },
+            {
+              "level": 4,
+              "text": "False non-matches (mated rejected) (5)"
+            },
+            {
+              "level": 4,
+              "text": "Match evidence \u00b7 lfw-local-fold-01-mated-0001 \u00b7 MATED \u00b7 QS-C22.AS [QUALSIGHT_EXECUTED]"
+            },
+            {
+              "level": 5,
+              "text": "left \u00b7 Abel_Pacheco"
+            },
+            {
+              "level": 5,
+              "text": "right \u00b7 Abel_Pacheco"
+            },
+            {
+              "level": 5,
+              "text": "Quality context (association, not causation)"
+            },
+            {
+              "level": 3,
+              "text": "Externally computed scores (QS-C21) \u2014 imported, never re-scored; marker EXTERNALLY_COMPUTED travels with every result"
+            }
+          ],
+          "images_without_alt": [],
+          "interactive_controls": 35,
+          "invalid_dialogs": [],
+          "invalid_tables": [],
+          "nonsemantic_buttons": [],
+          "unfocusable": [],
+          "unlabeled": [],
+          "unnamed": [],
+          "view": "matchers"
+        },
+        {
+          "contrast_failures": [],
+          "dialogs": 0,
+          "disabled_unexplained": [],
+          "duplicate_ids": [],
+          "heading_jumps": [],
+          "headings": [
+            {
+              "level": 2,
+              "text": "Choose one recorded working image first"
+            },
+            {
+              "level": 2,
+              "text": "Population degradation analysis"
+            },
+            {
+              "level": 2,
+              "text": "Advanced analysis \u00b7 1:N identification \u00b7 controlled degradation"
+            },
+            {
+              "level": 3,
+              "text": "1:N protocols and searches"
+            },
+            {
+              "level": 4,
+              "text": "Search b9d08bcdeb59\u2026 \u00b7 Run b7db58f8155b\u2026"
+            },
+            {
+              "level": 5,
+              "text": "Closed set (mated searches)"
+            },
+            {
+              "level": 5,
+              "text": "Open set (FNIR at target FPIR; MATCHER THRESHOLD from non-mated searches)"
+            },
+            {
+              "level": 5,
+              "text": "Gallery-size effect"
+            },
+            {
+              "level": 3,
+              "text": "Controlled degradation (transform real inputs \u2192 OFIQ + matcher response)"
+            },
+            {
+              "level": 4,
+              "text": "Degradation response \u00b7 Run c8e218c5148f\u2026 \u00b7 MATCHER THRESHOLD 0.8000"
+            }
+          ],
+          "images_without_alt": [],
+          "interactive_controls": 30,
+          "invalid_dialogs": [],
+          "invalid_tables": [],
+          "nonsemantic_buttons": [],
+          "unfocusable": [],
+          "unlabeled": [],
+          "unnamed": [],
+          "view": "advanced"
+        },
+        {
+          "contrast_failures": [],
+          "dialogs": 0,
+          "disabled_unexplained": [],
+          "duplicate_ids": [],
+          "heading_jumps": [],
+          "headings": [
+            {
+              "level": 2,
+              "text": "Quality \u2192 utility \u00b7 ERC, risk-coverage, policy analysis"
+            },
+            {
+              "level": 3,
+              "text": "Analysis 1d74b44831c9e8\u2026 \u00b7 Run da4f7e0c501971\u2026 \u00b7 QS-C22.AS \u00b7 Sharpness \u00b7 pair.quality.min"
+            },
+            {
+              "level": 4,
+              "text": "Thresholds (never conflated)"
+            },
+            {
+              "level": 4,
+              "text": "Areas under the ERC (registry v1.2.0)"
+            },
+            {
+              "level": 4,
+              "text": "Policy: quality \u2265 40 at fixed matcher threshold"
+            },
+            {
+              "level": 4,
+              "text": "Quality-conditioned FNMR (bins recorded with the Run)"
+            },
+            {
+              "level": 4,
+              "text": "Quality\u2013error association (mated units)"
+            },
+            {
+              "level": 4,
+              "text": "Per-quality-measure impact (retention-matched cutoffs)"
+            },
+            {
+              "level": 4,
+              "text": "Rejected by the quality policy \u00b7 4 pairs (showing 4)"
+            }
+          ],
+          "images_without_alt": [],
+          "interactive_controls": 31,
+          "invalid_dialogs": [],
+          "invalid_tables": [],
+          "nonsemantic_buttons": [],
+          "unfocusable": [],
+          "unlabeled": [],
+          "unnamed": [],
+          "view": "utility"
+        },
+        {
+          "contrast_failures": [],
+          "dialogs": 0,
+          "disabled_unexplained": [],
+          "duplicate_ids": [],
+          "heading_jumps": [],
+          "headings": [
+            {
+              "level": 2,
+              "text": "Cross-matcher \u00b7 fixed-condition and fixed-matcher contrasts"
+            }
+          ],
+          "images_without_alt": [],
+          "interactive_controls": 4,
+          "invalid_dialogs": [],
+          "invalid_tables": [],
+          "nonsemantic_buttons": [],
+          "unfocusable": [],
+          "unlabeled": [],
+          "unnamed": [],
+          "view": "cross"
+        },
+        {
+          "contrast_failures": [],
+          "dialogs": 0,
+          "disabled_unexplained": [],
+          "duplicate_ids": [],
+          "heading_jumps": [],
+          "headings": [
+            {
+              "level": 2,
+              "text": "Figures \u00b7 dashboards \u00b7 reports \u00b7 exports \u00b7 reproduction"
+            },
+            {
+              "level": 3,
+              "text": "Recorded figures for active dataset (2)"
+            },
+            {
+              "level": 3,
+              "text": "FNMR-ERC overlay"
+            },
+            {
+              "level": 3,
+              "text": "Active-dataset dashboards (1) \u00b7 reports (1)"
+            },
+            {
+              "level": 3,
+              "text": "Console dashboard \u00b7 v1 \u00b7 layout sha daa82f1e07\u2026"
+            },
+            {
+              "level": 3,
+              "text": "Exports (CSV \u00b7 JSON \u00b7 Parquet, with run identifiers)"
+            },
+            {
+              "level": 3,
+              "text": "Active-dataset bundles (1) \u00b7 reproductions (1)"
+            }
+          ],
+          "images_without_alt": [],
+          "interactive_controls": 30,
+          "invalid_dialogs": [],
+          "invalid_tables": [],
+          "nonsemantic_buttons": [],
+          "unfocusable": [],
+          "unlabeled": [],
+          "unnamed": [],
+          "view": "reports"
+        },
+        {
+          "contrast_failures": [],
+          "dialogs": 0,
+          "disabled_unexplained": [],
+          "duplicate_ids": [],
+          "heading_jumps": [],
+          "headings": [
+            {
+              "level": 2,
+              "text": "System management"
+            },
+            {
+              "level": 3,
+              "text": "Matcher add-ons"
+            },
+            {
+              "level": 4,
+              "text": "AdaFace IR-101 WebFace4M local checkpoint"
+            },
+            {
+              "level": 5,
+              "text": "Checkpoint identity"
+            },
+            {
+              "level": 5,
+              "text": "Pinned architecture sources"
+            },
+            {
+              "level": 5,
+              "text": "Rights, acquisition, and runtime"
+            },
+            {
+              "level": 3,
+              "text": "Dataset add-ons"
+            }
+          ],
+          "images_without_alt": [],
+          "interactive_controls": 20,
+          "invalid_dialogs": [],
+          "invalid_tables": [],
+          "nonsemantic_buttons": [],
+          "unfocusable": [],
+          "unlabeled": [],
+          "unnamed": [],
+          "view": "system"
+        }
+      ],
+      "step": "semantic-accessibility",
+      "system_tab_keyboard": {
+        "next": "system-tab-processing",
+        "next_focused": true,
+        "restored": "system-tab-addons",
+        "restored_focused": true,
+        "selected": "system-tab-addons"
+      }
+    },
+    {
+      "routes": [
+        {
+          "checkbox_controls": 0,
+          "document_client_width": 390,
+          "document_scroll_width": 390,
+          "ordinary_controls": 17,
+          "undersized": [],
+          "view": "projects",
+          "viewport": 390
+        },
+        {
+          "checkbox_controls": 0,
+          "document_client_width": 390,
+          "document_scroll_width": 390,
+          "ordinary_controls": 22,
+          "undersized": [],
+          "view": "data",
+          "viewport": 390
+        },
+        {
+          "checkbox_controls": 0,
+          "document_client_width": 390,
+          "document_scroll_width": 390,
+          "ordinary_controls": 6,
+          "undersized": [],
+          "view": "assess",
+          "viewport": 390
+        },
+        {
+          "checkbox_controls": 8,
+          "document_client_width": 390,
+          "document_scroll_width": 390,
+          "ordinary_controls": 27,
+          "undersized": [],
+          "view": "matchers",
+          "viewport": 390
+        },
+        {
+          "checkbox_controls": 7,
+          "document_client_width": 390,
+          "document_scroll_width": 390,
+          "ordinary_controls": 23,
+          "undersized": [],
+          "view": "advanced",
+          "viewport": 390
+        },
+        {
+          "checkbox_controls": 1,
+          "document_client_width": 390,
+          "document_scroll_width": 390,
+          "ordinary_controls": 30,
+          "undersized": [],
+          "view": "utility",
+          "viewport": 390
+        },
+        {
+          "checkbox_controls": 0,
+          "document_client_width": 390,
+          "document_scroll_width": 390,
+          "ordinary_controls": 4,
+          "undersized": [],
+          "view": "cross",
+          "viewport": 390
+        },
+        {
+          "checkbox_controls": 0,
+          "document_client_width": 390,
+          "document_scroll_width": 390,
+          "ordinary_controls": 30,
+          "undersized": [],
+          "view": "reports",
+          "viewport": 390
+        },
+        {
+          "checkbox_controls": 0,
+          "document_client_width": 390,
+          "document_scroll_width": 390,
+          "ordinary_controls": 20,
+          "undersized": [],
+          "view": "system",
+          "viewport": 390
+        }
+      ],
+      "step": "mobile-390-accessibility",
+      "surfaces": [
+        {
+          "focus_visible": true,
+          "keyboard_focus": true,
+          "layout": {
+            "document_client_width": 390,
+            "document_scroll_width": 390,
+            "viewport": 390
+          },
+          "space_toggled": true,
+          "state_restored": true,
+          "target": {
+            "height": 44,
+            "tag": "LABEL",
+            "width": 318.84375
+          },
+          "view": "matchers"
+        },
+        {
+          "focus_visible": true,
+          "keyboard_focus": true,
+          "layout": {
+            "document_client_width": 390,
+            "document_scroll_width": 390,
+            "viewport": 390
+          },
+          "space_toggled": true,
+          "state_restored": true,
+          "target": {
+            "height": 44,
+            "tag": "LABEL",
+            "width": 299.25
+          },
+          "view": "advanced"
+        }
+      ],
+      "viewport_width": 390
+    }
+  ]
+}

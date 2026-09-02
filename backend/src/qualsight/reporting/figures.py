@@ -26,11 +26,25 @@ import numpy as np  # noqa: E402
 import pyarrow.parquet as pq  # noqa: E402
 
 from ..engines.ofiq.adapter import content_id  # noqa: E402
+from ..execution.prepared_output import (  # noqa: E402
+    PreparedOutputError,
+    create_staging_directory,
+    discard_staging_directory,
+    load_prepared_output,
+    prepare_and_publish,
+)
 from ..provenance import sha256_file  # noqa: E402
 
 FIGURE_VERSION = "1.0.0"
 FIGURE_KINDS = ("det_overlay", "roc_overlay", "score_distributions", "erc_overlay", "risk_coverage", "quality_conditioned_fnmr", "quality_histogram", "error_overlap", "operating_points")
 COLORS = ["#1f77b4", "#d62728", "#2ca02c", "#ff7f0e", "#9467bd", "#8c564b", "#17becf", "#e377c2"]
+FIGURE_ARTIFACT_NAMES = (
+    "figure.csv",
+    "figure.pdf",
+    "figure.png",
+    "figure.provenance.json",
+    "figure.svg",
+)
 
 
 class FigureError(RuntimeError):
@@ -76,15 +90,15 @@ class FigureSpec:
 # -- builders -------------------------------------------------------------------
 
 
-def _leaf_rows(store: Any, matrix_id: str) -> list[dict[str, Any]]:
-    rows = store.matcher_leaves(matrix_id=matrix_id)
+def _leaf_rows(store: Any, project_id: str, matrix_id: str) -> list[dict[str, Any]]:
+    rows = store.matcher_leaves(project_id=project_id, matrix_id=matrix_id)
     if not rows:
         raise FigureError("matrix is not recorded")
     return sorted(rows, key=lambda row: row["leaf_id"])
 
 
 def det_overlay(store: Any, project_id: str, matrix_id: str, *, policy: str = "EXCLUDE_FAILED_TRIALS", kind: str = "det_overlay") -> FigureSpec:
-    rows = _leaf_rows(store, matrix_id)
+    rows = _leaf_rows(store, project_id, matrix_id)
     series, sources, thresholds = [], [], []
     for row in rows:
         metrics = json.loads(row["metrics_json"])
@@ -107,7 +121,7 @@ def det_overlay(store: Any, project_id: str, matrix_id: str, *, policy: str = "E
 
 def score_distributions(store: Any, project_id: str, run_id: str, *, bins: int = 60) -> FigureSpec:
     row = store.matcher_leaf(run_id)
-    if row is None:
+    if row is None or row["project_id"] != project_id:
         raise FigureError("matcher run is not recorded")
     table = pq.read_table(row["comparisons_parquet"], columns=["label", "score"]).to_pylist()
     mated = np.array([r["score"] for r in table if r["label"] == "MATED" and r["score"] is not None], dtype=np.float64)
@@ -126,9 +140,9 @@ def score_distributions(store: Any, project_id: str, run_id: str, *, bins: int =
                       sources=[{"run_id": run_id, "leaf_id": row["leaf_id"], "matcher_id": row["matcher_id"], "condition_id": row["condition_id"], "comparisons_sha256": row["comparisons_sha256"]}], plot="bar")
 
 
-def _utility_document(store: Any, analysis_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def _utility_document(store: Any, project_id: str, analysis_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     row = store.utility_analysis(analysis_id)
-    if row is None:
+    if row is None or row["project_id"] != project_id:
         raise FigureError("utility analysis is not recorded")
     document = json.loads((Path(row["directory"]) / "utility.json").read_text(encoding="utf-8"))
     return row, document
@@ -137,7 +151,7 @@ def _utility_document(store: Any, analysis_id: str) -> tuple[dict[str, Any], dic
 def erc_overlay(store: Any, project_id: str, analysis_ids: list[str], *, curve: str = "FNMR") -> FigureSpec:
     series, sources, thresholds, definitions = [], [], [], []
     for analysis_id in analysis_ids:
-        row, document = _utility_document(store, analysis_id)
+        row, document = _utility_document(store, project_id, analysis_id)
         points = document["utility"]["erc"]["curves"][curve]["points"]
         xs = [p["rejected_fraction"] for p in points if p["error_rate"] is not None]
         ys = [p["error_rate"] for p in points if p["error_rate"] is not None]
@@ -152,7 +166,7 @@ def erc_overlay(store: Any, project_id: str, analysis_ids: list[str], *, curve: 
 
 
 def risk_coverage(store: Any, project_id: str, analysis_id: str, *, curve: str = "FNMR") -> FigureSpec:
-    row, document = _utility_document(store, analysis_id)
+    row, document = _utility_document(store, project_id, analysis_id)
     points = document["utility"]["risk_coverage"]["curves"][curve]["points"]
     xs = [p["coverage"] for p in points if p["risk"] is not None]
     ys = [p["risk"] for p in points if p["risk"] is not None]
@@ -164,7 +178,7 @@ def risk_coverage(store: Any, project_id: str, analysis_id: str, *, curve: str =
 
 
 def quality_conditioned_fnmr(store: Any, project_id: str, analysis_id: str) -> FigureSpec:
-    row, document = _utility_document(store, analysis_id)
+    row, document = _utility_document(store, project_id, analysis_id)
     bins = document["utility"]["quality_conditioned"]["FNMR"]["bins"]
     xs = [(b["quality_low"] + b["quality_high"]) / 2 for b in bins]
     ys = [b["rate"] if b["rate"] is not None else 0.0 for b in bins]
@@ -178,7 +192,7 @@ def quality_conditioned_fnmr(store: Any, project_id: str, analysis_id: str) -> F
 
 def quality_histogram(store: Any, project_id: str, job_id: str, *, measure: str = "UnifiedQualityScore", bins: int = 20) -> FigureSpec:
     job = store.job(job_id)
-    if job is None or not job.get("parquet_path"):
+    if job is None or job["project_id"] != project_id or not job.get("parquet_path"):
         raise FigureError("quality job is not recorded")
     table = pq.read_table(job["parquet_path"], columns=["outcome", f"{measure}.scalar", f"{measure}.failed"]).to_pylist()
     values = np.array([r[f"{measure}.scalar"] for r in table if r["outcome"] == "MEASURED" and not r[f"{measure}.failed"] and r[f"{measure}.scalar"] is not None], dtype=np.float64)
@@ -192,7 +206,7 @@ def quality_histogram(store: Any, project_id: str, job_id: str, *, measure: str 
 
 def error_overlap(store: Any, project_id: str, analysis_id: str) -> FigureSpec:
     row = store.cross_matcher_analysis(analysis_id)
-    if row is None:
+    if row is None or row["project_id"] != project_id:
         raise FigureError("cross-matcher analysis is not recorded")
     document = json.loads((Path(row["directory"]) / "crossmatcher.json").read_text(encoding="utf-8"))
     contrasts = document["contrasts"]
@@ -207,7 +221,7 @@ def error_overlap(store: Any, project_id: str, analysis_id: str) -> FigureSpec:
 
 
 def operating_points(store: Any, project_id: str, matrix_id: str, *, policy: str = "EXCLUDE_FAILED_TRIALS") -> FigureSpec:
-    rows = _leaf_rows(store, matrix_id)
+    rows = _leaf_rows(store, project_id, matrix_id)
     series, sources, thresholds = [], [], []
     for row in rows:
         block = json.loads(row["metrics_json"])["by_policy"][policy]
@@ -285,44 +299,171 @@ def _draw(spec: FigureSpec, ax: Any) -> None:
     ax.legend(fontsize=7, loc="best")
 
 
+def _figure_request_sha256(spec: FigureSpec) -> str:
+    request = {
+        "version": FIGURE_VERSION,
+        "figure_id": spec.figure_id,
+        "project_id": spec.project_id,
+        "kind": spec.kind,
+        "parameters": spec.parameters,
+        "sources": spec.sources,
+    }
+    encoded = json.dumps(
+        request,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def recover_prepared_figure(
+    directory: Path,
+    *,
+    figure_id: str,
+    project_id: str,
+    request_sha256: str,
+) -> dict[str, Any]:
+    """Validate and recover one fully promoted figure publication."""
+
+    try:
+        receipt = load_prepared_output(
+            directory,
+            operation_kind="FIGURE",
+            result_id=figure_id,
+            project_id=project_id,
+            request_sha256=request_sha256,
+            artifact_names=FIGURE_ARTIFACT_NAMES,
+        )
+        record = receipt["record"]
+        expected_keys = {
+            "figure_id",
+            "version",
+            "kind",
+            "title",
+            "project_id",
+            "created_at",
+            "parameters",
+            "sources",
+            "source_run_ids",
+            "metric_definitions",
+            "thresholds",
+            "notes",
+            "axes",
+            "series",
+            "generator",
+            "files",
+            "directory",
+            "provenance_sha256",
+        }
+        if (
+            set(record) != expected_keys
+            or record["figure_id"] != figure_id
+            or record["project_id"] != project_id
+            or record["version"] != FIGURE_VERSION
+            or record["directory"] != str(directory)
+            or set(record["files"]) != {"png", "svg", "pdf", "csv"}
+        ):
+            raise FigureError("prepared figure record contract differs")
+        for name, item in record["files"].items():
+            if set(item) != {"path", "sha256", "size_bytes"}:
+                raise FigureError("prepared figure artifact record differs")
+            path = directory / f"figure.{name}"
+            if item["path"] != str(path) or item["sha256"] != sha256_file(path):
+                raise FigureError("prepared figure artifact identity differs")
+        provenance_path = directory / "figure.provenance.json"
+        provenance_text = provenance_path.read_text(encoding="utf-8")
+        provenance = json.loads(provenance_text)
+        if (
+            provenance != {
+                key: value
+                for key, value in record.items()
+                if key != "provenance_sha256"
+            }
+            or hashlib.sha256(provenance_text.encode("utf-8")).hexdigest()
+            != record["provenance_sha256"]
+        ):
+            raise FigureError("prepared figure provenance differs")
+        return record
+    except (PreparedOutputError, OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        if isinstance(error, FigureError):
+            raise
+        raise FigureError("prepared figure failed integrity verification") from error
+
+
 def render(spec: FigureSpec, root: Path) -> dict[str, Any]:
     """Render PNG/SVG/PDF + CSV + provenance sidecar into root/<figure_id>/; returns the figure record."""
 
     figure_id = spec.figure_id
     directory = root / figure_id.replace(":", "_")
+    request_sha256 = _figure_request_sha256(spec)
     if directory.exists():
-        provenance_path = directory / "figure.provenance.json"
-        if provenance_path.exists():
-            return json.loads(provenance_path.read_text(encoding="utf-8"))
-    directory.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(6.4, 4.2), dpi=150)
-    _draw(spec, ax)
-    fig.tight_layout()
-    files = {}
-    for extension in ("png", "svg", "pdf"):
-        path = directory / f"figure.{extension}"
-        fig.savefig(path, format=extension, metadata={"Title": spec.title, "Creator": "QualSight"} if extension != "png" else {"Title": spec.title, "Software": "QualSight"})
-        files[extension] = path
-    plt.close(fig)
-    csv_path = directory / "figure.csv"
-    with csv_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(["series", "source_run_id", "x", "y"])
-        for series in spec.series:
-            for x, y in zip(series.x, series.y):
-                writer.writerow([series.label, series.source_run_id, repr(x), repr(y)])
-    files["csv"] = csv_path
-    record = {
-        "figure_id": figure_id, "version": FIGURE_VERSION, "kind": spec.kind, "title": spec.title, "project_id": spec.project_id, "created_at": _now().isoformat(),
-        "parameters": spec.parameters, "sources": spec.sources, "source_run_ids": sorted({s["run_id"] for s in spec.sources if s.get("run_id")}),
-        "metric_definitions": spec.metric_definitions, "thresholds": spec.thresholds, "notes": spec.notes,
-        "axes": {"x": spec.x_label, "y": spec.y_label, "x_scale": spec.x_scale, "y_scale": spec.y_scale, "plot": spec.plot},
-        "series": [{"label": s.label, "source_run_id": s.source_run_id, "points": len(s.x), "extra": s.extra} for s in spec.series],
-        "generator": {"matplotlib": matplotlib.__version__, "backend": "Agg"},
-        "files": {name: {"path": str(path), "sha256": sha256_file(path), "size_bytes": path.stat().st_size} for name, path in files.items()},
-        "directory": str(directory),
-    }
-    provenance_path = directory / "figure.provenance.json"
-    provenance_path.write_text(json.dumps(record, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
-    record["provenance_sha256"] = hashlib.sha256(provenance_path.read_bytes()).hexdigest()
-    return record
+        return recover_prepared_figure(
+            directory,
+            figure_id=figure_id,
+            project_id=spec.project_id,
+            request_sha256=request_sha256,
+        )
+    stage = create_staging_directory(
+        directory,
+        operation_kind="FIGURE",
+        result_id=figure_id,
+        project_id=spec.project_id,
+        request_sha256=request_sha256,
+    )
+    try:
+        fig, ax = plt.subplots(figsize=(6.4, 4.2), dpi=150)
+        try:
+            _draw(spec, ax)
+            fig.tight_layout()
+            files = {}
+            for extension in ("png", "svg", "pdf"):
+                stage_path = stage / f"figure.{extension}"
+                fig.savefig(stage_path, format=extension, metadata={"Title": spec.title, "Creator": "QualSight"} if extension != "png" else {"Title": spec.title, "Software": "QualSight"})
+                files[extension] = stage_path
+        finally:
+            plt.close(fig)
+        csv_path = stage / "figure.csv"
+        with csv_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["series", "source_run_id", "x", "y"])
+            for series in spec.series:
+                for x, y in zip(series.x, series.y):
+                    writer.writerow([series.label, series.source_run_id, repr(x), repr(y)])
+        files["csv"] = csv_path
+        record = {
+            "figure_id": figure_id, "version": FIGURE_VERSION, "kind": spec.kind, "title": spec.title, "project_id": spec.project_id, "created_at": _now().isoformat(),
+            "parameters": spec.parameters, "sources": spec.sources, "source_run_ids": sorted({s["run_id"] for s in spec.sources if s.get("run_id")}),
+            "metric_definitions": spec.metric_definitions, "thresholds": spec.thresholds, "notes": spec.notes,
+            "axes": {"x": spec.x_label, "y": spec.y_label, "x_scale": spec.x_scale, "y_scale": spec.y_scale, "plot": spec.plot},
+            "series": [{"label": s.label, "source_run_id": s.source_run_id, "points": len(s.x), "extra": s.extra} for s in spec.series],
+            "generator": {"matplotlib": matplotlib.__version__, "backend": "Agg"},
+            "files": {name: {"path": str(directory / path.name), "sha256": sha256_file(path), "size_bytes": path.stat().st_size} for name, path in files.items()},
+            "directory": str(directory),
+        }
+        provenance_path = stage / "figure.provenance.json"
+        provenance_path.write_text(json.dumps(record, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+        record["provenance_sha256"] = hashlib.sha256(provenance_path.read_bytes()).hexdigest()
+        prepare_and_publish(
+            stage,
+            directory,
+            operation_kind="FIGURE",
+            result_id=figure_id,
+            project_id=spec.project_id,
+            request_sha256=request_sha256,
+            artifact_names=FIGURE_ARTIFACT_NAMES,
+            record=record,
+        )
+        return record
+    except FileExistsError:
+        return recover_prepared_figure(
+            directory,
+            figure_id=figure_id,
+            project_id=spec.project_id,
+            request_sha256=request_sha256,
+        )
+    except PreparedOutputError as error:
+        raise FigureError(str(error)) from error
+    finally:
+        discard_staging_directory(stage)

@@ -15,10 +15,15 @@ import tempfile
 import unittest
 
 from qualsight.addons import dataset_addons
+from qualsight.api.settings import Settings
 from qualsight.execution.registry_binding import load_resource_registry
 from qualsight.matchers.lifecycle import MatcherRuntimeManager
 from qualsight.matchers.runtime import MatcherId
 from qualsight.matchers.upstream import UpstreamSources
+from qualsight.security.network_guard import (
+    NetworkGuardViolation,
+    permit_explicit_setup_network,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -61,6 +66,67 @@ class IntegrityReadinessRealTests(unittest.TestCase):
             encoding="utf-8",
         )
         return derived_registry
+
+    def test_upstream_sources_can_prepare_only_from_the_verified_real_cache(self) -> None:
+        state = self.temp_dir / "offline-state"
+        upstream = UpstreamSources(
+            UPSTREAM_MANIFEST,
+            state,
+            cache_root=ROOT / "var" / "upstream",
+        )
+
+        acquired = upstream.acquire_cached()
+
+        self.assertEqual(set(acquired), set(upstream.sources))
+        for key, path in acquired.items():
+            self.assertEqual(path, upstream.verify(key))
+        unavailable = UpstreamSources(
+            UPSTREAM_MANIFEST,
+            self.temp_dir / "unavailable-state",
+            cache_root=self.temp_dir / "empty-cache",
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "verified local cache is unavailable"
+        ):
+            unavailable.acquire_cached(("adaface_net",))
+
+    def test_environment_selected_cache_prepares_real_sources_without_publisher_access(self) -> None:
+        variable = "QUALSIGHT_SOURCE_CACHE_ROOT"
+        previous = os.environ.get(variable)
+        verified_cache = (ROOT / "var" / "upstream").resolve(strict=True)
+        os.environ[variable] = str(verified_cache)
+        try:
+            settings = Settings.from_environment(repository_root=ROOT)
+            self.assertEqual(settings.upstream_cache_root, verified_cache)
+            upstream = UpstreamSources(
+                UPSTREAM_MANIFEST,
+                self.temp_dir / "environment-cache-state",
+                cache_root=settings.upstream_cache_root,
+            )
+            acquired = upstream.acquire()
+            self.assertEqual(set(acquired), set(upstream.sources))
+            self.assertTrue(all(path == upstream.verify(key) for key, path in acquired.items()))
+        finally:
+            if previous is None:
+                os.environ.pop(variable, None)
+            else:
+                os.environ[variable] = previous
+
+    def test_offline_process_refuses_the_explicit_setup_exception(self) -> None:
+        variable = "QUALSIGHT_SETUP_NETWORK_DISABLED"
+        previous = os.environ.get(variable)
+        os.environ[variable] = "1"
+        try:
+            with self.assertRaisesRegex(
+                NetworkGuardViolation, "explicit setup network is disabled"
+            ):
+                with permit_explicit_setup_network():
+                    self.fail("disabled setup exception admitted execution")
+        finally:
+            if previous is None:
+                os.environ.pop(variable, None)
+            else:
+                os.environ[variable] = previous
 
     def test_checkpoint_status_rehashes_after_bytes_change_with_restored_mtime(self) -> None:
         registry = load_resource_registry(REGISTRY_PATH)

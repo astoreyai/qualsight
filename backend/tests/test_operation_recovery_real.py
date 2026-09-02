@@ -186,7 +186,7 @@ class OperationRecoveryRealTests(unittest.TestCase):
 
         database = self._downgrade_real_operation_rows_to_v4()
         preflight = database.with_name(
-            f"{database.name}.pre-migration-v4-to-v5.snapshot.sqlite3"
+            f"{database.name}.pre-migration-v4-to-v8.snapshot.sqlite3"
         )
         migrated = RunStore(database)
         try:
@@ -246,7 +246,7 @@ class OperationRecoveryRealTests(unittest.TestCase):
             connection.close()
 
         preflight = database.with_name(
-            f"{database.name}.pre-migration-v4-to-v5.snapshot.sqlite3"
+            f"{database.name}.pre-migration-v4-to-v8.snapshot.sqlite3"
         )
         with self.assertRaisesRegex(sqlite3.IntegrityError, "rollback gate"):
             RunStore(database)
@@ -304,7 +304,7 @@ class OperationRecoveryRealTests(unittest.TestCase):
             connection.close()
 
         canonical = database.with_name(
-            f"{database.name}.pre-migration-v4-to-v5.snapshot.sqlite3"
+            f"{database.name}.pre-migration-v4-to-v8.snapshot.sqlite3"
         )
         with self.assertRaisesRegex(sqlite3.IntegrityError, "retry gate"):
             RunStore(database)
@@ -325,11 +325,87 @@ class OperationRecoveryRealTests(unittest.TestCase):
         self.assertEqual(canonical.read_bytes(), canonical_bytes)
         retry_snapshots = sorted(
             database.parent.glob(
-                f"{database.name}.pre-migration-v4-to-v5.source-*.snapshot.sqlite3"
+                f"{database.name}.pre-migration-v4-to-v8.source-*.snapshot.sqlite3"
             )
         )
         self.assertEqual(len(retry_snapshots), 1)
         self.assertNotEqual(retry_snapshots[0].read_bytes(), canonical_bytes)
+
+    def test_incomplete_target_ledger_is_snapshotted_and_restored_before_schema_repair(self) -> None:
+        database = self.data_dir / "qualsight.sqlite3"
+        connection = sqlite3.connect(database)
+        try:
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 8)
+            self.assertEqual(
+                [row[0] for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")],
+                list(range(1, 9)),
+            )
+            connection.execute("DROP TABLE direct_pair_comparisons")
+            connection.execute("DELETE FROM schema_migrations WHERE version = 8")
+            connection.execute(
+                "CREATE TRIGGER refuse_v8_history BEFORE INSERT ON schema_migrations "
+                "WHEN NEW.version = 8 BEGIN SELECT RAISE(ABORT, 'v8 ledger rollback gate'); END"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        preflight = database.with_name(
+            f"{database.name}.pre-migration-v8-to-v8.snapshot.sqlite3"
+        )
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "v8 ledger rollback gate"):
+            RunStore(database)
+        self.assertTrue(preflight.is_file())
+        self.assertEqual(database.read_bytes(), preflight.read_bytes())
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+        try:
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 8)
+            self.assertEqual(
+                [row[0] for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")],
+                list(range(1, 8)),
+            )
+            self.assertIsNone(
+                connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'direct_pair_comparisons'"
+                ).fetchone()
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT project_id FROM projects WHERE project_id = ?", (self.project_id,)
+                ).fetchone(),
+                (self.project_id,),
+            )
+            self.assertEqual(connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        finally:
+            connection.close()
+
+        connection = sqlite3.connect(database)
+        try:
+            connection.execute("DROP TRIGGER refuse_v8_history")
+            connection.commit()
+        finally:
+            connection.close()
+        repaired = RunStore(database)
+        try:
+            self.assertIsNotNone(repaired.project(self.project_id))
+            self.assertIsNotNone(repaired.dataset(self.dataset_id))
+        finally:
+            repaired.close()
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+        try:
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 8)
+            self.assertEqual(
+                [row[0] for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")],
+                list(range(1, 9)),
+            )
+            self.assertIsNotNone(
+                connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'direct_pair_comparisons'"
+                ).fetchone()
+            )
+            self.assertEqual(connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        finally:
+            connection.close()
 
     def test_fastapi_advertises_the_exact_beta_package_version(self) -> None:
         app = create_app(self.settings)
@@ -363,7 +439,7 @@ class OperationRecoveryRealTests(unittest.TestCase):
             store.close()
 
         with TestClient(create_app(self.settings), base_url="http://127.0.0.1") as restarted:
-            status = restarted.get(f"/api/operations/{operation_id}")
+            status = restarted.get(f"/api/projects/{self.project_id}/operations/{operation_id}")
             self.assertEqual(status.status_code, 200, status.text)
             self.assertEqual(status.json()["state"], "INTERRUPTED")
             project_operations = restarted.get(f"/api/projects/{self.project_id}/operations")
@@ -438,10 +514,14 @@ class OperationRecoveryRealTests(unittest.TestCase):
             projected = [row for row in response.json() if row["job_id"] == result_id]
             self.assertEqual(len(projected), 1)
             self.assertEqual(projected[0]["state"], "INTERRUPTED")
-            stable_status = client.get(f"/api/jobs/{result_id}")
+            self.assertFalse(projected[0]["quality_result_available"])
+            stable_status = client.get(
+                f"/api/projects/{self.project_id}/jobs/{result_id}"
+            )
             self.assertEqual(stable_status.status_code, 200, stable_status.text)
             self.assertEqual(stable_status.json()["job_id"], result_id)
             self.assertEqual(stable_status.json()["state"], "INTERRUPTED")
+            self.assertFalse(stable_status.json()["quality_result_available"])
 
     def test_api_explicitly_retries_and_executes_an_interrupted_real_quality_batch(self) -> None:
         fixture = json.loads(
@@ -479,11 +559,11 @@ class OperationRecoveryRealTests(unittest.TestCase):
             store.close()
 
         with TestClient(create_app(self.settings), base_url="http://127.0.0.1") as client:
-            interrupted = client.get(f"/api/operations/{operation_id}")
+            interrupted = client.get(f"/api/projects/{self.project_id}/operations/{operation_id}")
             self.assertEqual(interrupted.status_code, 200, interrupted.text)
             self.assertEqual(interrupted.json()["state"], "INTERRUPTED")
 
-            response = client.post(f"/api/operations/{operation_id}/retry")
+            response = client.post(f"/api/projects/{self.project_id}/operations/{operation_id}/retry")
             self.assertEqual(response.status_code, 202, response.text)
             retry = response.json()["operation"]
             self.assertEqual(retry["request_id"], operation_id)
@@ -495,7 +575,7 @@ class OperationRecoveryRealTests(unittest.TestCase):
 
             deadline = time.monotonic() + 300
             while time.monotonic() < deadline:
-                status = client.get(f"/api/operations/{retry['operation_id']}")
+                status = client.get(f"/api/projects/{self.project_id}/operations/{retry['operation_id']}")
                 self.assertEqual(status.status_code, 200, status.text)
                 if status.json()["state"] in {"COMPLETED", "FAILED", "CANCELLED"}:
                     break
@@ -504,7 +584,7 @@ class OperationRecoveryRealTests(unittest.TestCase):
                 self.fail(f"retried real quality operation did not terminate: {status.text}")
             self.assertEqual(status.json()["state"], "COMPLETED", status.text)
             self.assertEqual(
-                client.get(f"/api/operations/{operation_id}").json()["state"],
+                client.get(f"/api/projects/{self.project_id}/operations/{operation_id}").json()["state"],
                 "INTERRUPTED",
             )
             jobs = client.get(f"/api/projects/{self.project_id}/jobs")
@@ -513,9 +593,110 @@ class OperationRecoveryRealTests(unittest.TestCase):
             self.assertEqual(projected_ids.count(response.json()["result_id"]), 1)
             self.assertNotIn(retry["operation_id"], projected_ids)
             self.assertEqual(
-                client.get(f"/api/jobs/{retry['operation_id']}").status_code,
+                client.get(
+                    f"/api/projects/{self.project_id}/jobs/{retry['operation_id']}"
+                ).status_code,
                 404,
             )
+
+    def test_api_retries_an_interrupted_real_matcher_matrix_request(self) -> None:
+        with TestClient(create_app(self.settings), base_url="http://127.0.0.1") as client:
+            frozen = client.post(
+                f"/api/projects/{self.project_id}/datasets/{self.dataset_id}/protocols/freeze-lfw-view2"
+            )
+            self.assertEqual(frozen.status_code, 201, frozen.text)
+            protocol_id = frozen.json()["protocol_id"]
+            pulled = client.post(
+                "/api/matcher-assets/adaface-ir101-local-candidate/pull-sources"
+            )
+            self.assertEqual(pulled.status_code, 200, pulled.text)
+
+        fixture = json.loads(
+            (ROOT / "resources" / "manifests" / "lfw-subset-fixture-v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        request = {
+            "dataset_id": self.dataset_id,
+            "protocol_id": protocol_id,
+            "fixture_pairs_only": True,
+            "leaves": "QS-C22.AS",
+            "leaf_ids": ["QS-C22.AS"],
+            "pair_count": len(fixture["pairs"]),
+            "sample_count": len(fixture["images"]),
+            "expected_leaf_count": 1,
+            "selection_rule": (
+                "the registered subset-fixture pairs of the frozen protocol "
+                "(leaf selection ['QS-C22.AS']: the matcher x condition cross "
+                "product of the named leaves)"
+            ),
+        }
+        stored = RunStore(self.data_dir / "qualsight.sqlite3")
+        try:
+            protocol = stored.protocol(protocol_id)
+            assert protocol is not None
+            operation_id = content_id(
+                "matrix",
+                self.project_id,
+                protocol_id,
+                protocol.pairs_sha256,
+                json.dumps(["QS-C22.AS"], separators=(",", ":")),
+                request["selection_rule"],
+            )
+        finally:
+            stored.close()
+        store = RunStore(self.data_dir / "qualsight.sqlite3")
+        try:
+            operation, created = store.admit_operation(
+                operation_id=operation_id,
+                operation_kind="MATCHER_MATRIX",
+                project_id=self.project_id,
+                request=request,
+                output_path=self.data_dir / "matrix" / operation_id.replace(":", "_"),
+            )
+            self.assertTrue(created)
+            self.assertEqual(operation["state"], "QUEUED")
+        finally:
+            store.close()
+
+        with TestClient(create_app(self.settings), base_url="http://127.0.0.1") as client:
+            interrupted = client.get(f"/api/projects/{self.project_id}/operations/{operation_id}")
+            self.assertEqual(interrupted.status_code, 200, interrupted.text)
+            self.assertEqual(interrupted.json()["state"], "INTERRUPTED")
+
+            retried = client.post(
+                f"/api/projects/{self.project_id}/operations/{operation_id}/retry"
+            )
+            self.assertEqual(retried.status_code, 202, retried.text)
+            deadline = time.monotonic() + 300
+            status: dict = {}
+            while time.monotonic() < deadline:
+                response = client.get(
+                    f"/api/projects/{self.project_id}/matrices/{operation_id}"
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+                status = response.json()
+                if status["progress"]["phase"] in {"completed", "failed"}:
+                    break
+                time.sleep(0.05)
+            self.assertEqual(status.get("progress", {}).get("phase"), "completed", status)
+            self.assertEqual(
+                [leaf["leaf_id"] for leaf in status["leaves"]],
+                ["QS-C22.AS"],
+            )
+            attempts = [
+                item
+                for item in client.get(
+                    f"/api/projects/{self.project_id}/operations"
+                ).json()
+                if item["request_id"] == operation_id
+            ]
+            attempts.sort(key=lambda item: int(item["attempt"]))
+            self.assertEqual(len(attempts), 2)
+            self.assertEqual(attempts[0]["operation_id"], operation_id)
+            self.assertEqual(attempts[0]["state"], "INTERRUPTED")
+            self.assertEqual(attempts[1]["state"], "COMPLETED")
+            self.assertEqual(attempts[1]["supersedes_operation_id"], operation_id)
 
     def test_audit_reads_verify_evidence_and_project_chain_linkage(self) -> None:
         store = RunStore(self.data_dir / "qualsight.sqlite3")
@@ -576,7 +757,7 @@ class OperationRecoveryRealTests(unittest.TestCase):
             )
             self.assertEqual(started.status_code, 202, started.text)
             operation_id = started.json()["job_id"]
-            admitted = client.get(f"/api/operations/{operation_id}")
+            admitted = client.get(f"/api/projects/{self.project_id}/operations/{operation_id}")
             self.assertEqual(admitted.status_code, 200, admitted.text)
             self.assertIn(admitted.json()["state"], {"QUEUED", "RUNNING", "COMPLETED"})
             self.assertIsNotNone(admitted.json()["accepted_at"])
@@ -584,7 +765,9 @@ class OperationRecoveryRealTests(unittest.TestCase):
 
             deadline = time.monotonic() + 300
             while time.monotonic() < deadline:
-                status = client.get(f"/api/jobs/{operation_id}")
+                status = client.get(
+                    f"/api/projects/{self.project_id}/jobs/{operation_id}"
+                )
                 self.assertEqual(status.status_code, 200, status.text)
                 if status.json()["state"] in {"COMPLETED", "FAILED", "CANCELLED"}:
                     break
@@ -594,7 +777,7 @@ class OperationRecoveryRealTests(unittest.TestCase):
             self.assertEqual(status.json()["state"], "COMPLETED", status.text)
             operation_deadline = time.monotonic() + 30
             while time.monotonic() < operation_deadline:
-                terminal_response = client.get(f"/api/operations/{operation_id}")
+                terminal_response = client.get(f"/api/projects/{self.project_id}/operations/{operation_id}")
                 self.assertEqual(terminal_response.status_code, 200, terminal_response.text)
                 terminal = terminal_response.json()
                 if terminal["state"] in {"COMPLETED", "FAILED", "CANCELLED"}:
@@ -606,10 +789,10 @@ class OperationRecoveryRealTests(unittest.TestCase):
             self.assertIsNotNone(terminal["started_at"])
             self.assertIsNotNone(terminal["ended_at"])
             self.assertIsNone(terminal["error"])
-            self.assertTrue(Path(terminal["output_path"]).is_dir())
+            self.assertNotIn("output_path", terminal)
 
         with TestClient(create_app(self.settings), base_url="http://127.0.0.1") as restarted:
-            recovered = restarted.get(f"/api/operations/{operation_id}")
+            recovered = restarted.get(f"/api/projects/{self.project_id}/operations/{operation_id}")
             self.assertEqual(recovered.status_code, 200, recovered.text)
             self.assertEqual(recovered.json()["state"], "COMPLETED")
 
@@ -627,18 +810,25 @@ class OperationRecoveryRealTests(unittest.TestCase):
             operation_id = started.json()["job_id"]
             deadline = time.monotonic() + 300
             while time.monotonic() < deadline:
-                status = client.get(f"/api/jobs/{operation_id}")
+                status = client.get(
+                    f"/api/projects/{self.project_id}/jobs/{operation_id}"
+                )
                 if status.json()["state"] in {"COMPLETED", "FAILED", "CANCELLED"}:
                     break
                 time.sleep(0.25)
             else:
                 self.fail(f"real quality operation did not reach a terminal state: {status.text}")
             self.assertEqual(status.json()["state"], "COMPLETED", status.text)
-            output_path = Path(client.get(f"/api/operations/{operation_id}").json()["output_path"])
-            self.assertTrue(output_path.is_dir())
+            public_operation = client.get(f"/api/projects/{self.project_id}/operations/{operation_id}")
+            self.assertEqual(public_operation.status_code, 200, public_operation.text)
+            self.assertNotIn("output_path", public_operation.json())
 
         store = RunStore(self.data_dir / "qualsight.sqlite3")
         try:
+            operation = store.operation(operation_id)
+            self.assertIsNotNone(operation)
+            output_path = Path(operation["output_path"])
+            self.assertTrue(output_path.is_dir())
             targets = purge_targets(store, self.data_dir, self.project_id)
             self.assertIn(str(output_path), targets["directories"])
             purge_id = content_id("purge", self.project_id, "restart-recovery-gate-v1")
@@ -660,7 +850,7 @@ class OperationRecoveryRealTests(unittest.TestCase):
             self.assertEqual(purges.json()[0]["purge_id"], purge_id)
             self.assertTrue(purges.json()[0]["verified"])
             self.assertFalse(output_path.exists())
-            self.assertEqual(restarted.get(f"/api/operations/{operation_id}").status_code, 404)
+            self.assertEqual(restarted.get(f"/api/projects/{self.project_id}/operations/{operation_id}").status_code, 404)
             project = restarted.get(f"/api/projects/{self.project_id}")
             self.assertEqual(project.status_code, 200, project.text)
 

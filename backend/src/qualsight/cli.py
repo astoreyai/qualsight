@@ -12,9 +12,11 @@ import argparse
 import json
 from pathlib import Path
 import sys
+from typing import Any
 
 from .api.settings import Settings
 from .api.store import RunStore
+from .domain.primitives import CanonicalJson
 from .engines.ofiq.adapter import OFIQQualityEngine
 from .reproduction import export_run_manifest, reproduce_run
 from .security.local_storage import activate_private_umask, secure_data_tree
@@ -36,6 +38,86 @@ def _selected_axis(values: list[str] | None, enum_type):
 
     selected = (enum_type(value) for value in values) if values else iter(enum_type)
     return tuple(dict.fromkeys(selected))
+
+
+def _run_quality_batch_operation(
+    store: RunStore,
+    job: Any,
+    request: dict[str, Any],
+) -> Any:
+    """Execute one CLI quality batch behind the durable operation ledger."""
+
+    operation, created = store.admit_operation(
+        operation_id=job.job_id,
+        operation_kind="QUALITY_BATCH",
+        project_id=job.project.project_id,
+        request=request,
+        output_path=job.job_dir,
+        result_id=job.job_id,
+    )
+    if not created:
+        raise RuntimeError("CLI quality operation identity is already recorded")
+    job.bind_operation_request_sha256(CanonicalJson.from_value(request).sha256)
+    try:
+        store.start_operation(operation["operation_id"])
+        progress = job.run()
+    except BaseException:
+        current = store.operation(operation["operation_id"])
+        if current is not None and current["state"] in {"QUEUED", "RUNNING"}:
+            store.finish_operation(
+                operation["operation_id"],
+                state="FAILED",
+                error=job.error or "CLI quality batch execution failed",
+            )
+        raise
+    else:
+        store.finish_operation(operation["operation_id"], state="COMPLETED")
+        return progress
+    finally:
+        store.finish_job(
+            job.job_id,
+            job.ended_at.isoformat() if job.ended_at else "",
+            job.state,
+        )
+
+
+def _run_external_score_operation(store: RunStore, importer: Any) -> Any:
+    """Import registered scores behind the durable operation ledger."""
+
+    request = importer.operation_request
+    operation, created = store.admit_operation(
+        operation_id=importer.matrix_id,
+        operation_kind="EXTERNAL_SCORE_IMPORT",
+        project_id=importer.project.project_id,
+        request=request,
+        output_path=importer.job_dir,
+        result_id=importer.matrix_id,
+    )
+    if not created:
+        raise RuntimeError("CLI external-score operation identity is already recorded")
+    request_sha256 = CanonicalJson.from_value(request).sha256
+    try:
+        store.start_operation(operation["operation_id"])
+        result = importer.run(
+            request_sha256=request_sha256,
+            operation_id=operation["operation_id"],
+        )
+    except BaseException as error:
+        current = store.operation(operation["operation_id"])
+        if current is not None and current["state"] in {"QUEUED", "RUNNING"}:
+            store.finish_operation(
+                operation["operation_id"],
+                state="FAILED",
+                error=f"{type(error).__name__}: {error}",
+            )
+        raise
+    else:
+        completed = store.operation(operation["operation_id"])
+        if completed is None or completed["state"] != "COMPLETED":
+            raise RuntimeError(
+                "CLI external-score result did not complete its durable operation"
+            )
+        return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -196,6 +278,18 @@ def main(argv: list[str] | None = None) -> int:
         lease.close()
         raise
     try:
+        store.reconcile_prepared_owner_publications(settings.data_dir)
+        store.reconcile_interrupted_operations()
+        from .reporting.recovery import (
+            reconcile_prepared_reporting_publications,
+            reporting_publication_audit_event,
+        )
+
+        reconcile_prepared_reporting_publications(
+            store,
+            data_dir=settings.data_dir,
+            actor_id=settings.actor,
+        )
         if args.command == "snapshot-database":
             print(json.dumps(store.snapshot_database(args.output), sort_keys=True))
             return 0
@@ -300,8 +394,18 @@ def main(argv: list[str] | None = None) -> int:
                 execution=args.execution,
             )
             print(json.dumps({"job_id": job.job_id, "total": len(job.samples), "chunks_requested": job.chunks_requested, "job_dir": str(job.job_dir)}, indent=2), file=sys.stderr, flush=True)
-            progress = job.run()
-            store.finish_job(job.job_id, job.ended_at.isoformat() if job.ended_at else "", job.state)
+            operation_request = {
+                "interface": "CLI",
+                "command": "batch",
+                "dataset_id": args.dataset_id,
+                "selection": args.selection,
+                "chunks": args.chunks,
+                "purpose_scope": args.scope,
+                "execution": args.execution,
+                "sample_count": len(job.samples),
+                "selection_rule": rule,
+            }
+            progress = _run_quality_batch_operation(store, job, operation_request)
             print(json.dumps({"job_id": progress.job_id, "state": progress.state, "assessed": progress.assessed, "failed": progress.failed, "integrity_failures": progress.integrity_failures, "not_assessed": progress.not_assessed, "run_id": progress.run_id, "resource_use": progress.resource_use, "parquet_path": str(job.parquet_path)}, indent=2))
             return 0 if progress.state == "COMPLETED" else 5
         if args.command == "freeze-lfw-protocol":
@@ -340,7 +444,7 @@ def main(argv: list[str] | None = None) -> int:
             selected_conditions = _selected_axis(args.condition_ids, ConditionId)
             selected_leaves = [f"{matcher.value} × {condition.value}" for matcher in selected_matchers for condition in selected_conditions]
             rule += f" (selected matcher x preprocessing product: {selected_leaves})"
-            upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir)
+            upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir, cache_root=settings.upstream_cache_root)
             try:
                 for matcher_id in selected_matchers:
                     for key in UPSTREAM_KEYS[matcher_id]:
@@ -351,6 +455,7 @@ def main(argv: list[str] | None = None) -> int:
                 registry=engine.registry, registry_path=settings.registry_path, repository_root=settings.repository_root, upstream=upstream,
                 store=store, project=project, dataset=dataset, protocol=protocol, pairs=pairs, job_root=settings.data_dir / "matrix", selection_rule=rule,
                 matchers=selected_matchers, conditions=selected_conditions,
+                execution_timeout_seconds=settings.native_execution_timeout_seconds,
             )
             print(json.dumps({"matrix_id": job.matrix_id, "pairs": len(job.pairs), "samples": len(job.sample_ids), "job_dir": str(job.job_dir)}, indent=2), file=sys.stderr, flush=True)
             leaves = job.run()
@@ -417,8 +522,18 @@ def main(argv: list[str] | None = None) -> int:
                 purpose_scope=args.scope, job_root=settings.data_dir / "jobs", chunks=1,
                 selection_rule="the single operator-supplied owner image (decision 30, CLI)",
             )
-            progress = job.run()
-            store.finish_job(job.job_id, job.ended_at.isoformat() if job.ended_at else "", job.state)
+            operation_request = {
+                "interface": "CLI",
+                "command": "assess-owner",
+                "dataset_id": dataset.dataset_id,
+                "sample_id": sample.sample_id,
+                "source_sha256": admitted.sha256,
+                "purpose_scope": args.scope,
+                "execution": "host",
+                "sample_count": 1,
+                "selection_rule": job.selection_rule,
+            }
+            progress = _run_quality_batch_operation(store, job, operation_request)
             print(json.dumps({"run_id": progress.run_id, "state": progress.state, "source_kind": "OWNER_SUPPLIED_LOCAL_INPUT", "image_sha256": admitted.sha256, "stored_path": admitted.path, "dataset_id": dataset.dataset_id}, indent=2))
             return 0 if progress.state == "COMPLETED" else 5
         if args.command == "import-owner-directory":
@@ -434,7 +549,10 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"dataset_id": result.dataset.dataset_id, "samples": result.sample_count, "subjects": result.subject_count, "source_kind": "OWNER_SUPPLIED_LOCAL_INPUT", "statistics_sha256": result.statistics_sha256}, indent=2))
             return 0
         if args.command == "freeze-owner-pairs":
-            from .importers.owner_supplied import freeze_owner_pairs
+            from .importers.owner_supplied import (
+                OWNER_PAIR_MAX_OUTPUT_PAIRS,
+                freeze_owner_pairs,
+            )
             from .projects import ProjectService
 
             engine = _engine(settings)
@@ -443,7 +561,7 @@ def main(argv: list[str] | None = None) -> int:
             dataset = store.dataset(args.dataset_id)
             if dataset is None:
                 raise SystemExit("dataset is not recorded")
-            record = freeze_owner_pairs(store, project, dataset, data_dir=settings.data_dir, actor_id=service.actor, seed=args.seed, max_mated_pairs_per_subject=args.max_mated_per_subject, nonmated_multiple=args.nonmated_multiple)
+            record = freeze_owner_pairs(store, project, dataset, data_dir=settings.data_dir, actor_id=service.actor, seed=args.seed, max_pairs=OWNER_PAIR_MAX_OUTPUT_PAIRS, max_mated_pairs_per_subject=args.max_mated_per_subject, nonmated_multiple=args.nonmated_multiple)
             print(json.dumps({"protocol_id": record.protocol_id, "pairs": record.pair_count, "mated": record.mated_count, "nonmated": record.nonmated_count, "pairs_sha256": record.pairs_sha256}, indent=2))
             return 0
         if args.command == "identification":
@@ -461,13 +579,13 @@ def main(argv: list[str] | None = None) -> int:
                 raise SystemExit("dataset is not recorded")
             protocol = freeze_lfw_identification(store, project=project, dataset=dataset, selection=args.selection, rank_depth=args.rank_depth, repository_root=settings.repository_root, actor=service.actor)
             print(json.dumps({"protocol_id": protocol["protocol_id"], "gallery": protocol["gallery_count"], "mated_probes": protocol["mated_probe_count"], "nonmated_probes": protocol["nonmated_probe_count"]}, indent=2), file=sys.stderr, flush=True)
-            upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir)
+            upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir, cache_root=settings.upstream_cache_root)
             try:
                 for key in UPSTREAM_KEYS[MatcherId(args.matcher_id)]:
                     upstream.verify(key)
             except Exception as error:  # noqa: BLE001 - actionable dependency refusal at the CLI boundary
                 raise SystemExit(f"matcher architecture sources are not ready; run `qualsight setup` explicitly: {error}") from error
-            job = IdentificationSearchJob(store=store, registry=engine.registry, upstream=upstream, repository_root=settings.repository_root, project=project, protocol=protocol, entries=store.identification_entries(protocol["protocol_id"]), matcher_id=args.matcher_id, condition_id=args.condition_id, job_root=settings.data_dir / "identification", actor=service.actor, quality_job_id=args.quality_job_id)
+            job = IdentificationSearchJob(store=store, registry=engine.registry, upstream=upstream, repository_root=settings.repository_root, project=project, protocol=protocol, entries=store.identification_entries(protocol["protocol_id"]), matcher_id=args.matcher_id, condition_id=args.condition_id, job_root=settings.data_dir / "identification", actor=service.actor, execution_timeout_seconds=settings.native_execution_timeout_seconds, quality_job_id=args.quality_job_id)
             result = job.run()
             print(json.dumps({"search_id": result.search_id, "run_id": result.run.run_id, "protocol_id": protocol["protocol_id"], "summary": result.summary, "gallery_effects": result.metrics["gallery_effects"]["gallery_sizes"], "operating_points": result.metrics["open_set"]["EXCLUDE_FAILED_TRIALS"]["operating_points"], "rank_k": {k: v["rate"] for k, v in result.metrics["closed_set"]["EXCLUDE_FAILED_TRIALS"]["rank_k"].items()}}, indent=2))
             return 0
@@ -482,14 +600,14 @@ def main(argv: list[str] | None = None) -> int:
             if protocol is None:
                 raise SystemExit("protocol is not recorded")
             importer = ExternalScoreImporter(store=store, registry=engine.registry, repository_root=settings.repository_root, project=project, protocol=protocol, resource_id=args.resource_id, job_root=settings.data_dir / "external", actor=service.actor)
-            result = importer.run()
+            result = _run_external_score_operation(store, importer)
             policy = result.metrics["by_policy"]["EXCLUDE_FAILED_TRIALS"]
             print(json.dumps({"leaf": result.leaf_id, "run_id": result.run.run_id, "provenance_marker": "EXTERNALLY_COMPUTED", "scored": result.scored_count, "failed": result.failed_count, "eer": policy["eer"]["eer"], "fnmr_at_fmr_1e-3": next((p.get("fnmr") for p in policy["operating_points"] if p["target_fmr"] == 0.001), None), "mapping": result.mapping}, indent=2))
             return 0
         if args.command == "setup":
             from .matchers.upstream import UpstreamSources
 
-            upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir)
+            upstream = UpstreamSources(settings.repository_root / "resources" / "manifests" / "matcher-upstream-sources-v1.json", settings.data_dir, cache_root=settings.upstream_cache_root)
             with permit_explicit_setup_network():
                 acquired = upstream.acquire()
             summary = {"upstream_sources": {key: str(path) for key, path in acquired.items()}, "data_dir": str(settings.data_dir), "registry": str(settings.registry_path)}
@@ -503,7 +621,20 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "bundle-export":
             from .reporting.bundle import export_bundle
 
-            record = export_bundle(store, run_id=args.run_id, root=settings.data_dir / "bundles", repository_root=settings.repository_root)
+            record = export_bundle(
+                store,
+                run_id=args.run_id,
+                root=settings.data_dir / "bundles",
+                repository_root=settings.repository_root,
+                record_publication=False,
+            )
+            store.record_reporting_publication(
+                "EXPERIMENT_BUNDLE",
+                record,
+                reporting_publication_audit_event(
+                    "EXPERIMENT_BUNDLE", record, actor_id=settings.actor
+                ),
+            )
             print(json.dumps({k: v for k, v in record.items() if k != "manifest"}, indent=2))
             return 0
         if args.command == "reproduce-bundle":
@@ -513,7 +644,7 @@ def main(argv: list[str] | None = None) -> int:
             from .reporting.bundle import reproduce_bundle
 
             engine = _engine(settings)
-            result = reproduce_bundle(args.bundle, store=store, registry=engine.registry, repository_root=settings.repository_root, work_root=settings.data_dir / "reproductions", project_service=ProjectService(store, engine), engine=engine)
+            result = reproduce_bundle(args.bundle, store=store, registry=engine.registry, repository_root=settings.repository_root, work_root=settings.data_dir / "reproductions", project_service=ProjectService(store, engine), execution_timeout_seconds=settings.native_execution_timeout_seconds, engine=engine)
             print(json.dumps(asdict(result), indent=2, default=str))
             return 0 if result.state in {"EXACT", "WITHIN_TOLERANCE"} else 3
         if args.command == "figure":
@@ -521,7 +652,13 @@ def main(argv: list[str] | None = None) -> int:
 
             spec = figure_module.build(store, args.project_id, args.kind, json.loads(args.params))
             record = figure_module.render(spec, settings.data_dir / "figures")
-            store.record_figure(record)
+            store.record_reporting_publication(
+                "FIGURE",
+                record,
+                reporting_publication_audit_event(
+                    "FIGURE", record, actor_id=settings.actor
+                ),
+            )
             print(json.dumps({"figure_id": record["figure_id"], "files": record["files"], "source_run_ids": record["source_run_ids"]}, indent=2))
             return 0
         if args.command == "export-run":

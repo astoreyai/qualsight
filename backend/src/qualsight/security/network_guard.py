@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import ipaddress
+import os
 import socket
 import threading
 from typing import Any, Iterator
@@ -122,6 +123,8 @@ def guard_status() -> dict[str, Any]:
 def permit_explicit_setup_network() -> Iterator[None]:
     """Permit network only on the thread executing an explicit pinned-source pull."""
 
+    if os.environ.get("QUALSIGHT_SETUP_NETWORK_DISABLED") == "1":
+        raise NetworkGuardViolation("explicit setup network is disabled for this process")
     depth = getattr(_SETUP_SCOPE, "depth", 0)
     _SETUP_SCOPE.depth = depth + 1
     try:

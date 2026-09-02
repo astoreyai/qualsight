@@ -13,14 +13,16 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import csv
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import getpass
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import resource as host_resource
+import stat
 import threading
 import time
 from typing import Any
@@ -61,8 +63,12 @@ from ...provenance import (
     sha256_bytes,
     sha256_file,
 )
+from ...security.privacy import redact_private_paths
 from .adapter import OFIQEngineError, OFIQQualityEngine, _not_applicable, _to_domain, content_id
 from .output import ENGINE_FAILURE_SCALAR, VERSION_RE, INITIALIZATION_RE
+
+PREPARED_BATCH_FILENAME = ".qualsight-quality-batch.prepared.json"
+PREPARED_BATCH_SCHEMA_VERSION = "1.0.0"
 
 MEASURE_NAMES: tuple[str, ...] = (
     "UnifiedQualityScore",
@@ -140,6 +146,176 @@ class BatchResultRow:
     failure_reason: str | None
     assessment_ms: int | None
     measures: dict[str, tuple[float | None, int | None, bool]]
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedQualityBatch:
+    job: dict[str, Any]
+    experiment: Experiment
+    run: CompletedRun | None
+    artifacts: tuple[Artifact, ...]
+    results: tuple[BatchResultRow, ...]
+
+
+def _sync_directory(directory: Path) -> None:
+    descriptor = os.open(
+        directory,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+    )
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _regular_file_identity(path: Path, *, sync: bool) -> tuple[int, str]:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        observed = os.fstat(descriptor)
+        if not stat.S_ISREG(observed.st_mode):
+            raise BatchJobError("prepared quality-batch artifact is not a regular file")
+        if sync:
+            os.fsync(descriptor)
+        digest = hashlib.sha256()
+        while chunk := os.read(descriptor, 1024 * 1024):
+            digest.update(chunk)
+        return observed.st_size, digest.hexdigest()
+    finally:
+        os.close(descriptor)
+
+
+def _read_regular_text(path: Path) -> str:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise BatchJobError("prepared quality-batch receipt is not a regular file")
+        chunks: list[bytes] = []
+        while chunk := os.read(descriptor, 1024 * 1024):
+            chunks.append(chunk)
+        return b"".join(chunks).decode("utf-8")
+    finally:
+        os.close(descriptor)
+
+
+def recover_prepared_quality_batch(
+    directory: Path,
+    *,
+    job_id: str,
+    project_id: str,
+    request_sha256: str,
+) -> PreparedQualityBatch:
+    """Validate and reconstruct one completely written quality-batch receipt."""
+
+    try:
+        if directory.is_symlink() or not directory.is_dir():
+            raise BatchJobError("prepared quality-batch directory is unavailable")
+        receipt_path = directory / PREPARED_BATCH_FILENAME
+        text = _read_regular_text(receipt_path)
+        receipt = json.loads(text)
+        if text != CanonicalJson.from_value(receipt).text + "\n":
+            raise BatchJobError("prepared quality-batch receipt is not canonical")
+        if set(receipt) != {
+            "schema_version",
+            "operation_kind",
+            "job_id",
+            "project_id",
+            "request_sha256",
+            "files",
+            "record",
+        }:
+            raise BatchJobError("prepared quality-batch receipt contract differs")
+        if (
+            receipt["schema_version"] != PREPARED_BATCH_SCHEMA_VERSION
+            or receipt["operation_kind"] != "QUALITY_BATCH"
+            or receipt["job_id"] != job_id
+            or receipt["project_id"] != project_id
+            or receipt["request_sha256"] != request_sha256
+        ):
+            raise BatchJobError("prepared quality-batch receipt identity differs")
+        files = receipt["files"]
+        if not isinstance(files, list) or any(
+            not isinstance(item, dict)
+            or set(item) != {"name", "sha256", "size_bytes"}
+            or not isinstance(item["name"], str)
+            or Path(item["name"]).name != item["name"]
+            for item in files
+        ):
+            raise BatchJobError("prepared quality-batch file manifest differs")
+        names = [item["name"] for item in files]
+        if names != sorted(set(names)) or {
+            path.name for path in directory.iterdir()
+        } != {PREPARED_BATCH_FILENAME, *names}:
+            raise BatchJobError("prepared quality-batch file set differs")
+        for item in files:
+            size, digest = _regular_file_identity(directory / item["name"], sync=False)
+            if size != item["size_bytes"] or digest != item["sha256"]:
+                raise BatchJobError("prepared quality-batch artifact differs")
+        record = receipt["record"]
+        if not isinstance(record, dict) or set(record) != {
+            "job",
+            "experiment",
+            "run",
+            "artifacts",
+            "results",
+        }:
+            raise BatchJobError("prepared quality-batch record differs")
+        job = record["job"]
+        if not isinstance(job, dict) or set(job) != {
+            "job_id",
+            "project_id",
+            "dataset_id",
+            "state",
+            "created_at",
+            "started_at",
+            "prepared_at",
+            "total",
+            "cancellation_requested",
+            "parquet_path",
+            "resource_use",
+            "selection_rule",
+            "engine_version",
+        }:
+            raise BatchJobError("prepared quality-batch job record differs")
+        if (
+            job["job_id"] != job_id
+            or job["project_id"] != project_id
+            or job["state"] not in {"COMPLETED", "FAILED", "CANCELLED"}
+            or Path(job["parquet_path"]) != directory / "quality_measurements.parquet"
+        ):
+            raise BatchJobError("prepared quality-batch job identity differs")
+        experiment = Experiment.model_validate_json(json.dumps(record["experiment"]))
+        run = (
+            CompletedRun.model_validate_json(json.dumps(record["run"]))
+            if record["run"] is not None
+            else None
+        )
+        artifacts = tuple(
+            Artifact.model_validate_json(json.dumps(item)) for item in record["artifacts"]
+        )
+        results = tuple(BatchResultRow(**item) for item in record["results"])
+        if (
+            experiment.project_id != project_id
+            or experiment.dataset_id != job["dataset_id"]
+            or len(results) != job["total"]
+            or (run is None) != (job["state"] != "COMPLETED")
+            or (run is not None and (run.project_id != project_id or run.experiment_id != experiment.experiment_id))
+            or tuple(run.artifacts if run is not None else artifacts) != artifacts
+        ):
+            raise BatchJobError("prepared quality-batch metadata is inconsistent")
+        artifact_by_path = {Path(artifact.uri): artifact for artifact in artifacts}
+        if set(artifact_by_path) != {directory / item["name"] for item in files}:
+            raise BatchJobError("prepared quality-batch artifact paths differ")
+        for item in files:
+            artifact = artifact_by_path[directory / item["name"]]
+            if artifact.sha256 != item["sha256"] or artifact.size_bytes != item["size_bytes"]:
+                raise BatchJobError("prepared quality-batch artifact evidence differs")
+        return PreparedQualityBatch(job, experiment, run, artifacts, results)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+        if isinstance(error, BatchJobError):
+            raise
+        raise BatchJobError("prepared quality-batch evidence failed validation") from error
 
 
 def _now() -> datetime:
@@ -239,6 +415,15 @@ class OFIQBatchJob:
             "job", project.project_id, dataset.dataset_id, selection_sha, engine.runtime.resource_id, self.created_at.isoformat()
         )
         self.job_dir = job_root / self.job_id.replace(":", "_")
+        self.prepared_request_sha256 = CanonicalJson.from_value(
+            {
+                "job_id": self.job_id,
+                "project_id": project.project_id,
+                "dataset_id": dataset.dataset_id,
+                "selection_rule": selection_rule,
+                "execution": execution,
+            }
+        ).sha256
         self._lock = threading.Lock()
         self._cancel_requested = False
         self.state = "QUEUED"
@@ -271,7 +456,10 @@ class OFIQBatchJob:
                     if artifact.role == "DATA" and artifact.identity.path:
                         mounts.add(Path(artifact.identity.path).parent)
                     if artifact.role == "MANIFEST" and artifact.identity.path and artifact.identity.path.endswith("lfw-funneled-images-v1.jsonl"):
-                        mounts.add(Path("/mnt/projects/datasets/lfw/lfw_funneled"))
+                        raw = engine.registry.raw_resource(resource.resource_id)
+                        for check in raw.get("checks", []):
+                            if check.get("type") == "tree_manifest" and isinstance(check.get("root"), str):
+                                mounts.add(Path(check["root"]))
             derived_root = job_root.parent / "derived"
             if derived_root.exists():
                 mounts.add(derived_root)
@@ -281,7 +469,85 @@ class OFIQBatchJob:
             inner = engine.owner_adapter if self._input_resource == self.OWNER_SUPPLIED else engine.adapters[self._input_resource.resource_id]
             self.container_adapter = ContainerCLIAdapter(inner=inner, image=image, read_only_mounts=tuple(sorted(mounts)))
 
+    def bind_operation_request_sha256(self, request_sha256: str) -> None:
+        """Bind a queued API job to its durable operation request identity."""
+
+        if self.state != "QUEUED" or self.job_dir.exists():
+            raise BatchJobError("quality-batch request identity can only be bound before execution")
+        if len(request_sha256) != 64 or any(
+            character not in "0123456789abcdef" for character in request_sha256
+        ):
+            raise BatchJobError("quality-batch request SHA-256 is invalid")
+        self.prepared_request_sha256 = request_sha256
+
     OWNER_SUPPLIED = "OWNER_SUPPLIED_LOCAL_INPUT"
+
+    def _owner_derived_input(self, derived: dict[str, Any], path: str):
+        refusal = "owner-derived sample provenance failed integrity verification"
+        try:
+            chain = derived["chain"]
+            root = chain[0]
+            parent_id = root["parent_sample_id"]
+            parent_path = root["parent_path"]
+            parent_sha256 = root["parent_sha256"]
+            derived_path = Path(path)
+            parent_file = Path(parent_path)
+            current_sample = next(
+                sample for sample in self.samples if sample.source_path == path
+            )
+            parent = self.store.sample(parent_id)
+            parent_dataset = self.store.dataset(parent.dataset_id) if parent is not None else None
+            derived_set = self.store.derived_set(derived["derived_set_id"])
+            owner = self.store.owner_supplied_by_path(parent_path)
+            project_references = self.store.owner_supplied_for_project(
+                self.project.project_id
+            )
+            project_reference = next(
+                record
+                for record in project_references
+                if record.get("path") == parent_path
+            )
+        except (IndexError, KeyError, StopIteration, TypeError, AttributeError) as error:
+            raise BatchJobError(refusal) from error
+        if (
+            root.get("root_resource_id") is not None
+            or root.get("root_source_kind") != self.OWNER_SUPPLIED
+            or derived.get("parent_sample_id") != parent_id
+            or current_sample.sample_id != derived.get("derived_sample_id")
+            or current_sample.dataset_id != self.dataset.dataset_id
+            or current_sample.sha256 != derived.get("sha256")
+            or derived_set is None
+            or derived_set.get("project_id") != self.project.project_id
+            or derived_set.get("source_dataset_id") != parent.dataset_id
+            or derived_set.get("derived_dataset_id") != self.dataset.dataset_id
+            or derived_set.get("source_resource_id") is not None
+            or derived_set.get("source_kind") != self.OWNER_SUPPLIED
+            or parent_dataset is None
+            or parent_dataset.project_id != self.project.project_id
+            or parent.source_path != parent_path
+            or parent.sha256 != parent_sha256
+            or owner is None
+            or owner.get("source_kind") != self.OWNER_SUPPLIED
+            or owner.get("path") != parent_path
+            or owner.get("sha256") != parent_sha256
+            or project_reference.get("project_id") != self.project.project_id
+            or project_reference.get("source_kind") != self.OWNER_SUPPLIED
+            or project_reference.get("path") != parent_path
+            or project_reference.get("sha256") != parent_sha256
+            or derived_path.is_symlink()
+            or not derived_path.is_file()
+            or parent_file.is_symlink()
+            or not parent_file.is_file()
+        ):
+            raise BatchJobError(refusal)
+        try:
+            if sha256_file(derived_path) != derived["sha256"]:
+                raise BatchJobError(refusal)
+            if sha256_file(parent_file) != parent_sha256:
+                raise BatchJobError(refusal)
+        except OSError as error:
+            raise BatchJobError(refusal) from error
+        return self.OWNER_SUPPLIED, None
 
     def _input_resource_for(self, path: str):
         # Owner-supplied samples (decision 30): admitted only when the store records
@@ -296,6 +562,8 @@ class OFIQBatchJob:
         derived = self.store.derived_sample_by_path(path) if hasattr(self.store, "derived_sample_by_path") else None
         if derived is not None:
             root_id = derived["chain"][0].get("root_resource_id")
+            if root_id is None:
+                return self._owner_derived_input(derived, path)
             for resource in self.engine.input_resources:
                 if resource.resource_id == root_id:
                     if sha256_file(Path(path)) != derived["sha256"]:
@@ -305,8 +573,14 @@ class OFIQBatchJob:
         for resource in self.engine.input_resources:
             for artifact in resource.artifacts:
                 if artifact.role == "MANIFEST" and artifact.identity.path and artifact.identity.path.endswith("lfw-funneled-images-v1.jsonl"):
-                    if path.startswith("/mnt/projects/datasets/lfw/lfw_funneled/"):
-                        return resource, artifact
+                    raw = self.engine.registry.raw_resource(resource.resource_id)
+                    for check in raw.get("checks", []):
+                        if check.get("type") != "tree_manifest" or not isinstance(check.get("root"), str):
+                            continue
+                        tree_root = Path(check["root"])
+                        sample_path = Path(path)
+                        if sample_path != tree_root and sample_path.is_relative_to(tree_root):
+                            return resource, artifact
         for resource in self.engine.input_resources:
             for artifact in resource.artifacts:
                 if artifact.role == "DATA" and artifact.identity.path == path:
@@ -504,6 +778,89 @@ class OFIQBatchJob:
         if self.engine_version is not None and self.engine_version != self.engine.runtime.version:
             raise BatchJobError(f"engine reported version {self.engine_version}, registry records {self.engine.runtime.version}")
 
+    def _write_prepared_receipt(
+        self,
+        experiment: Experiment,
+        run: CompletedRun | None,
+        artifacts: list[Artifact],
+    ) -> None:
+        if self.parquet_path is None or self.started_at is None:
+            raise BatchJobError("quality-batch evidence is incomplete")
+        artifact_files: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for artifact in artifacts:
+            path = Path(artifact.uri)
+            if path.parent != self.job_dir or path.name in seen:
+                raise BatchJobError("quality-batch artifact path is not uniquely bound")
+            size_bytes, digest = _regular_file_identity(path, sync=True)
+            if digest != artifact.sha256 or size_bytes != artifact.size_bytes:
+                raise BatchJobError("quality-batch artifact changed before preparation")
+            seen.add(path.name)
+            artifact_files.append(
+                {"name": path.name, "sha256": digest, "size_bytes": size_bytes}
+            )
+        if {path.name for path in self.job_dir.iterdir()} != seen:
+            raise BatchJobError("quality-batch directory contains unbound files")
+        terminal_state = (
+            "COMPLETED"
+            if run is not None
+            else ("CANCELLED" if self._cancel_requested else "FAILED")
+        )
+        prepared_at = _now()
+        record = {
+            "job": {
+                "job_id": self.job_id,
+                "project_id": self.project.project_id,
+                "dataset_id": self.dataset.dataset_id,
+                "state": terminal_state,
+                "created_at": self.created_at.isoformat(),
+                "started_at": self.started_at.isoformat(),
+                "prepared_at": prepared_at.isoformat(),
+                "total": len(self.samples),
+                "cancellation_requested": self._cancel_requested,
+                "parquet_path": str(self.parquet_path),
+                "resource_use": self.resource_use,
+                "selection_rule": self.selection_rule,
+                "engine_version": self.engine_version,
+            },
+            "experiment": json.loads(experiment.model_dump_json()),
+            "run": json.loads(run.model_dump_json()) if run is not None else None,
+            "artifacts": [json.loads(artifact.model_dump_json()) for artifact in artifacts],
+            "results": [asdict(result) for result in self.results],
+        }
+        receipt = {
+            "schema_version": PREPARED_BATCH_SCHEMA_VERSION,
+            "operation_kind": "QUALITY_BATCH",
+            "job_id": self.job_id,
+            "project_id": self.project.project_id,
+            "request_sha256": self.prepared_request_sha256,
+            "files": sorted(artifact_files, key=lambda item: item["name"]),
+            "record": record,
+        }
+        receipt_path = self.job_dir / PREPARED_BATCH_FILENAME
+        encoded = (CanonicalJson.from_value(receipt).text + "\n").encode("utf-8")
+        descriptor = os.open(
+            receipt_path,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        try:
+            written = 0
+            while written < len(encoded):
+                count = os.write(descriptor, encoded[written:])
+                if count <= 0:
+                    raise OSError("prepared quality-batch receipt write made no progress")
+                written += count
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        _sync_directory(self.job_dir)
+        _sync_directory(self.job_dir.parent)
+
     def _persist(self) -> None:
         columns: dict[str, list[Any]] = {
             "sample_id": [], "source_path": [], "sha256": [], "subject_id": [], "chunk": [],
@@ -653,6 +1010,7 @@ class OFIQBatchJob:
             # A cancelled or nonzero-exit batch keeps its Parquet evidence and
             # audit trail but is not recorded as a COMPLETED scientific Run.
             self.completed_run = None
+            self._write_prepared_receipt(experiment, None, artifacts)
             self.store.record_batch_job(self, experiment, None, artifacts)
             return
         run = CompletedRun(
@@ -695,7 +1053,23 @@ class OFIQBatchJob:
                 LogRecord(stream="stdout", sha256=sha256_bytes(stdout_text.encode("utf-8")), text=stdout_text),
                 LogRecord(stream="stderr", sha256=sha256_bytes(stderr_text.encode("utf-8")), text=stderr_text),
             ),
-            warnings=tuple(f"{row.source_path}: {row.failure_reason}" for row in self.results if row.outcome != "MEASURED")[:500],
+            warnings=tuple(
+                json.dumps(
+                    {
+                        "sample_id": row.sample_id,
+                        "outcome": row.outcome,
+                        "reason": redact_private_paths(
+                            row.failure_reason or "reason not recorded",
+                            "recorded sample",
+                        ),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+                for row in self.results
+                if row.outcome != "MEASURED"
+            )[:500],
             provenance_limits=tuple(runtime_record["use_restrictions"]) + tuple(input_record["use_restrictions"]),
             exit_code=0,
             status=RunStatus.COMPLETED,
@@ -703,4 +1077,5 @@ class OFIQBatchJob:
         )
         self.completed_run = run
         self.run_id = run_id
+        self._write_prepared_receipt(experiment, run, artifacts)
         self.store.record_batch_job(self, experiment, run, artifacts)

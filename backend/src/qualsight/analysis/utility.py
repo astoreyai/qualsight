@@ -10,8 +10,10 @@ Runs are referenced by ID and by artifact hash.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import time
@@ -25,6 +27,13 @@ from ..domain.entities import Artifact, ArtifactKind, DataClassification, Experi
 from ..domain.primitives import CanonicalJson, ComponentBinding, ComponentState
 from ..domain.run import CompletedRun, LogRecord, MetricObservation, RunStatus, ScientificSupportState
 from ..engines.ofiq.adapter import content_id
+from ..execution.prepared_output import (
+    PreparedOutputError,
+    create_staging_directory,
+    discard_staging_directory,
+    load_prepared_output,
+    prepare_and_publish,
+)
 from ..metrics.policy import THRESHOLD_POLICY_DEFINITION, analyze_policy, retention_matched_cutoff
 from ..metrics.utility import (
     PAIR_QUALITY_POLICY_VERSION,
@@ -39,9 +48,129 @@ from ..matchers.conditions import ConditionId, SCRFD_CONDITIONS
 from ..provenance import application_version, environment_identity, hardware_identity, repository_identity, sha256_bytes, sha256_file
 
 ANALYSIS_KIND = "QUALITY_UTILITY"
-ANALYSIS_VERSION = "1.1.0"
+ANALYSIS_VERSION = "1.2.0"
+OVERLAY_IDENTITY_VERSION = "1.0.0"
 DEFAULT_MEASURE = "UnifiedQualityScore"
 DEFAULT_QUALITY_RANGE = (0.0, 100.0)  # OFIQ scalar quality components are 0–100 integers
+
+_OVERLAY_LOCKED_FIELDS = (
+    ("project_id", "PROJECT_MISMATCH"),
+    ("dataset_id", "DATASET_MISMATCH"),
+    ("protocol_id", "PROTOCOL_MISMATCH"),
+    ("pair_universe_sha256", "PAIR_UNIVERSE_MISMATCH"),
+    ("quality_parquet_sha256", "QUALITY_PARQUET_MISMATCH"),
+    ("quality_measure", "QUALITY_MEASURE_MISMATCH"),
+    ("pair_quality_policy", "PAIR_QUALITY_POLICY_MISMATCH"),
+    ("metric_registry", "METRIC_REGISTRY_MISMATCH"),
+    ("threshold_score_semantics", "THRESHOLD_SCORE_SEMANTICS_MISMATCH"),
+    ("matcher_threshold_value", "MATCHER_THRESHOLD_MISMATCH"),
+    ("quality_policy_threshold", "QUALITY_POLICY_THRESHOLD_MISMATCH"),
+    ("partial_interval", "PARTIAL_INTERVAL_MISMATCH"),
+    ("bootstrap_replicates", "BOOTSTRAP_CONFIGURATION_MISMATCH"),
+    ("seed", "BOOTSTRAP_CONFIGURATION_MISMATCH"),
+)
+
+
+def _canonical_sha256(value: object) -> str:
+    text = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _metric_registry_identity(repository_root: Path) -> dict[str, str]:
+    path = repository_root / "metrics" / "metric-registry.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise UtilityAnalysisError("the metric registry definition cannot be read") from error
+    registry_id = value.get("registry_id")
+    version = value.get("registry_version")
+    if not isinstance(registry_id, str) or not registry_id or not isinstance(version, str) or not version:
+        raise UtilityAnalysisError("the metric registry identity is incomplete")
+    return {
+        "id": registry_id,
+        "version": version,
+        "definition_sha256": sha256_file(path),
+    }
+
+
+def classify_utility_overlay(
+    baseline_summary: Mapping[str, Any],
+    candidate_summary: Mapping[str, Any],
+    *,
+    comparison_axes: Sequence[str],
+) -> dict[str, Any]:
+    """Classify one recorded analysis for an explicit, evidence-compatible overlay."""
+
+    axes = tuple(comparison_axes)
+    if not axes or len(set(axes)) != len(axes) or set(axes) - {"MATCHER", "PREPROCESSING"}:
+        raise ValueError("comparison_axes must be a unique non-empty subset of MATCHER and PREPROCESSING")
+    baseline = baseline_summary.get("overlay_identity")
+    candidate = candidate_summary.get("overlay_identity")
+    required = {
+        "schema_version",
+        "project_id",
+        "dataset_id",
+        "protocol_id",
+        "pair_universe_sha256",
+        "comparisons_sha256",
+        "quality_parquet_sha256",
+        "quality_measure",
+        "pair_quality_policy",
+        "metric_registry",
+        "threshold_score_semantics",
+        "matcher_threshold_value",
+        "quality_policy_threshold",
+        "partial_interval",
+        "bootstrap_replicates",
+        "seed",
+        "matcher_id",
+        "preprocessing_id",
+    }
+    if (
+        not isinstance(baseline, Mapping)
+        or not isinstance(candidate, Mapping)
+        or set(baseline) != required
+        or set(candidate) != required
+        or baseline.get("schema_version") != OVERLAY_IDENTITY_VERSION
+        or candidate.get("schema_version") != OVERLAY_IDENTITY_VERSION
+    ):
+        return {
+            "eligible": False,
+            "comparison_axis": "UNKNOWN",
+            "reasons": ["INCOMPLETE_OVERLAY_IDENTITY"],
+        }
+
+    matcher_changed = baseline["matcher_id"] != candidate["matcher_id"]
+    preprocessing_changed = baseline["preprocessing_id"] != candidate["preprocessing_id"]
+    comparison_axis = (
+        "COMPOSITE"
+        if matcher_changed and preprocessing_changed
+        else "MATCHER"
+        if matcher_changed
+        else "PREPROCESSING"
+        if preprocessing_changed
+        else "IDENTICAL_CONFIGURATION"
+    )
+    reasons = [
+        reason
+        for field, reason in _OVERLAY_LOCKED_FIELDS
+        if baseline[field] != candidate[field]
+    ]
+    if matcher_changed and "MATCHER" not in axes:
+        reasons.append("MATCHER_AXIS_NOT_SELECTED")
+    if preprocessing_changed and "PREPROCESSING" not in axes:
+        reasons.append("PREPROCESSING_AXIS_NOT_SELECTED")
+    if (
+        not matcher_changed
+        and not preprocessing_changed
+        and baseline["comparisons_sha256"] != candidate["comparisons_sha256"]
+    ):
+        reasons.append("COMPARISONS_ARTIFACT_MISMATCH")
+    return {
+        "eligible": not reasons,
+        "comparison_axis": comparison_axis,
+        "reasons": reasons,
+    }
 
 
 def quality_input_stage(condition_ids: list[str] | tuple[str, ...]) -> dict[str, object]:
@@ -107,7 +236,78 @@ class UtilityResult:
     summary: dict[str, Any]
 
 
-def _quality_columns(schema: pa.Schema) -> list[str]:
+UTILITY_ARTIFACT_NAMES = ("pair_quality.parquet", "policy.json", "utility.json")
+
+
+def recover_prepared_utility_analysis(
+    directory: Path,
+    *,
+    analysis_id: str,
+    project_id: str,
+    request_sha256: str,
+) -> UtilityResult:
+    """Reconstruct a typed utility result from its validated final receipt."""
+
+    try:
+        receipt = load_prepared_output(
+            directory,
+            operation_kind="UTILITY_ANALYSIS",
+            result_id=analysis_id,
+            project_id=project_id,
+            request_sha256=request_sha256,
+            artifact_names=UTILITY_ARTIFACT_NAMES,
+        )
+        record = receipt["record"]
+        if set(record) != {"experiment", "run", "summary"}:
+            raise UtilityAnalysisError("prepared utility result contract differs")
+        run = CompletedRun.model_validate_json(
+            json.dumps(record["run"], separators=(",", ":"), ensure_ascii=False)
+        )
+        experiment = Experiment.model_validate_json(
+            json.dumps(record["experiment"], separators=(",", ":"), ensure_ascii=False)
+        )
+        summary = record["summary"]
+        pair_table = directory / "pair_quality.parquet"
+        utility_path = directory / "utility.json"
+        policy_path = directory / "policy.json"
+        utility = json.loads(utility_path.read_text(encoding="utf-8"))
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        expected_paths = {str(pair_table), str(utility_path), str(policy_path)}
+        if (
+            run.project_id != project_id
+            or experiment.project_id != project_id
+            or summary.get("analysis_id") != analysis_id
+            or summary.get("run_id") != run.run_id
+            or {artifact.uri for artifact in run.artifacts} != expected_paths
+            or any(
+                sha256_file(Path(artifact.uri)) != artifact.sha256
+                for artifact in run.artifacts
+            )
+        ):
+            raise UtilityAnalysisError("prepared utility result identity differs")
+        return UtilityResult(
+            analysis_id,
+            run,
+            experiment,
+            utility,
+            policy,
+            directory,
+            pair_table,
+            utility_path,
+            policy_path,
+            summary,
+        )
+    except (PreparedOutputError, OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        if isinstance(error, UtilityAnalysisError):
+            raise
+        raise UtilityAnalysisError(
+            "prepared utility result failed integrity verification"
+        ) from error
+
+
+def quality_columns(schema: pa.Schema) -> list[str]:
+    """Return every scalar quality measure recorded by a quality Parquet schema."""
+
     return sorted({name[: -len(".scalar")] for name in schema.names if name.endswith(".scalar")})
 
 
@@ -155,6 +355,16 @@ class UtilityAnalysisJob:
             raise UtilityAnalysisError("quality job belongs to another project")
         if job["dataset_id"] != leaf["dataset_id"]:
             raise UtilityAnalysisError("quality job and matcher run cover different datasets")
+        quality_parquet = Path(job["parquet_path"])
+        self.quality_parquet_sha256 = sha256_file(quality_parquet)
+        if (
+            not isinstance(job.get("parquet_sha256"), str)
+            or job["parquet_sha256"] != self.quality_parquet_sha256
+        ):
+            raise UtilityAnalysisError("quality job Parquet failed recorded hash verification")
+        comparisons_parquet = Path(leaf["comparisons_parquet"])
+        if sha256_file(comparisons_parquet) != leaf["comparisons_sha256"]:
+            raise UtilityAnalysisError("matcher comparisons Parquet failed recorded hash verification")
         matcher_run = store.run(request.matcher_run_id)
         quality_run = store.run(job["run_id"]) if job.get("run_id") else None
         if matcher_run is None or quality_run is None:
@@ -164,7 +374,7 @@ class UtilityAnalysisJob:
         except ValueError as error:
             raise UtilityAnalysisError(f"unknown pair-quality policy {request.pair_quality_policy}") from error
         schema = pq.read_schema(job["parquet_path"])
-        self.available_measures = _quality_columns(schema)
+        self.available_measures = quality_columns(schema)
         if request.quality_measure not in self.available_measures:
             raise UtilityAnalysisError(f"quality measure {request.quality_measure} is not a scalar column of the quality job")
         if not (0 < request.partial_interval <= 1):
@@ -175,6 +385,7 @@ class UtilityAnalysisJob:
         if protocol is None:
             raise UtilityAnalysisError("protocol of the matcher run is not recorded")
         self.protocol = protocol
+        self.metric_registry = _metric_registry_identity(repository_root)
         self.leaf = leaf
         self.quality_job = job
         self.matcher_run: CompletedRun = matcher_run[0]
@@ -188,7 +399,7 @@ class UtilityAnalysisJob:
 
     # -- execution ------------------------------------------------------------
 
-    def run(self) -> UtilityResult:
+    def run(self, *, request_sha256: str | None = None) -> UtilityResult:
         started = _now()
         clock = time.monotonic()
         request = self.request
@@ -267,6 +478,48 @@ class UtilityAnalysisJob:
         else:
             quality_threshold = float(request.quality_threshold)
             quality_provenance = {"source": "CALLER_SUPPLIED", "kind": "QUALITY_POLICY_THRESHOLD"}
+        overlay_identity = {
+            "schema_version": OVERLAY_IDENTITY_VERSION,
+            "project_id": self.project.project_id,
+            "dataset_id": self.leaf["dataset_id"],
+            "protocol_id": self.leaf["protocol_id"],
+            "pair_universe_sha256": self.protocol.pairs_sha256,
+            "comparisons_sha256": self.leaf["comparisons_sha256"],
+            "quality_parquet_sha256": self.quality_parquet_sha256,
+            "quality_measure": request.quality_measure,
+            "pair_quality_policy": {
+                "id": self.policy.value,
+                "version": PAIR_QUALITY_POLICY_VERSION,
+                "definition_sha256": _canonical_sha256(
+                    {
+                        "id": self.policy.value,
+                        "version": PAIR_QUALITY_POLICY_VERSION,
+                        "definition": POLICY_DEFINITIONS[self.policy],
+                    }
+                ),
+            },
+            "metric_registry": self.metric_registry,
+            "threshold_score_semantics": {
+                "threshold_kind": provenance["kind"],
+                "threshold_source": provenance["source"],
+                "threshold_selection": provenance["threshold_selection"],
+                "target_fmr": provenance.get("target_fmr"),
+                "failure_policy": provenance.get("failure_policy"),
+                "evaluation_scope": provenance["evaluation_scope"],
+                "score_direction": "HIGHER_IS_MORE_SIMILAR",
+                "equality_rule": "ACCEPT_WHEN_SCORE_GE_THRESHOLD",
+            },
+            "matcher_threshold_value": threshold,
+            "quality_policy_threshold": {
+                "value": quality_threshold,
+                **quality_provenance,
+            },
+            "partial_interval": request.partial_interval,
+            "bootstrap_replicates": request.bootstrap_replicates,
+            "seed": request.seed,
+            "matcher_id": self.leaf["matcher_id"],
+            "preprocessing_id": self.leaf["condition_id"],
+        }
         quality_range = DEFAULT_QUALITY_RANGE if request.quality_measure in self.available_measures else None
         utility = compute_utility_analysis(
             UtilityInputs(scores, mated, failed, q_left, q_right, subject_left, subject_right),
@@ -301,8 +554,17 @@ class UtilityAnalysisJob:
                 })
         policy_block["per_quality_measure_impact"] = {"rule": "each measure is cut at the smallest cutoff whose retention does not exceed the policy retention; the matcher threshold is unchanged", "measures": per_measure}
         # Persist artifacts.
-        self.directory.mkdir(parents=True, exist_ok=False)
-        pair_table = self.directory / "pair_quality.parquet"
+        effective_request_sha256 = request_sha256 or CanonicalJson.from_value(
+            asdict(self.request)
+        ).sha256
+        stage = create_staging_directory(
+            self.directory,
+            operation_kind="UTILITY_ANALYSIS",
+            result_id=self.analysis_id,
+            project_id=self.project.project_id,
+            request_sha256=effective_request_sha256,
+        )
+        pair_table = stage / "pair_quality.parquet"
         accept = np.where(np.isfinite(scores), scores >= threshold, False)
         table = pa.table(
             {
@@ -320,9 +582,10 @@ class UtilityAnalysisJob:
         pq.write_table(table, pair_table, compression="zstd")
         document = {
             "analysis_id": self.analysis_id, "kind": ANALYSIS_KIND, "version": ANALYSIS_VERSION,
+            "overlay_identity": overlay_identity,
             "sources": {
                 "matcher_run_id": request.matcher_run_id, "matcher_leaf_id": self.leaf["leaf_id"], "matcher_id": self.leaf["matcher_id"], "condition_id": self.leaf["condition_id"], "comparisons_sha256": self.leaf["comparisons_sha256"],
-                "quality_job_id": request.quality_job_id, "quality_run_id": self.quality_job["run_id"], "quality_parquet_sha256": sha256_file(Path(self.quality_job["parquet_path"])), "quality_measure": request.quality_measure, "quality_measure_column": f"{request.quality_measure}.scalar",
+                "quality_job_id": request.quality_job_id, "quality_run_id": self.quality_job["run_id"], "quality_parquet_sha256": self.quality_parquet_sha256, "quality_measure": request.quality_measure, "quality_measure_column": f"{request.quality_measure}.scalar",
                 "quality_input_stage": quality_input_stage([self.leaf["condition_id"]]),
                 "samples_measured": measured, "samples_with_measure_value": len(quality),
             },
@@ -333,24 +596,54 @@ class UtilityAnalysisJob:
             "utility": utility,
             "counts": {"comparison_units": len(rows), "processing_failures": int(np.sum(failed)), "units_missing_quality": int(np.sum(~failed & ~np.isfinite(pq_values)))},
         }
-        utility_path = self.directory / "utility.json"
+        utility_path = stage / "utility.json"
         utility_path.write_text(json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
-        policy_path = self.directory / "policy.json"
+        policy_path = stage / "policy.json"
         policy_path.write_text(json.dumps(policy_block, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
         seconds = time.monotonic() - clock
-        run, experiment = self._run(started, seconds, document, policy_block, utility_path, policy_path, pair_table, threshold, quality_threshold)
+        run, experiment = self._run(started, seconds, document, policy_block, utility_path, policy_path, pair_table, threshold, quality_threshold, artifact_directory=self.directory)
         summary = {
             "analysis_id": self.analysis_id, "run_id": run.run_id, "matcher_run_id": request.matcher_run_id, "leaf_id": self.leaf["leaf_id"], "matcher_id": self.leaf["matcher_id"], "condition_id": self.leaf["condition_id"],
+            "overlay_identity": overlay_identity,
             "quality_job_id": request.quality_job_id, "quality_measure": request.quality_measure, "pair_quality_policy": self.policy.value, "matcher_threshold": threshold, "quality_threshold": quality_threshold,
             "au_erc_fnmr": utility["areas"]["FNMR"]["au_erc"]["value"], "partial_au_erc_fnmr": utility["areas"]["FNMR"]["partial_au_erc"]["value"],
             "au_erc_fmr": utility["areas"]["FMR"]["au_erc"]["value"], "fnmr_before": policy_block["before_policy"]["fnmr"]["rate"], "fnmr_after": policy_block["after_policy"]["fnmr"]["rate"],
             "retention_rate": policy_block["retention_rate"], "errors_prevented": policy_block["impact"]["errors_prevented"], "successful_comparisons_removed": policy_block["impact"]["successful_comparisons_removed"],
         }
-        result = UtilityResult(self.analysis_id, run, experiment, document, policy_block, self.directory, pair_table, utility_path, policy_path, summary)
+        result = UtilityResult(
+            self.analysis_id,
+            run,
+            experiment,
+            document,
+            policy_block,
+            self.directory,
+            self.directory / pair_table.name,
+            self.directory / utility_path.name,
+            self.directory / policy_path.name,
+            summary,
+        )
+        try:
+            prepare_and_publish(
+                stage,
+                self.directory,
+                operation_kind="UTILITY_ANALYSIS",
+                result_id=self.analysis_id,
+                project_id=self.project.project_id,
+                request_sha256=effective_request_sha256,
+                artifact_names=UTILITY_ARTIFACT_NAMES,
+                record={
+                    "run": json.loads(run.model_dump_json()),
+                    "experiment": json.loads(experiment.model_dump_json()),
+                    "summary": summary,
+                },
+            )
+        except BaseException:
+            discard_staging_directory(stage)
+            raise
         self.store.record_utility_analysis(result)
         return result
 
-    def _run(self, started: datetime, seconds: float, document: dict[str, Any], policy_block: dict[str, Any], utility_path: Path, policy_path: Path, pair_table: Path, threshold: float, quality_threshold: float) -> tuple[CompletedRun, Experiment]:
+    def _run(self, started: datetime, seconds: float, document: dict[str, Any], policy_block: dict[str, Any], utility_path: Path, policy_path: Path, pair_table: Path, threshold: float, quality_threshold: float, *, artifact_directory: Path | None = None) -> tuple[CompletedRun, Experiment]:
         request = self.request
         source = self.matcher_run
         configuration = CanonicalJson.from_value({
@@ -387,7 +680,8 @@ class UtilityAnalysisJob:
         artifacts = []
         for path, kind, media, backend in ((utility_path, ArtifactKind.METRICS, "application/json", StorageBackend.FILESYSTEM), (policy_path, ArtifactKind.METRICS, "application/json", StorageBackend.FILESYSTEM), (pair_table, ArtifactKind.TABLE, "application/vnd.apache.parquet", StorageBackend.PARQUET)):
             digest = sha256_file(path)
-            artifacts.append(Artifact(artifact_id=content_id("artifact", run_id, digest, path.name), run_id=run_id, kind=kind, storage_backend=backend, uri=str(path), sha256=digest, size_bytes=path.stat().st_size, media_type=media, classification=DataClassification.SENSITIVE_BIOMETRIC_DERIVED, created_at=_now()))
+            artifact_path = (artifact_directory / path.name) if artifact_directory is not None else path
+            artifacts.append(Artifact(artifact_id=content_id("artifact", run_id, digest, path.name), run_id=run_id, kind=kind, storage_backend=backend, uri=str(artifact_path), sha256=digest, size_bytes=path.stat().st_size, media_type=media, classification=DataClassification.SENSITIVE_BIOMETRIC_DERIVED, created_at=_now()))
         run = CompletedRun(
             run_id=run_id, project_id=self.project.project_id, experiment_id=experiment_id, user_id=self.actor,
             dataset_manifest=source.dataset_manifest, dataset_hash=source.dataset_hash,

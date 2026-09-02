@@ -19,13 +19,77 @@ export interface HealthOut {
   registry_sha256: string;
   registry_id: string;
   engine: ResourceOut;
-  database_path: string;
   actor_id: string;
   network_guard: {
     installed: boolean;
     refused_attempts: string[];
     authorized_setup_connections: number;
   };
+}
+
+export interface ExecutorStatusOut {
+  capacity: number;
+  in_flight: number;
+  available: number;
+}
+
+export interface DatabaseOperationalStatusOut {
+  query: "ok";
+  schema_version: number;
+  operation_states: Record<string, number>;
+  unresolved_purges: number;
+}
+
+type ReadyDatabaseCheck = ({ ok: true } & DatabaseOperationalStatusOut) | { ok: false; error_code: "DATABASE_UNAVAILABLE" };
+type ReadyStorageCheck =
+  | { ok: true; mode: string; available_bytes: number }
+  | { ok: false; error_code: "STORAGE_UNAVAILABLE" };
+
+export interface ReadyOut {
+  status: "ready" | "not_ready";
+  checks: {
+    shutdown: { ok: boolean };
+    data_directory_lease: {
+      state: "HELD" | "UNAVAILABLE";
+      owner: string | null;
+      pid: number | null;
+      acquired_at: string | null;
+      expires_at: string | null;
+      release_condition: "PROCESS_SHUTDOWN";
+    };
+    database: ReadyDatabaseCheck;
+    storage: ReadyStorageCheck;
+    core_runtime: {
+      ok: boolean;
+      artifacts: Array<{
+        role: "BINARY" | "CONFIGURATION";
+        resource_id: string;
+        sha256: string;
+        ok: boolean;
+      }>;
+    };
+    scientific_capacity: ExecutorStatusOut;
+    network_guard: {
+      ok: boolean;
+      installed: boolean;
+      refused_attempts: string[];
+      authorized_setup_connections: number;
+    };
+  };
+}
+
+export interface OperationalMetricsOut {
+  kind: "QUALSIGHT_LOCAL_OPERATIONAL_METRICS_V1";
+  uptime_seconds: number;
+  http: {
+    requests: number;
+    responses_by_status: Record<string, number>;
+    mean_duration_ms: number | null;
+  };
+  scientific_work: ExecutorStatusOut;
+  database: DatabaseOperationalStatusOut;
+  reconciled_at_startup: { operations: number; purges: number };
+  shutting_down: boolean;
 }
 
 export interface MatcherAssetOut {
@@ -39,7 +103,7 @@ export interface MatcherAssetOut {
   approved_scopes: string[];
   checkpoint: {
     state: "VERIFIED" | "MISSING" | "DRIFTED";
-    path: string;
+    location_state: "MANAGED" | "REGISTERED_EXTERNAL" | "LEGACY_EXTERNAL";
     registered_sha256: string;
     registered_size_bytes: number;
     observed_sha256: string | null;
@@ -52,14 +116,12 @@ export interface MatcherAssetOut {
     published_url: string;
     source_host: string;
     allowed_redirect_hosts: string[];
-    managed_path: string;
     sha256: string;
     size_bytes: number;
   };
   architecture_sources: Array<{
     key: string;
     state: "VERIFIED" | "MISSING" | "DRIFTED";
-    path: string;
     repository: string;
     commit: string;
     url: string;
@@ -99,14 +161,13 @@ export interface DatasetAddonOut {
   runtime_state: string;
   blocking_reasons: string[];
   managed: boolean;
-  local_root: string;
   sample_count: number;
   identity_count: number | null;
   pair_count?: number;
   mated_pair_count?: number;
   nonmated_pair_count?: number;
   tree_sha256?: string;
-  archive?: { path: string; sha256: string; size_bytes: number; state?: string };
+  archive?: { sha256: string; size_bytes: number; state?: string };
   rights: { third_party: string; research_use: string; redistribution: string };
   classification: string;
   approved_scopes: string[];
@@ -214,14 +275,15 @@ export interface EmbeddingAssetOut {
   rows: number | null;
   dimension: number | null;
   created_at: string;
-  links: { run: string; export_parquet: string; export_json: string };
+  links: { run: string };
 }
 
 export interface RegisteredSample {
+  registered_sample_id: string;
+  display_name: string;
   resource_id: string;
-  resource_state: string;
+  role: string;
   approved_scopes: string[];
-  path: string;
   sha256: string;
   size_bytes: number;
   media_type: string;
@@ -230,8 +292,11 @@ export interface RegisteredSample {
 export interface MeasureOut {
   name: string;
   native: number | null;
+  native_unit: string;
+  native_semantics: string;
   scalar: number | null;
   failed: boolean;
+  failure_reason: string | null;
 }
 
 export interface ProvenanceLinks {
@@ -250,7 +315,7 @@ export interface AssessResponse {
   engine_version: string;
   engine_state: string;
   purpose_scope: string;
-  image_path: string;
+  registered_sample_id: string;
   image_sha256: string;
   initialization_ms: number;
   assessment_ms: number;
@@ -264,11 +329,13 @@ export interface AssessResponse {
 
 export interface AssessmentFailure {
   error: "ASSESSMENT_FAILED";
-  image_path: string;
+  registered_sample_id: string;
   engine_version: string;
   exit_code: number;
-  reason: string;
-  stderr: string;
+  reason_code: "ENGINE_EXECUTION_FAILED" | "ENGINE_RETURNED_NO_MEASURES";
+  message: string;
+  failure_event_id: string;
+  failure_evidence_sha256: string;
 }
 
 export interface RunSummaryOut {
@@ -304,7 +371,7 @@ async function readJson<T>(response: Response): Promise<T> {
     const body = (await response.json()) as { detail?: unknown; error?: string };
     if (body && body.error === "ASSESSMENT_FAILED") {
       failure = body as unknown as AssessmentFailure;
-      detail = failure.reason;
+      detail = failure.message;
     } else if (typeof body.detail === "string") {
       detail = body.detail;
     } else if (body.detail !== undefined) {
@@ -314,6 +381,19 @@ async function readJson<T>(response: Response): Promise<T> {
     // keep the status text
   }
   throw new ApiError(response.status, detail, failure);
+}
+
+async function readDownload(response: Response): Promise<{ blob: Blob; filename: string }> {
+  if (!response.ok) {
+    await readJson<never>(response);
+  }
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+  const filename = filenameMatch?.[1]?.trim();
+  if (!filename) {
+    throw new ApiError(response.status, "the export response omitted its governed filename");
+  }
+  return { blob: await response.blob(), filename };
 }
 
 export interface ProjectOut {
@@ -331,6 +411,41 @@ export interface ProjectOut {
   scientific_configuration: Record<string, unknown>;
   run_ids: string[];
   derived_from: Record<string, unknown> | null;
+  evidence_sha256: string;
+}
+
+export interface ProjectPurgeScopeOut {
+  project_id: string;
+  scope: string;
+  target_counts: {
+    files: number;
+    directories: number;
+  };
+}
+
+export interface ProjectPurgeOut {
+  purge_id: string;
+  version: string;
+  project_id: string;
+  actor_id: string;
+  created_at: string;
+  scope: string;
+  target_counts: ProjectPurgeScopeOut["target_counts"];
+  outcome_counts: {
+    deleted: number;
+    already_absent: number;
+    reconciled_after_deletion_intent: number;
+    failed: number;
+    remaining_after_purge: number;
+  };
+  metadata: {
+    removed: Record<string, number>;
+    remaining: Record<string, number>;
+    verified: boolean;
+  };
+  verified: boolean;
+  retained: string[];
+  not_performed: string[];
   evidence_sha256: string;
 }
 
@@ -369,9 +484,9 @@ export interface JobOut {
   run_id: string | null;
   error: string | null;
   resource_use: Record<string, number>;
-  parquet_path: string | null;
   engine_version: string | null;
   dataset_id?: string | null;
+  quality_result_available: boolean;
 }
 
 export interface DistributionBin {
@@ -394,6 +509,14 @@ export interface DistributionOut {
   parquet_sha256: string | null;
 }
 
+export interface QualityMeasureCatalogOut {
+  job_id: string;
+  run_id: string;
+  parquet_sha256: string;
+  measures: string[];
+  default_measure: string | null;
+}
+
 export interface DrilldownRow {
   job_id: string;
   sample_id: string;
@@ -403,13 +526,21 @@ export interface DrilldownRow {
   failure_reason: string | null;
   uqs_scalar: number | null;
   uqs_native: number | null;
-  source_path: string;
   sha256: string;
   links: { sample: string; quality: string; run: string | null; image: string };
 }
 
 export interface SampleQualityOut {
-  sample: { sample_id: string; source_path: string; sha256: string; subject_id: { value?: string | null } ; metadata: Record<string, unknown> };
+  sample: {
+    sample_id: string;
+    dataset_id: string;
+    subject_id: string | null;
+    media_type: string;
+    sha256: string;
+    size_bytes: number;
+    metadata: Record<string, unknown>;
+    links: { image: string; detection: string; ofiq_landmarks: string; quality: string };
+  };
   results: Array<{
     job_id: string;
     run_id: string | null;
@@ -484,6 +615,31 @@ export interface MatrixStatus {
 
 export interface PairQualityPolicy { id: string; version: string; definition: string }
 
+export interface UtilityOverlayIdentity {
+  schema_version: "1.0.0";
+  project_id: string;
+  dataset_id: string;
+  protocol_id: string;
+  pair_universe_sha256: string;
+  comparisons_sha256: string;
+  quality_parquet_sha256: string;
+  quality_measure: string;
+  pair_quality_policy: { id: string; version: string; definition_sha256: string };
+  metric_registry: { id: string; version: string; definition_sha256: string };
+  threshold_score_semantics: {
+    threshold_kind: string;
+    threshold_source: string;
+    threshold_selection: string;
+    target_fmr: number | null;
+    failure_policy: string | null;
+    evaluation_scope: string;
+    score_direction: "HIGHER_IS_MORE_SIMILAR" | "LOWER_IS_MORE_SIMILAR";
+    equality_rule: string;
+  };
+  matcher_id: string;
+  preprocessing_id: string;
+}
+
 export interface UtilitySummary {
   analysis_id: string;
   run_id: string;
@@ -504,6 +660,7 @@ export interface UtilitySummary {
   retention_rate: number | null;
   errors_prevented: number;
   successful_comparisons_removed: number;
+  overlay_identity?: UtilityOverlayIdentity;
   created_at: string;
   links: { analysis: string; run: string; pairs: string; matcher_run: string; quality_job: string };
 }
@@ -622,6 +779,93 @@ export interface FigureOut {
   thresholds: any[];
 }
 
+export type DashboardPanelKind = "figure" | "operating_points" | "utility_summary" | "cross_contrasts" | "dataset_statistics" | "policy_table";
+
+export interface DashboardFigurePanel {
+  kind: "figure";
+  ref: string;
+  title: string;
+  run_ids: string[];
+  data: {
+    figure: {
+      kind: string;
+      files: Record<"png" | "svg" | "pdf" | "csv" | "provenance", string>;
+      thresholds: Array<Record<string, unknown>>;
+      metric_definitions: string[][];
+    };
+  };
+}
+
+export interface DashboardOperatingPointsPanel {
+  kind: "operating_points";
+  ref: string;
+  title: string;
+  run_ids: string[];
+  data: {
+    leaf_id: string;
+    matcher_id: string;
+    condition_id: string;
+    by_policy: Record<string, {
+      operating_points: Array<{ target_fmr: number; threshold: number | null; fmr?: number; fnmr?: number; reason?: string }>;
+      eer: { eer: number | null; threshold: number | null; method?: string; evaluation_scope?: string };
+    }>;
+  };
+}
+
+export interface DashboardUtilityPanel {
+  kind: "utility_summary" | "policy_table";
+  ref: string;
+  title: string;
+  run_ids: string[];
+  data: {
+    summary: Partial<UtilitySummary>;
+    policy?: {
+      retention_rate?: number | null;
+      counts?: Record<string, number>;
+      impact?: { errors_prevented?: number; successful_comparisons_removed?: number };
+    };
+  };
+}
+
+export interface DashboardCrossContrastsPanel {
+  kind: "cross_contrasts";
+  ref: string;
+  title: string;
+  run_ids: string[];
+  data: { contrasts: CrossContrastSummary[] };
+}
+
+export interface DashboardDatasetStatisticsPanel {
+  kind: "dataset_statistics";
+  ref: string;
+  title: string;
+  run_ids: string[];
+  data: {
+    statistics: {
+      population?: {
+        subjects?: number;
+        samples?: number;
+        samples_per_subject_mean?: number;
+        samples_per_subject_median?: number;
+        samples_per_subject_min?: number;
+        samples_per_subject_max?: number;
+      };
+      data_completeness?: Record<string, number>;
+    };
+    evidence_sha256: string;
+  };
+}
+
+export type DashboardPanel = DashboardFigurePanel | DashboardOperatingPointsPanel | DashboardUtilityPanel | DashboardCrossContrastsPanel | DashboardDatasetStatisticsPanel;
+
+export interface DashboardLayout {
+  version: string;
+  name: string;
+  template: string;
+  columns: number;
+  panels: Array<{ kind: DashboardPanelKind; ref: string; title?: string }>;
+}
+
 export interface DashboardOut {
   dashboard_id: string;
   name: string;
@@ -631,8 +875,20 @@ export interface DashboardOut {
   created_at: string;
   layout_sha256?: string;
   panel_run_ids: string[];
-  panels: number | any[];
-  layout?: any;
+  panels: number;
+}
+
+export interface DashboardSaveOut extends Omit<DashboardOut, "panels"> {
+  project_id: string;
+  created_by: string;
+  layout: DashboardLayout;
+}
+
+export interface DashboardDetailOut extends Omit<DashboardOut, "panels"> {
+  project_id: string;
+  created_by: string;
+  layout: DashboardLayout;
+  panels: DashboardPanel[];
 }
 
 export interface ReportOut {
@@ -658,7 +914,6 @@ export interface ArtifactDownloadOut {
 export interface BundleOut {
   bundle_id: string;
   run_id: string;
-  path: string;
   sha256: string;
   size_bytes?: number;
   created_at: string;
@@ -687,7 +942,7 @@ export interface IdentificationSearchSummary {
   links: { search: string; run: string; candidates: string; protocol: string };
 }
 export interface IdentificationSearchOut { search_id: string; state: "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "INTERRUPTED"; run_id?: string; summary?: IdentificationSearchSummary; metrics?: any; progress?: any; error?: string | null }
-export interface DerivedSetOut { derived_set_id: string; derived_dataset_id: string; source_dataset_id: string; transforms: any[]; levels: number; source_count: number; derived_count: number; created_at: string; directory: string }
+export interface DerivedSetOut { derived_set_id: string; project_id: string; derived_dataset_id: string; source_dataset_id: string; transforms: any[]; levels: number; source_count: number; derived_count: number; created_at: string; links: { detail: string } }
 export interface DegradationSummary { analysis_id: string; run_id: string; derived_set_id: string; matcher_id: string; condition_id: string; matcher_threshold: number; transforms: string[]; levels: number; mated_pairs: number; nonmated_pairs: number; seconds: number; fnmr_by_transform: Record<string, Array<number | null>>; uqs_by_transform: Record<string, Array<number | null>>; created_at?: string; links?: { analysis: string; run: string } }
 export interface DegradationOut { analysis_id: string; state: "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "INTERRUPTED"; run_id?: string; summary?: DegradationSummary; document?: any; progress?: any; error?: string | null }
 
@@ -698,13 +953,129 @@ export interface UploadAssessOut {
   sample_id: string;
   source_kind: string;
   image_sha256: string;
-  stored_path: string;
   original_name: string;
   width: number;
   height: number;
   measures: MeasureOut[];
   failed_measures: string[];
-  provenance: { run: string; sample_image: string; statement: string };
+  provenance: { run: string; sample: string; sample_image: string; statement: string };
+}
+
+export type OwnerPairRelationship = "SAME_PERSON" | "DIFFERENT_PEOPLE" | "NOT_RECORDED";
+
+export interface OwnerPairAdmissionOut {
+  schema_version: "1.0.0";
+  pair_id: string;
+  project_id: string;
+  left_sample_id: string;
+  right_sample_id: string;
+  left_sha256: string;
+  right_sha256: string;
+  relationship: OwnerPairRelationship;
+  comparison_label: "MATED" | "NON_MATED" | null;
+  relationship_assertion: {
+    state: "OPERATOR_ASSERTED_UNVERIFIED";
+    relationship: OwnerPairRelationship;
+    asserted_by: string;
+    asserted_at: string;
+  };
+  population_error_claims_allowed: false;
+  outcome_correctness_allowed: false;
+  source_kind: "OWNER_SUPPLIED_LOCAL_INPUT";
+  local_only: true;
+}
+
+export interface DetectionGeometryOut {
+  label: string;
+  image: { width: number; height: number };
+  face_count: number | null;
+  chosen_index: number | null;
+  failure: string | null;
+  detections: Array<{ bbox: number[]; score: number; landmarks: number[][] }>;
+}
+
+export interface OfiqLandmarksOut {
+  label: string;
+  image: { width: number; height: number };
+  landmark_type: string;
+  faces: Array<{ x: number; y: number; width: number; height: number }>;
+  landmarks: number[][];
+}
+
+export interface DirectPairThreshold {
+  contract_id: "matcher_threshold";
+  kind: "FIXED_VALUE";
+  value: number;
+  rule?: "MATCH_WHEN_SCORE_GE_THRESHOLD";
+}
+
+export interface DirectPairComparisonStatus {
+  schema_version: "1.0";
+  comparison_id: string;
+  run_id: string;
+  project_id: string;
+  pair_id: string;
+  state: "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "INTERRUPTED";
+  links: { self: string; evidence: string; run: string; raw_manifest: string };
+  poll_after_ms: 500 | null;
+}
+
+export interface DirectPairSideEvidence {
+  sample_id: string;
+  dataset_id: string;
+  sha256: string;
+  face_count: number | null;
+  detection: ({ state: "RECORDED"; sha256: string | null } & Record<string, unknown>) | null;
+  crop: { state: "RECORDED"; sha256: string; pixel_sha256: string | null; width: 112; height: 112 } | null;
+  embedding: { state: "RECORDED"; sha256: string; value_sha256: string | null; shape: number[]; dtype: "float32" | null } | null;
+  failure: { kind: string; detail: string } | null;
+  quality: { job_id: string; run_id: string; unified_quality_score: number | null; failed_measures: string[] } | null;
+  links: { source: string; crop: string | null; detection: string | null; embedding: string | null; quality: string | null };
+}
+
+export interface DirectPairEvidenceOut {
+  schema_version: "1.0";
+  comparison_id: string;
+  run_id: string;
+  state: "COMPLETED";
+  project_id: string;
+  pair: {
+    pair_id: string;
+    relationship: OwnerPairRelationship;
+    comparison_label: "MATED" | "NON_MATED" | null;
+    relationship_assertion: OwnerPairAdmissionOut["relationship_assertion"];
+  };
+  execution: {
+    matcher_id: string;
+    preprocessing_id: string;
+    threshold: DirectPairThreshold & { rule: "MATCH_WHEN_SCORE_GE_THRESHOLD" };
+    matcher_checkpoint_sha256: string;
+    matcher_architecture_sha256: string[];
+    matcher_device: string;
+    preprocessing_definition_sha256: string;
+    detector_sha256: string;
+    application_version: string;
+    started_at: string;
+    ended_at: string;
+    runtime_seconds: number;
+  };
+  result: {
+    score: number | null;
+    direction: "HIGHER_IS_MORE_SIMILAR";
+    failure: string | null;
+    failure_side: "left" | "right" | "left+right" | "both" | null;
+    decision: "MATCH" | "NO_MATCH" | null;
+    decision_reason: "SCORE_GE_FIXED_THRESHOLD" | "SCORE_LT_FIXED_THRESHOLD" | "NO_SCORE_PROCESSING_FAILURE";
+    agreement_with_operator_assertion: boolean | null;
+  };
+  claim_boundary: {
+    population_error_claims_allowed: false;
+    outcome_correctness_allowed: false;
+    ground_truth_authority: false;
+    prohibited: Array<"FMR" | "FNMR" | "EER" | "ROC" | "DET" | "OPERATING_POINT">;
+  };
+  sides: { left: DirectPairSideEvidence; right: DirectPairSideEvidence };
+  links: { self: string; status: string; run: string; raw_manifest: string };
 }
 
 export const api = {
@@ -714,9 +1085,9 @@ export const api = {
   pullMatcherSources: (matcher_id: string) =>
     fetch(`/api/matcher-assets/${encodeURIComponent(matcher_id)}/pull-sources`, { method: "POST" }).then((r) => readJson<{ asset: MatcherAssetOut; event: SystemEventOut }>(r)),
   pullMatcherCheckpoint: (matcher_id: string) =>
-    fetch(`/api/matcher-assets/${encodeURIComponent(matcher_id)}/pull-checkpoint`, { method: "POST" }).then((r) => readJson<{ asset: MatcherAssetOut; receipt: { receipt_id: string; evidence_sha256: string; action: string; path: string }; event: SystemEventOut }>(r)),
+    fetch(`/api/matcher-assets/${encodeURIComponent(matcher_id)}/pull-checkpoint`, { method: "POST" }).then((r) => readJson<{ asset: MatcherAssetOut; receipt: { receipt_id: string; evidence_sha256: string; action: string }; event: SystemEventOut }>(r)),
   pullVerificationDataset: (addon_id: string) =>
-    fetch(`/api/dataset-assets/${encodeURIComponent(addon_id)}/pull`, { method: "POST" }).then((r) => readJson<{ dataset: DatasetAddonOut; receipt: { receipt_id: string; evidence_sha256: string; action: string; archive: { path: string; sha256: string; size_bytes: number } }; event: SystemEventOut }>(r)),
+    fetch(`/api/dataset-assets/${encodeURIComponent(addon_id)}/pull`, { method: "POST" }).then((r) => readJson<{ dataset: DatasetAddonOut; receipt: { receipt_id: string; evidence_sha256: string; action: string; archive: { sha256: string; size_bytes: number } }; event: SystemEventOut }>(r)),
   importVerificationDataset: (project_id: string, addon_id: string) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/dataset-assets/${encodeURIComponent(addon_id)}/import`, { method: "POST" }).then((r) => readJson<{ dataset: DatasetOut; protocol: { protocol_id: string; name: string; pair_count: number; mated_count: number; nonmated_count: number; fold_count: number | null; unique_subject_count: number | null }; samples: number; pairs: number }>(r)),
   loadMatcher: (matcher_id: string) =>
@@ -736,52 +1107,78 @@ export const api = {
       `/api/quality/assess-upload?project_id=${encodeURIComponent(project_id)}&purpose_scope=${encodeURIComponent(purpose_scope)}&filename=${encodeURIComponent(file.name)}`,
       { method: "POST", headers: { "content-type": "application/octet-stream" }, body: file },
     ).then((r) => readJson<UploadAssessOut>(r)),
+  detectionForSample: (project_id: string, sample_id: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/samples/${encodeURIComponent(sample_id)}/detection`).then((r) => readJson<DetectionGeometryOut>(r)),
+  ofiqLandmarksForSample: (project_id: string, sample_id: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/samples/${encodeURIComponent(sample_id)}/ofiq-landmarks`).then((r) => readJson<OfiqLandmarksOut>(r)),
+  projectSampleImageUrl: (project_id: string, sample_id: string) =>
+    `/api/projects/${encodeURIComponent(project_id)}/samples/${encodeURIComponent(sample_id)}/image`,
+  admitOwnerPair: (project_id: string, left_sample_id: string, right_sample_id: string, relationship: OwnerPairRelationship) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/owner-pair-admissions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ left_sample_id, right_sample_id, relationship }),
+    }).then((r) => readJson<OwnerPairAdmissionOut>(r)),
+  startOwnerPairComparison: (project_id: string, body: { pair_id: string; matcher_id: string; preprocessing_id: string; threshold: Omit<DirectPairThreshold, "rule"> }) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/owner-pair-comparisons`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => readJson<DirectPairComparisonStatus>(r)),
+  ownerPairComparison: (project_id: string, comparison_id: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/owner-pair-comparisons/${encodeURIComponent(comparison_id)}`).then((r) => readJson<DirectPairComparisonStatus>(r)),
+  ownerPairComparisonEvidence: (project_id: string, comparison_id: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/owner-pair-comparisons/${encodeURIComponent(comparison_id)}/evidence`).then((r) => readJson<DirectPairEvidenceOut>(r)),
+  ownerPairComparisons: (project_id: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/owner-pair-comparisons`).then((r) => readJson<DirectPairComparisonStatus[]>(r)),
   freezeIdentification: (project_id: string, dataset_id: string, selection: string, rank_depth: number) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/${encodeURIComponent(dataset_id)}/protocols/freeze-lfw-identification`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ selection, rank_depth }) }).then((r) => readJson<IdentificationProtocolOut>(r)),
   identificationProtocols: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/identification-protocols`).then((r) => readJson<IdentificationProtocolOut[]>(r)),
   startIdentificationSearch: (project_id: string, protocol_id: string, body: { matcher_id: string; condition_id: string; quality_job_id?: string | null }) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/identification-protocols/${encodeURIComponent(protocol_id)}/search`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => readJson<{ search_id: string; state: string }>(r)),
-  identificationSearch: (search_id: string) => fetch(`/api/identification-searches/${encodeURIComponent(search_id)}`).then((r) => readJson<IdentificationSearchOut>(r)),
+  identificationSearch: (project_id: string, search_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/identification-searches/${encodeURIComponent(search_id)}`).then((r) => readJson<IdentificationSearchOut>(r)),
   identificationSearches: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/identification-searches`).then((r) => readJson<IdentificationSearchSummary[]>(r)),
-  identificationCandidates: (search_id: string, query: string) => fetch(`/api/identification-searches/${encodeURIComponent(search_id)}/candidates?${query}`).then((r) => readJson<{ total: number; rows: any[] }>(r)),
+  identificationCandidates: (project_id: string, search_id: string, query: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/identification-searches/${encodeURIComponent(search_id)}/candidates?${query}`).then((r) => readJson<{ total: number; rows: any[] }>(r)),
   transforms: () => fetch("/api/transforms").then((r) => readJson<{ operators: Array<{ kind: string; parameter: string; version: string }> }>(r)),
   createTransformations: (project_id: string, dataset_id: string, body: { selection: string; sample_ids?: string[]; transforms: Array<{ kind: string; parameters: number[] }> }) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/${encodeURIComponent(dataset_id)}/transformations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => readJson<DerivedSetOut>(r)),
   derivedSets: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/derived-sets`).then((r) => readJson<DerivedSetOut[]>(r)),
   startDegradation: (project_id: string, body: Record<string, unknown>) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/degradation-analyses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => readJson<{ analysis_id: string; state: string }>(r)),
-  degradation: (analysis_id: string) => fetch(`/api/degradation-analyses/${encodeURIComponent(analysis_id)}`).then((r) => readJson<DegradationOut>(r)),
+  degradation: (project_id: string, analysis_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/degradation-analyses/${encodeURIComponent(analysis_id)}`).then((r) => readJson<DegradationOut>(r)),
   degradations: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/degradation-analyses`).then((r) => readJson<DegradationSummary[]>(r)),
   figures: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/figures`).then((r) => readJson<FigureOut[]>(r)),
   createFigure: (project_id: string, kind: string, parameters: Record<string, unknown>) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/figures`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, parameters }) }).then((r) => readJson<FigureOut>(r)),
   dashboards: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/dashboards`).then((r) => readJson<DashboardOut[]>(r)),
   saveDashboard: (project_id: string, body: { name: string; template: string; columns: number; panels: Array<{ kind: string; ref: string }> }) =>
-    fetch(`/api/projects/${encodeURIComponent(project_id)}/dashboards`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => readJson<any>(r)),
-  dashboard: (dashboard_id: string) => fetch(`/api/dashboards/${encodeURIComponent(dashboard_id)}`).then((r) => readJson<any>(r)),
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/dashboards`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => readJson<DashboardSaveOut>(r)),
+  dashboard: (project_id: string, dashboard_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/dashboards/${encodeURIComponent(dashboard_id)}`).then((r) => readJson<DashboardDetailOut>(r)),
   reports: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/reports`).then((r) => readJson<ReportOut[]>(r)),
   createReport: (project_id: string, spec: Record<string, unknown>) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/reports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ spec }) }).then((r) => readJson<ReportOut>(r)),
+  exportTable: (project_id: string, category: "quality_results" | "comparison_records" | "embeddings" | "metric_tables" | "statistical_results" | "annotations", ref: string, format: "csv" | "json" | "parquet") =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/exports/${encodeURIComponent(category)}?ref=${encodeURIComponent(ref)}&format=${encodeURIComponent(format)}`, { method: "POST" }).then(readDownload),
   bundles: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/bundles`).then((r) => readJson<BundleOut[]>(r)),
   createBundle: (project_id: string, run_id: string) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/bundles`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ run_id }) }).then((r) => readJson<BundleOut>(r)),
-  reproduce: (bundle_path: string) => fetch("/api/reproductions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ bundle_path }) }).then((r) => readJson<ReproductionOut>(r)),
-  reproductions: (project_id: string) => fetch(`/api/reproductions?project_id=${encodeURIComponent(project_id)}`).then((r) => readJson<ReproductionOut[]>(r)),
-  matrixSets: (matrix_id: string) => fetch(`/api/matrices/${encodeURIComponent(matrix_id)}/sets`).then((r) => readJson<any>(r)),
+  reproduce: (project_id: string, bundle_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/reproductions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ bundle_id }) }).then((r) => readJson<ReproductionOut>(r)),
+  reproductions: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/reproductions`).then((r) => readJson<ReproductionOut[]>(r)),
+  matrixSets: (project_id: string, matrix_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/matrices/${encodeURIComponent(matrix_id)}/sets`).then((r) => readJson<any>(r)),
   crossMatcherAnalyses: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/cross-matcher`).then((r) => readJson<CrossMatcherSummary[]>(r)),
   startCrossMatcher: (project_id: string, body: { matrix_id: string; quality_job_id: string; quality_measure?: string; pair_quality_policy?: string; target_fmr?: number; bootstrap_replicates?: number }) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/cross-matcher`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => readJson<{ analysis_id: string; state: string; already_recorded?: boolean }>(r)),
-  crossMatcher: (analysis_id: string) => fetch(`/api/cross-matcher/${encodeURIComponent(analysis_id)}`).then((r) => readJson<CrossMatcherOut>(r)),
-  crossPairs: (analysis_id: string, contrast_id: string, category?: string) =>
-    fetch(`/api/cross-matcher/${encodeURIComponent(analysis_id)}/pairs?contrast_id=${encodeURIComponent(contrast_id)}${category ? `&category=${encodeURIComponent(category)}` : ""}&limit=60`).then((r) => readJson<{ total: number; rows: CrossPairRow[]; contrast: any }>(r)),
+  crossMatcher: (project_id: string, analysis_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/cross-matcher/${encodeURIComponent(analysis_id)}`).then((r) => readJson<CrossMatcherOut>(r)),
+  crossPairs: (project_id: string, analysis_id: string, contrast_id: string, category?: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/cross-matcher/${encodeURIComponent(analysis_id)}/pairs?contrast_id=${encodeURIComponent(contrast_id)}${category ? `&category=${encodeURIComponent(category)}` : ""}&limit=60`).then((r) => readJson<{ total: number; rows: CrossPairRow[]; contrast: any }>(r)),
   annotate: (project_id: string, subject_type: string, subject_id: string, text: string, context: Record<string, unknown>) =>
-    fetch("/api/annotations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project_id, subject_type, subject_id, text, context }) }).then((r) => readJson<any>(r)),
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/annotations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ subject_type, subject_id, text, context }) }).then((r) => readJson<any>(r)),
   pairQualityPolicies: () => fetch("/api/pair-quality-policies").then((r) => readJson<{ version: string; policies: PairQualityPolicy[] }>(r)),
   utilityAnalyses: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/utility-analyses`).then((r) => readJson<UtilitySummary[]>(r)),
   startUtilityAnalysis: (project_id: string, body: UtilityRequestBody) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/utility-analyses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => readJson<{ analysis_id: string; state: string; already_recorded?: boolean }>(r)),
-  utilityAnalysis: (analysis_id: string) => fetch(`/api/utility-analyses/${encodeURIComponent(analysis_id)}`).then((r) => readJson<UtilityAnalysisOut>(r)),
-  utilityPairs: (analysis_id: string, query: string) => fetch(`/api/utility-analyses/${encodeURIComponent(analysis_id)}/pairs?${query}`).then((r) => readJson<{ total: number; rows: UtilityPairRow[] }>(r)),
+  utilityAnalysis: (project_id: string, analysis_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/utility-analyses/${encodeURIComponent(analysis_id)}`).then((r) => readJson<UtilityAnalysisOut>(r)),
+  utilityPairs: (project_id: string, analysis_id: string, query: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/utility-analyses/${encodeURIComponent(analysis_id)}/pairs?${query}`).then((r) => readJson<{ total: number; rows: UtilityPairRow[] }>(r)),
   protocols: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/protocols`).then((r) => readJson<Array<{ protocol_id: string; dataset_id: string; name: string; pair_count: number; mated_count: number; nonmated_count: number }>>(r)),
   freezeProtocol: (project_id: string, dataset_id: string) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/${encodeURIComponent(dataset_id)}/protocols/freeze-lfw-view2`, { method: "POST" }).then((r) => readJson<{ protocol_id: string; pair_count: number }>(r)),
@@ -790,39 +1187,43 @@ export const api = {
     if (leafIds?.length) query.set("leaves", leafIds.join(","));
     return fetch(`/api/projects/${encodeURIComponent(project_id)}/protocols/${encodeURIComponent(protocol_id)}/matrix?${query.toString()}`, { method: "POST" }).then((r) => readJson<{ matrix_id: string; pairs: number; samples: number }>(r));
   },
-  matrix: (matrix_id: string) => fetch(`/api/matrices/${encodeURIComponent(matrix_id)}`).then((r) => readJson<MatrixStatus>(r)),
+  matrix: (project_id: string, matrix_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/matrices/${encodeURIComponent(matrix_id)}`).then((r) => readJson<MatrixStatus>(r)),
   importExternalScores: (project_id: string, protocol_id: string, resource_id: string) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/protocols/${encodeURIComponent(protocol_id)}/import-external-scores`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ resource_id }) }).then((r) => readJson<MatcherLeaf & { provenance_marker: string; mapping: any }>(r)),
   matcherLeaves: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/matcher-leaves`).then((r) => readJson<MatcherLeaf[]>(r)),
-  matcherMetrics: (run_id: string) => fetch(`/api/matcher-runs/${encodeURIComponent(run_id)}/metrics`).then((r) => readJson<{ metrics: any }>(r)),
-  matcherErrors: (run_id: string, threshold?: number) =>
-    fetch(`/api/matcher-runs/${encodeURIComponent(run_id)}/errors${threshold !== undefined ? `?threshold=${threshold}` : ""}`).then((r) => readJson<MatcherErrors>(r)),
+  matcherMetrics: (project_id: string, run_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/matcher-runs/${encodeURIComponent(run_id)}/metrics`).then((r) => readJson<{ metrics: any }>(r)),
+  matcherErrors: (project_id: string, run_id: string, threshold?: number) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/matcher-runs/${encodeURIComponent(run_id)}/errors${threshold !== undefined ? `?threshold=${threshold}` : ""}`).then((r) => readJson<MatcherErrors>(r)),
   datasets: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets`).then((r) => readJson<DatasetOut[]>(r)),
-  dataset: (dataset_id: string) => fetch(`/api/datasets/${encodeURIComponent(dataset_id)}`).then((r) => readJson<DatasetOut>(r)),
+  dataset: (project_id: string, dataset_id: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/${encodeURIComponent(dataset_id)}`).then((r) => readJson<DatasetOut>(r)),
   importLfw: (project_id: string, verify_hashes: boolean) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/import-registered`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ resource_id: "lfw-funneled-local-candidate", verify_hashes }),
     }).then((r) => readJson<DatasetOut>(r)),
-  datasetStatistics: (dataset_id: string) =>
-    fetch(`/api/datasets/${encodeURIComponent(dataset_id)}/statistics`).then((r) => readJson<{ dataset_id: string; evidence_sha256: string; statistics: Record<string, any> }>(r)),
+  datasetStatistics: (project_id: string, dataset_id: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/${encodeURIComponent(dataset_id)}/statistics`).then((r) => readJson<{ dataset_id: string; evidence_sha256: string; statistics: Record<string, any> }>(r)),
   startBatch: (project_id: string, dataset_id: string, selection: Record<string, unknown>, chunks: number, purpose_scope: string | null) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/datasets/${encodeURIComponent(dataset_id)}/quality-batch`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(purpose_scope ? { selection, chunks, purpose_scope } : { selection, chunks }),
     }).then((r) => readJson<JobOut>(r)),
-  job: (job_id: string) => fetch(`/api/jobs/${encodeURIComponent(job_id)}`).then((r) => readJson<JobOut>(r)),
-  cancelJob: (job_id: string) => fetch(`/api/jobs/${encodeURIComponent(job_id)}/cancel`, { method: "POST" }).then((r) => readJson<JobOut>(r)),
+  job: (project_id: string, job_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/jobs/${encodeURIComponent(job_id)}`).then((r) => readJson<JobOut>(r)),
+  cancelJob: (project_id: string, job_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/jobs/${encodeURIComponent(job_id)}/cancel`, { method: "POST" }).then((r) => readJson<JobOut>(r)),
   projectJobs: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/jobs`).then((r) => readJson<JobOut[]>(r)),
-  distribution: (job_id: string, measure: string, component: "scalar" | "native", bins: number) =>
-    fetch(`/api/jobs/${encodeURIComponent(job_id)}/distribution?measure=${encodeURIComponent(measure)}&component=${component}&bins=${bins}`).then((r) => readJson<DistributionOut>(r)),
-  drilldown: (job_id: string, min_scalar: number, max_scalar: number, limit = 60) =>
-    fetch(`/api/jobs/${encodeURIComponent(job_id)}/drilldown?min_scalar=${min_scalar}&max_scalar=${max_scalar}&outcome=MEASURED&limit=${limit}`).then((r) => readJson<{ total: number; rows: DrilldownRow[] }>(r)),
-  drilldownFailures: (job_id: string, limit = 60) =>
-    fetch(`/api/jobs/${encodeURIComponent(job_id)}/drilldown?outcome=ENGINE_ROW_FAILURE&limit=${limit}`).then((r) => readJson<{ total: number; rows: DrilldownRow[] }>(r)),
-  sampleQuality: (sample_id: string) => fetch(`/api/samples/${encodeURIComponent(sample_id)}/quality`).then((r) => readJson<SampleQualityOut>(r)),
+  qualityMeasures: (project_id: string, job_id: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/jobs/${encodeURIComponent(job_id)}/quality-measures`).then((r) => readJson<QualityMeasureCatalogOut>(r)),
+  distribution: (project_id: string, job_id: string, measure: string, component: "scalar" | "native", bins: number) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/jobs/${encodeURIComponent(job_id)}/distribution?measure=${encodeURIComponent(measure)}&component=${component}&bins=${bins}`).then((r) => readJson<DistributionOut>(r)),
+  drilldown: (project_id: string, job_id: string, min_scalar: number, max_scalar: number, limit = 60) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/jobs/${encodeURIComponent(job_id)}/drilldown?min_scalar=${min_scalar}&max_scalar=${max_scalar}&outcome=MEASURED&limit=${limit}`).then((r) => readJson<{ total: number; rows: DrilldownRow[] }>(r)),
+  drilldownFailures: (project_id: string, job_id: string, limit = 60) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/jobs/${encodeURIComponent(job_id)}/drilldown?outcome=ENGINE_ROW_FAILURE&limit=${limit}`).then((r) => readJson<{ total: number; rows: DrilldownRow[] }>(r)),
+  sampleQuality: (project_id: string, sample_id: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/samples/${encodeURIComponent(sample_id)}/quality`).then((r) => readJson<SampleQualityOut>(r)),
   projects: () => fetch("/api/projects").then((r) => readJson<ProjectOut[]>(r)),
   createProject: (name: string, description: string, purpose_scope: string) =>
     fetch("/api/projects", {
@@ -842,16 +1243,35 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name }),
     }).then((r) => readJson<ProjectOut>(r)),
+  projectPurgeScope: (project_id: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/purge-scope`).then((r) => readJson<ProjectPurgeScopeOut>(r)),
+  purgeProject: (project_id: string, confirm: string) =>
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/purge`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm }),
+    }).then((r) => readJson<ProjectPurgeOut>(r)),
   health: () => fetch("/api/health").then((r) => readJson<HealthOut>(r)),
+  ready: () => fetch("/api/ready").then((response) => {
+    if (response.status === 200 || response.status === 503) {
+      return response.json() as Promise<ReadyOut>;
+    }
+    return readJson<ReadyOut>(response);
+  }),
+  operationalMetrics: () => fetch("/api/metrics").then((r) => readJson<OperationalMetricsOut>(r)),
   resources: () => fetch("/api/resources").then((r) => readJson<ResourceOut[]>(r)),
   registeredSamples: () => fetch("/api/samples/registered").then((r) => readJson<RegisteredSample[]>(r)),
   runs: (projectId: string) =>
-    fetch(`/api/runs?project_id=${encodeURIComponent(projectId)}&limit=10000`).then((r) => readJson<RunSummaryOut[]>(r)),
-  assess: (image_path: string, purpose_scope: string, project_id: string | null) =>
+    fetch(`/api/projects/${encodeURIComponent(projectId)}/runs?limit=10000`).then((r) => readJson<RunSummaryOut[]>(r)),
+  assess: (registered_sample_id: string, purpose_scope: string, project_id: string | null) =>
     fetch("/api/quality/assess", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(project_id ? { image_path, purpose_scope, project_id } : { image_path, purpose_scope }),
+      body: JSON.stringify(project_id ? { registered_sample_id, purpose_scope, project_id } : { registered_sample_id, purpose_scope }),
     }).then((r) => readJson<AssessResponse>(r)),
-  imageUrl: (path: string) => `/api/samples/image?path=${encodeURIComponent(path)}`,
+  registeredSampleDetection: (registered_sample_id: string) =>
+    fetch(`/api/detection?registered_sample_id=${encodeURIComponent(registered_sample_id)}`).then((r) => readJson<DetectionGeometryOut>(r)),
+  registeredSampleOfiqLandmarks: (registered_sample_id: string) =>
+    fetch(`/api/ofiq-landmarks?registered_sample_id=${encodeURIComponent(registered_sample_id)}`).then((r) => readJson<OfiqLandmarksOut>(r)),
+  imageUrl: (registered_sample_id: string) => `/api/samples/image?registered_sample_id=${encodeURIComponent(registered_sample_id)}`,
 };

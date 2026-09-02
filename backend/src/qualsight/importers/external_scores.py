@@ -32,6 +32,13 @@ from ..domain.primitives import ArtifactIdentity as DomainArtifactIdentity, Cano
 from ..domain.run import CompletedRun, LogRecord, MetricObservation, RunStatus, ScientificSupportState
 from ..engines.ofiq.adapter import _not_applicable, content_id
 from ..execution.cli_runtime import USABLE_RESOURCE_STATES
+from ..execution.prepared_output import (
+    PreparedOutputError,
+    create_staging_directory,
+    discard_staging_directory,
+    load_prepared_output,
+    prepare_and_publish,
+)
 from ..metrics.verification import ComparisonInputs, compute_verification_metrics
 from ..provenance import application_version, environment_identity, hardware_identity, repository_identity, sha256_bytes, sha256_file
 
@@ -39,6 +46,11 @@ EXTERNAL_LEAF_ID = "QS-C21.EXTERNAL"
 EXTERNAL_CONDITION_ID = "EXTERNALLY_COMPUTED"
 IMPORTER_VERSION = "1.0.0"
 REQUIRED_COLUMNS = ("pair_id", "score")
+EXTERNAL_IMPORT_ARTIFACT_NAMES = (
+    "comparisons.parquet",
+    "verification_metrics.json",
+)
+EXTERNAL_IMPORT_OPERATION_KIND = "EXTERNAL_SCORE_IMPORT"
 
 
 class ExternalScoreImportError(RuntimeError):
@@ -96,6 +108,147 @@ class ExternalImportResult:
     mapping: dict[str, Any]
 
 
+def recover_prepared_external_score_import(
+    directory: Path,
+    *,
+    matrix_id: str,
+    project_id: str,
+    dataset_id: str,
+    protocol_id: str,
+    resource_id: str,
+    request_sha256: str,
+) -> ExternalImportResult:
+    """Validate and reconstruct one fully published external-score import."""
+
+    try:
+        receipt = load_prepared_output(
+            directory,
+            operation_kind=EXTERNAL_IMPORT_OPERATION_KIND,
+            result_id=matrix_id,
+            project_id=project_id,
+            request_sha256=request_sha256,
+            artifact_names=EXTERNAL_IMPORT_ARTIFACT_NAMES,
+        )
+        record = receipt["record"]
+        if set(record) != {
+            "comparison_count",
+            "condition_id",
+            "failed_count",
+            "leaf_id",
+            "mapping",
+            "matcher_id",
+            "matrix_id",
+            "metrics",
+            "run",
+            "scored_count",
+        }:
+            raise ExternalScoreImportError(
+                "prepared external-score record contract differs"
+            )
+        run = CompletedRun.model_validate_json(
+            json.dumps(record["run"], separators=(",", ":"), ensure_ascii=False)
+        )
+        metrics = record["metrics"]
+        mapping = record["mapping"]
+        comparisons_path = directory / "comparisons.parquet"
+        metrics_path = directory / "verification_metrics.json"
+        configuration = json.loads(run.configuration.text)
+        comparison_count = int(record["comparison_count"])
+        scored_count = int(record["scored_count"])
+        failed_count = int(record["failed_count"])
+        expected_experiment_id = content_id(
+            "experiment",
+            project_id,
+            dataset_id,
+            protocol_id,
+            resource_id,
+            EXTERNAL_CONDITION_ID,
+        )
+        comparison_table = pq.read_table(comparisons_path)
+        score_count = (
+            comparison_table.num_rows - comparison_table.column("score").null_count
+        )
+        failure_count = (
+            comparison_table.num_rows - comparison_table.column("failure").null_count
+        )
+        expected_columns = {
+            "pair_id",
+            "fold",
+            "source_order",
+            "label",
+            "left_sample_id",
+            "right_sample_id",
+            "left_subject_id",
+            "right_subject_id",
+            "score",
+            "failure",
+            "failure_side",
+            "left_face_count",
+            "right_face_count",
+        }
+        artifacts = {artifact.uri: artifact for artifact in run.artifacts}
+        if (
+            record["matrix_id"] != matrix_id
+            or record["leaf_id"] != EXTERNAL_LEAF_ID
+            or record["matcher_id"] != resource_id
+            or record["condition_id"] != EXTERNAL_CONDITION_ID
+            or run.project_id != project_id
+            or run.experiment_id != expected_experiment_id
+            or run.status is not RunStatus.COMPLETED
+            or run.matcher is None
+            or run.matcher.component_id != resource_id
+            or run.matcher_preprocessing is None
+            or run.matcher_preprocessing.component_id != EXTERNAL_CONDITION_ID
+            or run.pair_search_protocol.component_id != protocol_id
+            or configuration.get("matrix_id") != matrix_id
+            or configuration.get("protocol_id") != protocol_id
+            or configuration.get("leaf_id") != EXTERNAL_LEAF_ID
+            or configuration.get("provenance_marker")
+            != ProvenanceMarker.EXTERNALLY_COMPUTED.value
+            or configuration.get("artifact", {}).get("resource_id") != resource_id
+            or set(artifacts) != {str(comparisons_path), str(metrics_path)}
+            or any(
+                sha256_file(Path(uri)) != artifact.sha256
+                for uri, artifact in artifacts.items()
+            )
+            or json.loads(metrics_path.read_text(encoding="utf-8")) != metrics
+            or not isinstance(metrics, dict)
+            or not isinstance(mapping, dict)
+            or comparison_count < 1
+            or scored_count < 0
+            or failed_count < 0
+            or scored_count + failed_count != comparison_count
+            or comparison_table.num_rows != comparison_count
+            or set(comparison_table.column_names) != expected_columns
+            or score_count != scored_count
+            or failure_count != failed_count
+            or mapping.get("protocol_pairs") != comparison_count
+            or metrics.get("counts", {}).get("trials") != comparison_count
+        ):
+            raise ExternalScoreImportError(
+                "prepared external-score result identity differs"
+            )
+        return ExternalImportResult(
+            leaf_id=EXTERNAL_LEAF_ID,
+            matcher_id=resource_id,
+            condition_id=EXTERNAL_CONDITION_ID,
+            run=run,
+            metrics=metrics,
+            comparisons_parquet=comparisons_path,
+            embeddings_path=None,
+            comparison_count=comparison_count,
+            scored_count=scored_count,
+            failed_count=failed_count,
+            mapping=mapping,
+        )
+    except ExternalScoreImportError:
+        raise
+    except (PreparedOutputError, OSError, TypeError, ValueError, KeyError) as error:
+        raise ExternalScoreImportError(
+            "prepared external-score result failed integrity verification"
+        ) from error
+
+
 class ExternalScoreImporter:
     """Import one registered external score artifact over one frozen protocol into an immutable Run."""
 
@@ -132,7 +285,21 @@ class ExternalScoreImporter:
             raise ExternalScoreImportError("protocol dataset is not recorded")
         self.matrix_id = content_id("external-import", project.project_id, protocol.protocol_id, resource_id, self.score_identity.sha256)
         self.job_dir = job_root / self.matrix_id.replace(":", "_")
-        if self.job_dir.exists():
+        self.leaf_dir = self.job_dir / EXTERNAL_LEAF_ID.replace(".", "_")
+        self.operation_request = {
+            "dataset_id": self.dataset.dataset_id,
+            "field_mapping": self.field_mapping,
+            "matrix_id": self.matrix_id,
+            "protocol_id": self.protocol.protocol_id,
+            "purpose_scope": self.purpose_scope,
+            "resource_id": self.resource_id,
+            "score_sha256": self.score_identity.sha256,
+            "sidecar_sha256": (
+                self.sidecar_identity.sha256 if self.sidecar_identity is not None else None
+            ),
+        }
+        self.request_sha256 = CanonicalJson.from_value(self.operation_request).sha256
+        if store.matcher_leaves(matrix_id=self.matrix_id):
             raise ExternalScoreImportError("this artifact is already imported for this protocol and project")
 
     # -- mapping ------------------------------------------------------------------
@@ -209,28 +376,88 @@ class ExternalScoreImporter:
 
     # -- run --------------------------------------------------------------------
 
-    def run(self) -> ExternalImportResult:
+    def run(
+        self,
+        *,
+        request_sha256: str | None = None,
+        operation_id: str | None = None,
+    ) -> ExternalImportResult:
+        effective_request_sha256 = request_sha256 or self.request_sha256
+        if self.leaf_dir.exists() or self.leaf_dir.is_symlink():
+            result = recover_prepared_external_score_import(
+                self.leaf_dir,
+                matrix_id=self.matrix_id,
+                project_id=self.project.project_id,
+                dataset_id=self.dataset.dataset_id,
+                protocol_id=self.protocol.protocol_id,
+                resource_id=self.resource_id,
+                request_sha256=effective_request_sha256,
+            )
+        else:
+            staging = create_staging_directory(
+                self.leaf_dir,
+                operation_kind=EXTERNAL_IMPORT_OPERATION_KIND,
+                result_id=self.matrix_id,
+                project_id=self.project.project_id,
+                request_sha256=effective_request_sha256,
+            )
+            try:
+                result = self._prepare_import(staging)
+                prepare_and_publish(
+                    staging,
+                    self.leaf_dir,
+                    operation_kind=EXTERNAL_IMPORT_OPERATION_KIND,
+                    result_id=self.matrix_id,
+                    project_id=self.project.project_id,
+                    request_sha256=effective_request_sha256,
+                    artifact_names=EXTERNAL_IMPORT_ARTIFACT_NAMES,
+                    record={
+                        "comparison_count": result.comparison_count,
+                        "condition_id": result.condition_id,
+                        "failed_count": result.failed_count,
+                        "leaf_id": result.leaf_id,
+                        "mapping": result.mapping,
+                        "matcher_id": result.matcher_id,
+                        "matrix_id": self.matrix_id,
+                        "metrics": result.metrics,
+                        "run": result.run.model_dump(mode="json"),
+                        "scored_count": result.scored_count,
+                    },
+                )
+            finally:
+                discard_staging_directory(staging)
+        leaf = _LeafView(result)
+        if operation_id is None:
+            self.store.record_matcher_leaf(self, leaf)
+        else:
+            self.store.record_external_score_import(
+                self,
+                leaf,
+                operation_id=operation_id,
+            )
+        return result
+
+    def _prepare_import(self, staging: Path) -> ExternalImportResult:
         started = _now()
         clock = time.perf_counter()
         rows, mapping = self._mapped_rows()
-        self.job_dir.mkdir(parents=True, exist_ok=False)
-        leaf_dir = self.job_dir / EXTERNAL_LEAF_ID.replace(".", "_")
-        leaf_dir.mkdir()
         table = pa.Table.from_pylist(rows, schema=pa.schema([
             pa.field("pair_id", pa.string()), pa.field("fold", pa.int32()), pa.field("source_order", pa.int32()), pa.field("label", pa.string()),
             pa.field("left_sample_id", pa.string()), pa.field("right_sample_id", pa.string()), pa.field("left_subject_id", pa.string()), pa.field("right_subject_id", pa.string()),
             pa.field("score", pa.float64()), pa.field("failure", pa.string()), pa.field("failure_side", pa.string()), pa.field("left_face_count", pa.int32()), pa.field("right_face_count", pa.int32()),
         ]))
-        comparisons_path = leaf_dir / "comparisons.parquet"
-        pq.write_table(table, comparisons_path, compression="zstd")
+        comparisons_path = self.leaf_dir / "comparisons.parquet"
+        staged_comparisons_path = staging / comparisons_path.name
+        pq.write_table(table, staged_comparisons_path, compression="zstd")
         metrics = compute_verification_metrics(ComparisonInputs(
             scores=np.array([r["score"] if r["score"] is not None else np.nan for r in rows], dtype=np.float64),
             mated=np.array([r["label"] == ComparisonLabel.MATED.value for r in rows]),
             failed=np.array([r["failure"] is not None for r in rows]),
             folds=np.array([r["fold"] for r in rows], dtype=object),
         ))
-        metrics_path = leaf_dir / "verification_metrics.json"
-        metrics_path.write_text(json.dumps(metrics, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+        metrics_path = self.leaf_dir / "verification_metrics.json"
+        staged_metrics_path = staging / metrics_path.name
+        staged_metrics_path.write_text(json.dumps(metrics, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
         seconds = time.perf_counter() - clock
         scored = sum(1 for r in rows if r["score"] is not None)
         sidecar = json.loads(Path(self.sidecar_identity.path).read_text(encoding="utf-8")) if self.sidecar_identity else {}
@@ -246,7 +473,7 @@ class ExternalScoreImporter:
         if configuration.text and sidecar.get("score_direction", "HIGHER_IS_MORE_SIMILAR") != ScoreDirection.HIGHER_IS_MORE_SIMILAR.value:
             raise ExternalScoreImportError("only HIGHER_IS_MORE_SIMILAR score artifacts are supported by the registered verification definitions")
         experiment_id = content_id("experiment", self.project.project_id, self.dataset.dataset_id, self.protocol.protocol_id, self.resource_id, EXTERNAL_CONDITION_ID)
-        run_id = content_id("run", experiment_id, started.isoformat(), sha256_file(comparisons_path), self.score_identity.sha256)
+        run_id = content_id("run", experiment_id, started.isoformat(), sha256_file(staged_comparisons_path), self.score_identity.sha256)
         policy = metrics["by_policy"]["EXCLUDE_FAILED_TRIALS"]
         generalized = metrics["by_policy"]["FAILURES_AS_REJECT"]
         observations = [
@@ -263,9 +490,9 @@ class ExternalScoreImporter:
             if point.get("threshold") is not None:
                 observations.append(MetricObservation(metric_id=f"biometric.verification.fnmr@1.0.0[EXCLUDE_FAILED_TRIALS]@fmr<={point['target_fmr']}", value=float(point["fnmr"]), unit="rate"))
         artifacts = []
-        for path, kind, media, backend in ((comparisons_path, ArtifactKind.TABLE, "application/vnd.apache.parquet", StorageBackend.PARQUET), (metrics_path, ArtifactKind.METRICS, "application/json", StorageBackend.FILESYSTEM)):
-            digest = sha256_file(path)
-            artifacts.append(Artifact(artifact_id=content_id("artifact", run_id, digest, path.name), run_id=run_id, kind=kind, storage_backend=backend, uri=str(path), sha256=digest, size_bytes=path.stat().st_size, media_type=media, classification=DataClassification.SENSITIVE_BIOMETRIC_DERIVED, created_at=_now()))
+        for path, source_path, kind, media, backend in ((comparisons_path, staged_comparisons_path, ArtifactKind.TABLE, "application/vnd.apache.parquet", StorageBackend.PARQUET), (metrics_path, staged_metrics_path, ArtifactKind.METRICS, "application/json", StorageBackend.FILESYSTEM)):
+            digest = sha256_file(source_path)
+            artifacts.append(Artifact(artifact_id=content_id("artifact", run_id, digest, path.name), run_id=run_id, kind=kind, storage_backend=backend, uri=str(path), sha256=digest, size_bytes=source_path.stat().st_size, media_type=media, classification=DataClassification.SENSITIVE_BIOMETRIC_DERIVED, created_at=_now()))
         score_domain = DomainArtifactIdentity(path=self.score_identity.path, sha256=self.score_identity.sha256, size_bytes=self.score_identity.size_bytes, mtime_ns=self.score_identity.mtime_ns)
         model_hashes = [score_domain]
         if self.sidecar_identity is not None:
@@ -293,7 +520,6 @@ class ExternalScoreImporter:
             exit_code=0, status=RunStatus.COMPLETED, scientific_support=ScientificSupportState.NOT_ASSESSED,
         )
         result = ExternalImportResult(EXTERNAL_LEAF_ID, self.resource_id, EXTERNAL_CONDITION_ID, run, metrics, comparisons_path, None, len(rows), scored, len(rows) - scored, mapping)
-        self.store.record_matcher_leaf(self, _LeafView(result))
         return result
 
 

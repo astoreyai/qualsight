@@ -13,7 +13,7 @@ This registry gives every PRD section a stable requirement ID, release classific
 | Artifact | SHA-256 | Mtime |
 |---|---|---|
 | PRD.md | cbdd00e9a43c67ae1e803b08cb1729fae23f842a79e3be5e7f18246c3bbf3025 | 2026-08-13 17:06:54.266266242 -0500 |
-| PLAN.md | dc6afaf12fc824709569500717170c2cc40cf32e97a49f7ae238d16f66bbe699 | 2026-08-13 17:06:54.918284036 -0500 |
+| PLAN.md | c60914f1815c3c241daf536c4427d4778ae69bd2c716807481a067bf3ea6cff4 | 2026-09-02 13:23:06.081840330 -0500 |
 | Owner authorization receipt | 48b11e76ac1d7288c40f0052fa000ae72f7edd4c930db3057751c7c7f841a3fa | 2026-08-14 10:18:34.006247146 -0500 |
 If any recorded identity changes, this registry is stale until the changed clauses are reviewed and the affected rows are updated explicitly.
 
@@ -149,7 +149,7 @@ Conditional requirements are added to the applicable phase gate only when activa
 
 ## Controlled beta release boundary
 
-The `0.1.0-beta.2` release authority is limited to one trusted researcher operating one
+The `0.1.0-beta.3` release authority is limited to one trusted researcher operating one
 Clarkson-controlled workstation. The beta-required controls are the accepted QS-A10 through QS-H74
 gates, the exact committed dependency locks and resource registry, loopback-only service binding,
 single-process data-directory ownership, private managed storage, explicit and hash-verified add-on
@@ -163,7 +163,8 @@ runtime bytes remain external and are not release payloads.
 The release is unsigned, nonportable, not authorized for production or shared multi-user operation, and
 does not include biometric data, model checkpoints, native runtimes, or operational databases. Its
 Python socket guard detects and refuses non-loopback socket use by the Python process; it is not an
-operating-system egress control for native executables or child processes. Remote API connectors remain unadmitted. The implemented 1:N, controlled-transformation, and container research extensions remain
+operating-system egress control for native executables or child processes. Remote API connectors remain unadmitted. Beta 3 admits the recorded single-image transformation and descriptive trajectory workflow;
+dataset-scale 1:N execution, population degradation claims, and the container research adapter remain
 outside QS-H74 beta acceptance even though their code and local validation are present in the repository.
 
 ## DHS transition-only controls

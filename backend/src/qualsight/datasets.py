@@ -46,7 +46,6 @@ from .execution.registry_binding import RegisteredResource, ResourceRegistry
 from .provenance import sha256_bytes, sha256_file
 
 LFW_RESOURCE_ID = "lfw-funneled-local-candidate"
-LFW_TREE_ROOT = Path("/mnt/projects/datasets/lfw/lfw_funneled")
 
 
 class DatasetImportError(RuntimeError):
@@ -133,6 +132,14 @@ class RegisteredDatasetImporter:
         if resource.state not in {"APPROVED_LOCAL_RESEARCH_USE", "VERIFIED_LIMITED_USE"}:
             raise DatasetImportError(f"LFW resource state {resource.state} does not permit import")
         raw = self.registry.raw_resource(LFW_RESOURCE_ID)
+        tree_checks = [
+            check for check in raw.get("checks", []) if check.get("type") == "tree_manifest"
+        ]
+        if len(tree_checks) != 1 or not isinstance(tree_checks[0].get("root"), str):
+            raise DatasetImportError("the LFW resource does not register one tree root")
+        lfw_tree_root = Path(tree_checks[0]["root"])
+        if not lfw_tree_root.is_absolute():
+            raise DatasetImportError("the registered LFW tree root is not absolute")
         image_manifest_path, pair_manifest_path = self._lfw_artifacts(resource)
         image_manifest_identity = DomainArtifactIdentity(
             path=str(image_manifest_path),
@@ -158,7 +165,7 @@ class RegisteredDatasetImporter:
                 "manifest_version": "1.0.0",
                 "image_manifest": image_manifest_identity.model_dump(mode="json"),
                 "pair_manifest": pair_manifest_identity.model_dump(mode="json"),
-                "tree_root": str(LFW_TREE_ROOT),
+                "tree_root": str(lfw_tree_root),
                 "identity_rule": "subject_id is the immediate parent directory name of each image (LFW layout <subject>/<subject>_<index>.jpg)",
                 "sample_count": len(rows),
                 "selection_rule": "Every image row of the registered image manifest; no filtering.",
@@ -179,7 +186,7 @@ class RegisteredDatasetImporter:
         for row in rows:
             relative = row["path"]
             path_counter[relative] += 1
-            absolute = LFW_TREE_ROOT / relative
+            absolute = lfw_tree_root / relative
             subject_id = Path(relative).parent.name
             if not subject_id:
                 raise DatasetImportError(f"row without an identity directory: {relative}")

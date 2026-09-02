@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type AddonCatalogOut, type CrossContrastSummary, type CrossMatcherOut, type CrossMatcherSummary, type CrossPairRow, type JobOut, type MatcherLeaf } from "./api";
 import { PairEvidence } from "./PairEvidence";
+import { EvidenceOpenButton, type EvidenceRequest } from "./EvidenceDetail";
 import { numericParameterError } from "./parameterContract";
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -29,10 +30,11 @@ interface CrossMatcherProps {
   projectId: string | null;
   onMessage: (message: string) => void;
   onWorkflowTerminal?: () => void;
+  onOpenEvidence: (request: EvidenceRequest) => void;
 }
 
 /** Cross-matcher workbench: fixed-condition matcher contrasts, fixed-matcher preprocessing contrasts, disagreement drilldown, annotations (QS-E40..E42). */
-export function CrossMatcher({ projectId, onMessage, onWorkflowTerminal }: CrossMatcherProps) {
+export function CrossMatcher({ projectId, onMessage, onWorkflowTerminal, onOpenEvidence }: CrossMatcherProps) {
   const [leaves, setLeaves] = useState<MatcherLeaf[]>([]);
   const [jobs, setJobs] = useState<JobOut[]>([]);
   const [analyses, setAnalyses] = useState<CrossMatcherSummary[]>([]);
@@ -181,11 +183,11 @@ export function CrossMatcher({ projectId, onMessage, onWorkflowTerminal }: Cross
   }, [loadCatalog]);
 
   useEffect(() => {
-    if (!running) return;
+    if (!running || !projectId) return;
     const epoch = projectEpoch.current;
     const analysisId = running;
     const handle = window.setInterval(() => {
-      api.crossMatcher(analysisId).then((status) => {
+      api.crossMatcher(projectId, analysisId).then((status) => {
         if (projectEpoch.current !== epoch) return;
         setPollError(null);
         if (status.state === "COMPLETED" || status.state === "FAILED" || status.state === "INTERRUPTED") {
@@ -206,7 +208,7 @@ export function CrossMatcher({ projectId, onMessage, onWorkflowTerminal }: Cross
       });
     }, 1500);
     return () => window.clearInterval(handle);
-  }, [running, refresh, onMessage, onWorkflowTerminal]);
+  }, [running, projectId, refresh, onMessage, onWorkflowTerminal]);
 
   const start = useCallback(async () => {
     const replicatesError = numericParameterError(replicates, analysisContracts?.bootstrap_replicates ?? null, "Bootstrap replicates");
@@ -219,7 +221,7 @@ export function CrossMatcher({ projectId, onMessage, onWorkflowTerminal }: Cross
       if (projectEpoch.current !== epoch) return;
       if (started.already_recorded) {
         onMessage(`Cross-matcher analysis ${shortHash(started.analysis_id)} was already recorded; showing it`);
-        const nextDetail = await api.crossMatcher(started.analysis_id);
+        const nextDetail = await api.crossMatcher(projectId, started.analysis_id);
         if (projectEpoch.current !== epoch) return;
         setDetail(nextDetail);
       } else {
@@ -234,30 +236,31 @@ export function CrossMatcher({ projectId, onMessage, onWorkflowTerminal }: Cross
   }, [projectId, selectedMatrix, selectedMatrixLeaves.length, selectedComparableLeafCount, selectedProtocolCount, selectedJob, replicates, analysisContracts, onMessage]);
 
   const open = useCallback(async (analysisId: string) => {
+    if (!projectId) return;
     const epoch = projectEpoch.current;
     try {
-      const nextDetail = await api.crossMatcher(analysisId);
+      const nextDetail = await api.crossMatcher(projectId, analysisId);
       if (projectEpoch.current !== epoch) return;
       setDetail(nextDetail);
       setContrast(null); setPairs(null);
     } catch (error) {
       if (projectEpoch.current === epoch) onMessage(error instanceof Error ? error.message : String(error));
     }
-  }, [onMessage]);
+  }, [projectId, onMessage]);
 
   const showPairs = useCallback(async (item: CrossContrastSummary, nextCategory: string) => {
-    if (!detail) return;
+    if (!detail || !projectId) return;
     const epoch = projectEpoch.current;
     setContrast(item);
     setCategory(nextCategory);
     try {
-      const nextPairs = await api.crossPairs(detail.analysis_id, item.contrast_id, nextCategory);
+      const nextPairs = await api.crossPairs(projectId, detail.analysis_id, item.contrast_id, nextCategory);
       if (projectEpoch.current !== epoch) return;
       setPairs(nextPairs);
     } catch (error) {
       if (projectEpoch.current === epoch) onMessage(error instanceof Error ? error.message : String(error));
     }
-  }, [detail, onMessage]);
+  }, [detail, projectId, onMessage]);
 
   const annotate = useCallback(async (row: CrossPairRow) => {
     if (!projectId || !detail || !contrast) return;
@@ -365,7 +368,7 @@ export function CrossMatcher({ projectId, onMessage, onWorkflowTerminal }: Cross
               <td>{item.quality_measure} · {item.pair_quality_policy.replace("pair.quality.", "")}</td>
               <td className="mono">{item.target_fmr}</td>
               <td className="mono">{item.matcher_contrasts} matcher · {item.preprocessing_contrasts} preprocessing</td>
-              <td><a href={item.links.run} className="mono">{shortHash(item.run_id, 10)}</a></td>
+              <td>{projectId ? <EvidenceOpenButton testId="cross-analysis-run-evidence" request={{ kind: "run", href: item.links.run, evidenceId: item.run_id, projectId, label: `Cross-matcher Run ${shortHash(item.run_id, 10)}` }} onOpen={onOpenEvidence} className="mono">{shortHash(item.run_id, 10)}</EvidenceOpenButton> : shortHash(item.run_id, 10)}</td>
             </tr>
           ))}
         </tbody>
@@ -429,9 +432,9 @@ export function CrossMatcher({ projectId, onMessage, onWorkflowTerminal }: Cross
               <div>
                 <h4>Provenance</h4>
                 <dl className="facts">
-                  <dt>Run A</dt><dd><a href={`/api/runs/${fullContrast.a.run_id}`} className="mono">{shortHash(fullContrast.a.run_id, 14)}</a> · {fullContrast.a.leaf_id} · {fullContrast.a.condition_id}</dd>
-                  <dt>Run B</dt><dd><a href={`/api/runs/${fullContrast.b.run_id}`} className="mono">{shortHash(fullContrast.b.run_id, 14)}</a> · {fullContrast.b.leaf_id} · {fullContrast.b.condition_id}</dd>
-                  <dt>Analysis Run</dt><dd><a href={detail.summary.links.run} className="mono">{shortHash(detail.summary.run_id, 14)}</a></dd>
+                  <dt>Run A</dt><dd>{projectId ? <EvidenceOpenButton testId="cross-contrast-run-a-evidence" request={{ kind: "run", href: `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(fullContrast.a.run_id)}`, evidenceId: fullContrast.a.run_id, projectId, label: `Contrast Run A ${shortHash(fullContrast.a.run_id, 14)}` }} onOpen={onOpenEvidence} className="mono">{shortHash(fullContrast.a.run_id, 14)}</EvidenceOpenButton> : shortHash(fullContrast.a.run_id, 14)} · {fullContrast.a.leaf_id} · {fullContrast.a.condition_id}</dd>
+                  <dt>Run B</dt><dd>{projectId ? <EvidenceOpenButton testId="cross-contrast-run-b-evidence" request={{ kind: "run", href: `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(fullContrast.b.run_id)}`, evidenceId: fullContrast.b.run_id, projectId, label: `Contrast Run B ${shortHash(fullContrast.b.run_id, 14)}` }} onOpen={onOpenEvidence} className="mono">{shortHash(fullContrast.b.run_id, 14)}</EvidenceOpenButton> : shortHash(fullContrast.b.run_id, 14)} · {fullContrast.b.leaf_id} · {fullContrast.b.condition_id}</dd>
+                  <dt>Analysis Run</dt><dd>{projectId ? <EvidenceOpenButton testId="cross-summary-run-evidence" request={{ kind: "run", href: detail.summary.links.run, evidenceId: detail.summary.run_id, projectId, label: `Cross-matcher analysis Run ${shortHash(detail.summary.run_id, 14)}` }} onOpen={onOpenEvidence} className="mono">{shortHash(detail.summary.run_id, 14)}</EvidenceOpenButton> : shortHash(detail.summary.run_id, 14)}</dd>
                   <dt>Threshold kinds</dt><dd>MATCHER_THRESHOLD per Run (recorded operating point); transferred thresholds labelled MATCHER_THRESHOLD_TRANSFERRED</dd>
                 </dl>
               </div>
@@ -450,10 +453,10 @@ export function CrossMatcher({ projectId, onMessage, onWorkflowTerminal }: Cross
                       <span className="mono">{row.pair_id} · {row.label} · {CATEGORY_LABEL[row.category]}</span>
                       <span className="mono">A {row.score_a === null ? row.failure_a : row.score_a.toFixed(4)} · B {row.score_b === null ? row.failure_b : row.score_b.toFixed(4)} · q {row.quality_left ?? "—"}/{row.quality_right ?? "—"} → {row.pair_quality ?? "—"}</span>
                       <span className="links">
-                        <a href={row.links.left_quality}>left quality</a>
-                        <a href={row.links.right_quality}>right quality</a>
-                        <a href={row.links.run_a}>run A</a>
-                        <a href={row.links.run_b}>run B</a>
+                        {projectId && <EvidenceOpenButton testId="cross-left-quality-evidence" request={{ kind: "sample-quality", href: row.links.left_quality, evidenceId: row.left_sample_id, projectId, label: `Left sample quality ${shortHash(row.left_sample_id, 14)}` }} onOpen={onOpenEvidence}>left quality</EvidenceOpenButton>}
+                        {projectId && <EvidenceOpenButton testId="cross-right-quality-evidence" request={{ kind: "sample-quality", href: row.links.right_quality, evidenceId: row.right_sample_id, projectId, label: `Right sample quality ${shortHash(row.right_sample_id, 14)}` }} onOpen={onOpenEvidence}>right quality</EvidenceOpenButton>}
+                        {projectId && <EvidenceOpenButton testId="cross-pair-run-a-evidence" request={{ kind: "run", href: row.links.run_a, evidenceId: fullContrast.a.run_id, projectId, label: `Pair Run A ${shortHash(fullContrast.a.run_id, 14)}` }} onOpen={onOpenEvidence}>run A</EvidenceOpenButton>}
+                        {projectId && <EvidenceOpenButton testId="cross-pair-run-b-evidence" request={{ kind: "run", href: row.links.run_b, evidenceId: fullContrast.b.run_id, projectId, label: `Pair Run B ${shortHash(fullContrast.b.run_id, 14)}` }} onOpen={onOpenEvidence}>run B</EvidenceOpenButton>}
                         <button type="button" className="secondary" data-testid="cross-evidence-open" onClick={() => setEvidencePair(evidencePair?.pair === row.pair_id ? null : { pair: row.pair_id, run: row.links.run_a.split("/").pop() ?? "" })}>
                           {evidencePair?.pair === row.pair_id ? "hide evidence" : "match evidence (A)"}
                         </button>
@@ -471,7 +474,7 @@ export function CrossMatcher({ projectId, onMessage, onWorkflowTerminal }: Cross
                       </span>
                     </div>
                   {evidencePair?.pair === row.pair_id && (
-                      <PairEvidence runId={evidencePair.run} pairId={row.pair_id} onClose={() => setEvidencePair(null)} />
+                      <PairEvidence projectId={projectId} runId={evidencePair.run} pairId={row.pair_id} onClose={() => setEvidencePair(null)} />
                     )}
                   </li>
                 ))}

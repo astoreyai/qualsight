@@ -15,7 +15,7 @@ matcher, the preprocessing condition, and the threshold.
 from __future__ import annotations
 
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -30,7 +30,15 @@ from ..domain.entities import Artifact, ArtifactKind, DataClassification, Experi
 from ..domain.primitives import ArtifactIdentity as DomainArtifactIdentity, CanonicalJson, ComponentBinding, ComponentState
 from ..domain.run import CompletedRun, LogRecord, MetricObservation, RunStatus, ScientificSupportState
 from ..engines.ofiq.adapter import content_id
+from ..execution.prepared_output import (
+    PreparedOutputError,
+    create_staging_directory,
+    discard_staging_directory,
+    load_prepared_output,
+    prepare_and_publish,
+)
 from ..matchers.alignment import ARCFACE_TEMPLATE_SHA256
+from ..matchers.bounded import embed_with_deadline, validate_execution_timeout
 from ..matchers.conditions import CONDITION_DEFINITIONS, ConditionId, preprocess
 from ..matchers.detection import SCRFDDetector
 from ..matchers.matrix import SCRFD_RESOURCE_ID
@@ -73,6 +81,72 @@ class DegradationResult:
     summary: dict[str, Any]
 
 
+DEGRADATION_ARTIFACT_NAMES = ("degradation.json",)
+
+
+def recover_prepared_degradation_analysis(
+    directory: Path,
+    *,
+    analysis_id: str,
+    project_id: str,
+    request_sha256: str,
+) -> DegradationResult:
+    """Reconstruct a typed degradation result from its final receipt."""
+
+    try:
+        receipt = load_prepared_output(
+            directory,
+            operation_kind="DEGRADATION_ANALYSIS",
+            result_id=analysis_id,
+            project_id=project_id,
+            request_sha256=request_sha256,
+            artifact_names=DEGRADATION_ARTIFACT_NAMES,
+        )
+        record = receipt["record"]
+        if set(record) != {"experiment", "run", "summary"}:
+            raise DegradationAnalysisError(
+                "prepared degradation result contract differs"
+            )
+        run = CompletedRun.model_validate_json(
+            json.dumps(record["run"], separators=(",", ":"), ensure_ascii=False)
+        )
+        experiment = Experiment.model_validate_json(
+            json.dumps(record["experiment"], separators=(",", ":"), ensure_ascii=False)
+        )
+        summary = record["summary"]
+        document_path = directory / "degradation.json"
+        document = json.loads(document_path.read_text(encoding="utf-8"))
+        if (
+            run.project_id != project_id
+            or experiment.project_id != project_id
+            or summary.get("analysis_id") != analysis_id
+            or summary.get("run_id") != run.run_id
+            or {artifact.uri for artifact in run.artifacts} != {str(document_path)}
+            or any(
+                sha256_file(Path(artifact.uri)) != artifact.sha256
+                for artifact in run.artifacts
+            )
+        ):
+            raise DegradationAnalysisError(
+                "prepared degradation result identity differs"
+            )
+        return DegradationResult(
+            analysis_id,
+            run,
+            experiment,
+            document,
+            directory,
+            document_path,
+            summary,
+        )
+    except (PreparedOutputError, OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        if isinstance(error, DegradationAnalysisError):
+            raise
+        raise DegradationAnalysisError(
+            "prepared degradation result failed integrity verification"
+        ) from error
+
+
 def _quality_by_sample(parquet_path: str) -> tuple[dict[str, dict[str, float | None]], list[str]]:
     table = pq.read_table(parquet_path)
     measures = sorted({name[: -len(".scalar")] for name in table.schema.names if name.endswith(".scalar")})
@@ -90,7 +164,7 @@ def _mean(values: list[float | None]) -> float | None:
 
 
 class DegradationAnalysisJob:
-    def __init__(self, *, store: Any, registry: Any, upstream: Any, repository_root: Path, project: Any, request: DegradationRequest, job_root: Path, actor: str, purpose_scope: str = "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1", runtime_manager: Any | None = None) -> None:
+    def __init__(self, *, store: Any, registry: Any, upstream: Any, repository_root: Path, project: Any, request: DegradationRequest, job_root: Path, actor: str, execution_timeout_seconds: float, purpose_scope: str = "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1", runtime_manager: Any | None = None) -> None:
         self.store = store
         self.registry = registry
         self.upstream = upstream
@@ -100,6 +174,12 @@ class DegradationAnalysisJob:
         self.actor = actor
         self.purpose_scope = purpose_scope
         self.runtime_manager = runtime_manager
+        try:
+            self.execution_timeout_seconds = validate_execution_timeout(
+                execution_timeout_seconds
+            )
+        except ValueError as error:
+            raise DegradationAnalysisError(str(error)) from error
         derived = store.derived_set(request.derived_set_id)
         if derived is None or derived["project_id"] != project.project_id:
             raise DegradationAnalysisError("derived set is not recorded in this project")
@@ -134,8 +214,6 @@ class DegradationAnalysisJob:
         self.detector = SCRFDDetector(Path(self.detector_identity.path), self.detector_identity.sha256)
         self.analysis_id = content_id("analysis", ANALYSIS_KIND, ANALYSIS_VERSION, request.derived_set_id, request.quality_job_id, request.baseline_quality_job_id or "", request.matcher_id, request.condition_id, f"{request.matcher_threshold:.10f}", self.protocol.protocol_id)
         self.directory = job_root / self.analysis_id.replace(":", "_")
-        if self.directory.exists():
-            raise DegradationAnalysisError("this degradation analysis is already recorded")
         self.progress: dict[str, Any] = {"phase": "created", "detail": ""}
 
     def _template(self, path: str, expected_sha: str) -> np.ndarray | None:
@@ -148,12 +226,12 @@ class DegradationAnalysisJob:
         result = preprocess(image, self.condition, self.detector)
         return None if result.failure is not None or result.crop_bgr is None else result.crop_bgr
 
-    def run(self) -> DegradationResult:
+    def run(self, *, request_sha256: str | None = None) -> DegradationResult:
         lease = self.runtime_manager.lease(self.matcher_id) if self.runtime_manager is not None else nullcontext(FrozenMatcher(self.matcher_id, self.registry, self.upstream))
         with lease as matcher:
-            return self._execute(matcher)
+            return self._execute(matcher, request_sha256=request_sha256)
 
-    def _execute(self, matcher: FrozenMatcher) -> DegradationResult:
+    def _execute(self, matcher: FrozenMatcher, *, request_sha256: str | None = None) -> DegradationResult:
         started = _now()
         clock = time.perf_counter()
         request = self.request
@@ -191,7 +269,18 @@ class DegradationAnalysisJob:
             if position % 100 == 0:
                 self.progress = {"phase": "templates", "detail": f"derived {position}/{len(self.rows)}"}
         self.progress = {"phase": "embed", "detail": f"{len(crops)} templates on {matcher.device}"}
-        embeddings = matcher.embed(np.stack(crops)) if crops else np.zeros((0, 512), dtype=np.float32)
+        embeddings = (
+            embed_with_deadline(
+                matcher_id=matcher.matcher_id,
+                registry=self.registry,
+                upstream=self.upstream,
+                crops_bgr=np.stack(crops),
+                timeout_seconds=self.execution_timeout_seconds,
+                process_label=self.analysis_id,
+            )
+            if crops
+            else np.zeros((0, 512), dtype=np.float32)
+        )
         threshold = float(request.matcher_threshold)
 
         def score(left_id: str, right_id: str) -> float | None:
@@ -271,7 +360,16 @@ class DegradationAnalysisJob:
                     "failure_onset": {"rule": "first level with any false non-match among the mated pairs", "first_level_index": next((lvl["level_index"] for lvl in levels if lvl["fnmr"]["events"] > 0), None)},
                 },
             })
-        self.directory.mkdir(parents=True, exist_ok=False)
+        effective_request_sha256 = request_sha256 or CanonicalJson.from_value(
+            asdict(self.request)
+        ).sha256
+        stage = create_staging_directory(
+            self.directory,
+            operation_kind="DEGRADATION_ANALYSIS",
+            result_id=self.analysis_id,
+            project_id=self.project.project_id,
+            request_sha256=effective_request_sha256,
+        )
         document = {
             "analysis_id": self.analysis_id, "kind": ANALYSIS_KIND, "version": ANALYSIS_VERSION,
             "sources": {"derived_set_id": request.derived_set_id, "derived_dataset_id": self.derived["derived_dataset_id"], "source_dataset_id": self.derived["source_dataset_id"], "derived_manifest_sha256": self.derived["manifest_sha256"], "quality_job_id": request.quality_job_id, "quality_run_id": self.quality_job["run_id"], "quality_parquet_sha256": self.quality_job["parquet_sha256"],
@@ -280,19 +378,45 @@ class DegradationAnalysisJob:
             "pair_selection": {"rule": "protocol pairs whose left sample belongs to the derived set's sources; the transformed left image is compared with the original right image", "mated_pairs": len(mated_pairs), "nonmated_pairs": len(nonmated_pairs)},
             "template_failures": failures, "measures": measures, "responses": responses,
         }
-        document_path = self.directory / "degradation.json"
+        document_path = stage / "degradation.json"
         document_path.write_text(json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
         seconds = time.perf_counter() - clock
-        run, experiment = self._run(started, seconds, document, document_path, matcher, threshold, str(matcher.device))
+        run, experiment = self._run(started, seconds, document, document_path, matcher, threshold, str(matcher.device), artifact_directory=self.directory)
         summary = {"analysis_id": self.analysis_id, "run_id": run.run_id, "derived_set_id": request.derived_set_id, "matcher_id": self.matcher_id.value, "condition_id": self.condition.value, "matcher_threshold": threshold, "transforms": [r["transform"] for r in responses],
                    "levels": sum(len(r["levels"]) for r in responses), "mated_pairs": len(mated_pairs), "nonmated_pairs": len(nonmated_pairs), "seconds": round(seconds, 1),
                    "fnmr_by_transform": {r["transform"]: [lvl["fnmr"]["rate"] for lvl in r["levels"]] for r in responses}, "uqs_by_transform": {r["transform"]: [lvl["quality"].get("UnifiedQualityScore") for lvl in r["levels"]] for r in responses}}
-        result = DegradationResult(self.analysis_id, run, experiment, document, self.directory, document_path, summary)
+        result = DegradationResult(
+            self.analysis_id,
+            run,
+            experiment,
+            document,
+            self.directory,
+            self.directory / document_path.name,
+            summary,
+        )
+        try:
+            prepare_and_publish(
+                stage,
+                self.directory,
+                operation_kind="DEGRADATION_ANALYSIS",
+                result_id=self.analysis_id,
+                project_id=self.project.project_id,
+                request_sha256=effective_request_sha256,
+                artifact_names=DEGRADATION_ARTIFACT_NAMES,
+                record={
+                    "run": json.loads(run.model_dump_json()),
+                    "experiment": json.loads(experiment.model_dump_json()),
+                    "summary": summary,
+                },
+            )
+        except BaseException:
+            discard_staging_directory(stage)
+            raise
         self.store.record_degradation_analysis(result)
         self.progress = {"phase": "completed", "detail": ""}
         return result
 
-    def _run(self, started: datetime, seconds: float, document: dict[str, Any], document_path: Path, matcher: FrozenMatcher, threshold: float, device: str) -> tuple[CompletedRun, Experiment]:
+    def _run(self, started: datetime, seconds: float, document: dict[str, Any], document_path: Path, matcher: FrozenMatcher, threshold: float, device: str, *, artifact_directory: Path | None = None) -> tuple[CompletedRun, Experiment]:
         binding = matcher.binding
         checkpoint_identity = next(item.identity for item in self.registry.resource(self.matcher_id.value).artifacts if item.role == "MODEL")
         quality_run = self.store.run(self.quality_job["run_id"])
@@ -312,7 +436,8 @@ class DegradationAnalysisJob:
                 if uqs is not None:
                     observations.append(MetricObservation(metric_id=f"degradation.uqs_mean[{response['transform']}={level['parameter']:g}]", value=float(uqs), unit="observation"))
         digest = sha256_file(document_path)
-        artifacts = (Artifact(artifact_id=content_id("artifact", run_id, digest, document_path.name), run_id=run_id, kind=ArtifactKind.METRICS, storage_backend=StorageBackend.FILESYSTEM, uri=str(document_path), sha256=digest, size_bytes=document_path.stat().st_size, media_type="application/json", classification=DataClassification.SENSITIVE_BIOMETRIC_DERIVED, created_at=_now()),)
+        artifact_path = (artifact_directory / document_path.name) if artifact_directory is not None else document_path
+        artifacts = (Artifact(artifact_id=content_id("artifact", run_id, digest, document_path.name), run_id=run_id, kind=ArtifactKind.METRICS, storage_backend=StorageBackend.FILESYSTEM, uri=str(artifact_path), sha256=digest, size_bytes=document_path.stat().st_size, media_type="application/json", classification=DataClassification.SENSITIVE_BIOMETRIC_DERIVED, created_at=_now()),)
         detector_domain = DomainArtifactIdentity(path=self.detector_identity.path, sha256=self.detector_identity.sha256, size_bytes=self.detector_identity.size_bytes, mtime_ns=self.detector_identity.mtime_ns)
         checkpoint_domain = DomainArtifactIdentity(path=checkpoint_identity.path, sha256=checkpoint_identity.sha256, size_bytes=checkpoint_identity.size_bytes, mtime_ns=checkpoint_identity.mtime_ns)
         transform_sha = sha256_bytes(f"{TRANSFORM_IDS[self.matcher_id]}:{COLOR_ORDER[self.matcher_id]}".encode("utf-8"))

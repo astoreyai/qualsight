@@ -74,6 +74,7 @@ class RealMatcherMatrixTests(unittest.TestCase):
             registry=cls.registry, registry_path=ROOT / "resources" / "resource-registry.json", repository_root=ROOT, upstream=upstream,
             store=cls.run_store, project=cls.project, dataset=cls.dataset, protocol=cls.protocol, pairs=cls.pairs,
             job_root=cls.data_dir / "matrix", selection_rule="the ten registered subset-fixture pairs of the frozen protocol (test gate)",
+            execution_timeout_seconds=settings.native_execution_timeout_seconds,
         )
         cls.leaves = cls.job.run()
 
@@ -150,6 +151,7 @@ class RealMatcherMatrixTests(unittest.TestCase):
                     matchers=matchers,
                     conditions=conditions,
                     selection_rule="the real registered invalid-axis contract gate",
+                    execution_timeout_seconds=self.job.execution_timeout_seconds,
                 )
 
     def test_conditions_and_matchers_are_separate_identities_never_pooled(self) -> None:

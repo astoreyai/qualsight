@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, type BundleOut, type DashboardOut, type FigureOut, type JobOut, type MatcherLeaf, type ReportOut, type ReproductionOut, type UtilitySummary } from "./api";
+import { api, type BundleOut, type DashboardDetailOut, type DashboardOut, type DashboardPanel, type FigureOut, type JobOut, type MatcherLeaf, type ReportOut, type ReproductionOut, type UtilitySummary } from "./api";
+import { EvidenceOpenButton, type EvidenceRequest } from "./EvidenceDetail";
 
 function shortHash(value: string, keep = 12): string {
   const marker = value.indexOf("sha256:");
@@ -11,10 +12,87 @@ interface ReportsProps {
   projectId: string | null;
   datasetId: string | null;
   onMessage: (message: string) => void;
+  onOpenEvidence: (request: EvidenceRequest) => void;
+}
+
+function recordedNumber(value: number | null | undefined, digits = 4): string {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "Not recorded";
+}
+
+function recordedPercent(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : "Not recorded";
+}
+
+function DashboardOperatorSummary({ panel }: { panel: Exclude<DashboardPanel, { kind: "figure" }> }) {
+  if (panel.kind === "operating_points") {
+    return (
+      <div data-testid="dashboard-operator-summary">
+        <dl className="facts dashboard-panel-facts">
+          <dt>Matcher</dt><dd>{panel.data.matcher_id}</dd>
+          <dt>Preprocessing</dt><dd>{panel.data.condition_id}</dd>
+          <dt>Leaf</dt><dd className="mono">{panel.data.leaf_id}</dd>
+        </dl>
+        <table className="compact dashboard-summary-table">
+          <caption>Recorded operating-point policies</caption>
+          <thead><tr><th scope="col">Policy</th><th scope="col">EER</th><th scope="col">EER threshold</th><th scope="col">Operating points</th></tr></thead>
+          <tbody>{Object.entries(panel.data.by_policy).map(([policy, block]) => (
+            <tr key={policy}><th scope="row">{policy}</th><td>{recordedPercent(block.eer.eer)}</td><td className="mono">{recordedNumber(block.eer.threshold, 6)}</td><td>{block.operating_points.length}</td></tr>
+          ))}</tbody>
+        </table>
+      </div>
+    );
+  }
+  if (panel.kind === "utility_summary" || panel.kind === "policy_table") {
+    const summary = panel.data.summary;
+    return (
+      <div data-testid="dashboard-operator-summary">
+        <dl className="facts dashboard-panel-facts">
+          <dt>Matcher</dt><dd>{summary.matcher_id ?? "Not recorded"}</dd>
+          <dt>Preprocessing</dt><dd>{summary.condition_id ?? "Not recorded"}</dd>
+          <dt>Quality measure</dt><dd>{summary.quality_measure ?? "Not recorded"}</dd>
+          <dt>Pair-quality policy</dt><dd>{summary.pair_quality_policy ?? "Not recorded"}</dd>
+          <dt>Matcher threshold</dt><dd className="mono">{recordedNumber(summary.matcher_threshold, 6)}</dd>
+          <dt>Quality threshold</dt><dd className="mono">{recordedNumber(summary.quality_threshold, 4)}</dd>
+          <dt>Retention</dt><dd>{recordedPercent(summary.retention_rate ?? panel.data.policy?.retention_rate)}</dd>
+          <dt>FNMR before / after</dt><dd>{recordedPercent(summary.fnmr_before)} / {recordedPercent(summary.fnmr_after)}</dd>
+          <dt>Errors prevented</dt><dd>{summary.errors_prevented ?? panel.data.policy?.impact?.errors_prevented ?? "Not recorded"}</dd>
+          <dt>Successful comparisons removed</dt><dd>{summary.successful_comparisons_removed ?? panel.data.policy?.impact?.successful_comparisons_removed ?? "Not recorded"}</dd>
+        </dl>
+      </div>
+    );
+  }
+  if (panel.kind === "cross_contrasts") {
+    return (
+      <div data-testid="dashboard-operator-summary">
+        <table className="compact dashboard-summary-table">
+          <caption>Recorded matcher and preprocessing contrasts</caption>
+          <thead><tr><th scope="col">Contrast</th><th scope="col">A</th><th scope="col">B</th><th scope="col">FNM Jaccard</th><th scope="col">Δ AU-ERC FNMR</th></tr></thead>
+          <tbody>{panel.data.contrasts.map((contrast) => (
+            <tr key={contrast.contrast_id}><th scope="row">{contrast.kind}</th><td>{contrast.a}</td><td>{contrast.b}</td><td>{recordedNumber(contrast.fnm_jaccard, 3)}</td><td>{recordedNumber(contrast.au_erc_diff_fnmr, 4)}</td></tr>
+          ))}</tbody>
+        </table>
+      </div>
+    );
+  }
+  if (panel.kind === "dataset_statistics") {
+    const population = panel.data.statistics.population;
+    return (
+      <div data-testid="dashboard-operator-summary">
+        <dl className="facts dashboard-panel-facts">
+          <dt>Subjects</dt><dd>{population?.subjects ?? "Not recorded"}</dd>
+          <dt>Samples</dt><dd>{population?.samples ?? "Not recorded"}</dd>
+          <dt>Samples per subject</dt><dd>{recordedNumber(population?.samples_per_subject_mean, 2)} mean · {recordedNumber(population?.samples_per_subject_median, 2)} median</dd>
+          <dt>Recorded range</dt><dd>{population?.samples_per_subject_min ?? "Not recorded"}–{population?.samples_per_subject_max ?? "Not recorded"}</dd>
+          <dt>Statistics evidence</dt><dd className="mono">{shortHash(panel.data.evidence_sha256, 12)}</dd>
+        </dl>
+      </div>
+    );
+  }
+  return null;
 }
 
 /** Figures, dashboards, reports, exports, bundles, and reproduction (QS-F50..F53). */
-export function Reports({ projectId, datasetId, onMessage }: ReportsProps) {
+export function Reports({ projectId, datasetId, onMessage, onOpenEvidence }: ReportsProps) {
   const contextKey = `${projectId ?? ""}\u001f${datasetId ?? ""}`;
   const [leaves, setLeaves] = useState<MatcherLeaf[]>([]);
   const [jobs, setJobs] = useState<JobOut[]>([]);
@@ -25,7 +103,7 @@ export function Reports({ projectId, datasetId, onMessage }: ReportsProps) {
   const [bundles, setBundles] = useState<BundleOut[]>([]);
   const [reproductions, setReproductions] = useState<ReproductionOut[]>([]);
   const [selectedFigure, setSelectedFigure] = useState<FigureOut | null>(null);
-  const [loadedDashboard, setLoadedDashboard] = useState<any | null>(null);
+  const [loadedDashboard, setLoadedDashboard] = useState<DashboardDetailOut | null>(null);
   const [imagePolicy, setImagePolicy] = useState<"EXCLUDE" | "INCLUDE_PERMITTED">("EXCLUDE");
   const [busy, setBusy] = useState<string | null>(null);
   const [feedPhase, setFeedPhase] = useState<"loading" | "ready" | "error">("loading");
@@ -152,14 +230,15 @@ export function Reports({ projectId, datasetId, onMessage }: ReportsProps) {
     if (datasetAnalyses.length) panels.push({ kind: "policy_table", ref: datasetAnalyses[datasetAnalyses.length - 1]!.analysis_id });
     if (!panels.length) throw new Error("no figures or runs to place on a dashboard");
     const saved = await api.saveDashboard(projectId, { name: "Console dashboard", template: "FIQA Evaluation", columns: 2, panels });
-    const loaded = await api.dashboard(saved.dashboard_id);
+    const loaded = await api.dashboard(projectId, saved.dashboard_id);
     if (contextEpoch.current !== epoch) return "";
     setLoadedDashboard(loaded);
     return `Dashboard ${shortHash(saved.dashboard_id)} saved with ${panels.length} panels and reloaded (${loaded.layout_sha256 === saved.layout_sha256 ? "layout identical" : "layout differs"})`;
   });
 
   const openDashboard = (dashboardId: string) => run("dashboard-open", async (epoch) => {
-    const loaded = await api.dashboard(dashboardId);
+    if (!projectId) throw new Error("no project");
+    const loaded = await api.dashboard(projectId, dashboardId);
     if (contextEpoch.current !== epoch) return "";
     setLoadedDashboard(loaded);
     return `Dashboard ${shortHash(dashboardId)} reloaded: ${loaded.panels.length} panels`;
@@ -185,8 +264,30 @@ export function Reports({ projectId, datasetId, onMessage }: ReportsProps) {
     return `Bundle ${shortHash(bundle.bundle_id)} exported (${bundle.size_bytes ?? "?"} bytes)`;
   });
 
+  const downloadTable = (
+    category: "quality_results" | "comparison_records" | "embeddings" | "metric_tables" | "statistical_results" | "annotations",
+    ref: string,
+    format: "csv" | "json" | "parquet",
+  ) => run(`export-${category}-${format}`, async () => {
+    if (!projectId) throw new Error("no project");
+    const download = await api.exportTable(projectId, category, ref, format);
+    const objectUrl = URL.createObjectURL(download.blob);
+    try {
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = download.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    }
+    return `${download.filename} downloaded (${download.blob.size.toLocaleString()} bytes)`;
+  });
+
   const reproduce = (bundle: BundleOut) => run("reproduce", async () => {
-    const result = await api.reproduce(bundle.path);
+    if (!projectId) throw new Error("no project");
+    const result = await api.reproduce(projectId, bundle.bundle_id);
     return `Reproduction of ${shortHash(bundle.run_id)}: ${result.state} (${result.compared_values} values compared, ${result.differences.length} differences)`;
   });
 
@@ -201,6 +302,7 @@ export function Reports({ projectId, datasetId, onMessage }: ReportsProps) {
       </section>
     );
   }
+  const selectedFigureProvenance = selectedFigure?.files.provenance;
 
   return (
     <section className="panel reports" aria-labelledby="reports-heading" data-testid="reports">
@@ -225,6 +327,11 @@ export function Reports({ projectId, datasetId, onMessage }: ReportsProps) {
         <button type="button" className="primary" aria-describedby="report-prerequisites" title={!datasetId ? "Select an active dataset first" : !latestMatrix && !latestJob ? "Complete a verification matrix or quality batch for the active dataset first" : busy ? `Wait for ${busy} to finish` : undefined} disabled={busy !== null || !datasetId || (!latestMatrix && !latestJob)} onClick={() => void buildReport()} data-testid="report-build">Build report (HTML + PDF)</button>
       </div>
 
+      <aside className="report-disclosure-warning" role="note" data-testid="report-disclosure-warning" aria-labelledby="report-disclosure-warning-title">
+        <strong id="report-disclosure-warning-title">Disclosure review required before external transfer</strong>
+        <p id="report-disclosure-warning-text">HTML, PDF, JSON, tabular exports, and .qsexp bundles are governed evidence bytes and may include deployment-local provenance. Review the downloaded artifact before it leaves this controlled workstation.</p>
+      </aside>
+
       <div className="utility-facts">
         <div>
           <h3>Recorded figures for active dataset ({datasetFigures.length})</h3>
@@ -247,7 +354,7 @@ export function Reports({ projectId, datasetId, onMessage }: ReportsProps) {
                 <dt>Source Runs</dt><dd className="mono">{selectedFigure.source_run_ids.map((id) => shortHash(id, 10)).join(", ")}</dd>
                 <dt>Metric definitions</dt><dd className="mono">{selectedFigure.metric_definitions.map((d) => d.join("@")).join(", ") || "—"}</dd>
                 <dt>Thresholds</dt><dd className="mono">{selectedFigure.thresholds.length} recorded (kind {selectedFigure.thresholds[0]?.kind ?? "—"})</dd>
-                <dt>Export</dt><dd className="links"><a href={selectedFigure.files.png}>PNG</a><a href={selectedFigure.files.svg}>SVG</a><a href={selectedFigure.files.pdf}>PDF</a><a href={selectedFigure.files.csv}>CSV</a><a href={selectedFigure.files.provenance}>provenance</a></dd>
+                <dt>Export</dt><dd className="links"><a href={selectedFigure.files.png} aria-describedby="report-disclosure-warning-text" data-governed-download="figure-png">PNG</a><a href={selectedFigure.files.svg} aria-describedby="report-disclosure-warning-text" data-governed-download="figure-svg">SVG</a><a href={selectedFigure.files.pdf} aria-describedby="report-disclosure-warning-text" data-governed-download="figure-pdf">PDF</a><a href={selectedFigure.files.csv} aria-describedby="report-disclosure-warning-text" data-governed-download="figure-csv">CSV</a>{selectedFigureProvenance && <EvidenceOpenButton testId="report-figure-provenance-evidence" request={{ kind: "figure", href: selectedFigureProvenance, evidenceId: selectedFigure.figure_id, projectId, label: `Figure provenance ${shortHash(selectedFigure.figure_id, 14)}` }} onOpen={onOpenEvidence}>provenance</EvidenceOpenButton>}</dd>
               </dl>
             </div>
           )}
@@ -268,12 +375,18 @@ export function Reports({ projectId, datasetId, onMessage }: ReportsProps) {
             <div className="errors" data-testid="dashboard-detail">
               <h3>{loadedDashboard.name} · v{loadedDashboard.version} · layout sha {shortHash(loadedDashboard.layout_sha256 ?? "", 10)}</h3>
               <div className="dashboard-grid" style={{ gridTemplateColumns: `repeat(${loadedDashboard.layout.columns}, 1fr)` }}>
-                {loadedDashboard.panels.map((panel: any, index: number) => (
-                  <div key={`${panel.kind}-${index}`} className="dashboard-panel" data-testid="dashboard-panel">
+                {loadedDashboard.panels.map((panel, index) => (
+                  <div key={`${panel.kind}-${index}`} className="dashboard-panel" data-testid="dashboard-panel" data-panel-kind={panel.kind}>
                     <strong>{panel.title}</strong>
                     {panel.kind === "figure" && <img src={panel.data.figure.files.png} alt={panel.title} style={{ maxWidth: "100%" }} />}
-                    {panel.kind !== "figure" && <pre className="mono" style={{ maxHeight: 140, overflow: "auto" }}>{JSON.stringify(panel.data, null, 1).slice(0, 1200)}</pre>}
-                    <span className="sample-meta">Runs: {panel.run_ids.map((id: string) => shortHash(id, 8)).join(", ") || "—"}</span>
+                    {panel.kind !== "figure" && <DashboardOperatorSummary panel={panel} />}
+                    {panel.kind !== "figure" && (
+                      <details className="dashboard-raw-data" data-testid="dashboard-raw-data">
+                        <summary>Secondary raw panel JSON</summary>
+                        <pre className="mono">{JSON.stringify(panel.data, null, 2)}</pre>
+                      </details>
+                    )}
+                    <span className="sample-meta">Runs: {panel.run_ids.map((id) => shortHash(id, 8)).join(", ") || "—"}</span>
                   </div>
                 ))}
               </div>
@@ -289,7 +402,7 @@ export function Reports({ projectId, datasetId, onMessage }: ReportsProps) {
                   <td>{item.title}</td>
                   <td className="links">
                     {(["html", "pdf", "json"] as const).map((format) => item.downloads[format].href
-                      ? <a key={format} href={item.downloads[format].href ?? undefined} target={format === "html" ? "_blank" : undefined} rel={format === "html" ? "noreferrer" : undefined}>{format.toUpperCase()}</a>
+                      ? <a key={format} href={item.downloads[format].href ?? undefined} target={format === "html" ? "_blank" : undefined} rel={format === "html" ? "noreferrer" : undefined} aria-describedby="report-disclosure-warning-text" data-governed-download={`report-${format}`}>{format.toUpperCase()}</a>
                       : <span key={format} className="hint">{format.toUpperCase()} unavailable: {item.downloads[format].reason}</span>)}
                   </td>
                 </tr>
@@ -305,14 +418,14 @@ export function Reports({ projectId, datasetId, onMessage }: ReportsProps) {
           <h3>Exports (CSV · JSON · Parquet, with run identifiers)</h3>
           <p id="report-export-prerequisites" className="hint">Bundle export and reproduction are available when no other report operation is running.</p>
           <ul className="legend">
-            {latestJob && <li>quality results · <a href={`/api/exports/quality_results?ref=${encodeURIComponent(latestJob.job_id)}&format=csv`}>CSV</a> <a href={`/api/exports/quality_results?ref=${encodeURIComponent(latestJob.job_id)}&format=parquet`}>Parquet</a></li>}
+            {latestJob && <li>quality results · <button type="button" className="governed-download" disabled={busy !== null} onClick={() => void downloadTable("quality_results", latestJob.job_id, "csv")} aria-describedby="report-disclosure-warning-text" data-governed-download="quality-csv">CSV</button> <button type="button" className="governed-download" disabled={busy !== null} onClick={() => void downloadTable("quality_results", latestJob.job_id, "parquet")} aria-describedby="report-disclosure-warning-text" data-governed-download="quality-parquet">Parquet</button></li>}
             {datasetLeaves.slice(-6).map((leaf) => (
-              <li key={leaf.run_id}>{leaf.leaf_id} comparison records · <a href={`/api/exports/comparison_records?ref=${encodeURIComponent(leaf.run_id)}&format=csv`}>CSV</a> {leaf.condition_id !== "EXTERNALLY_COMPUTED" && (<><a href={`/api/exports/embeddings?ref=${encodeURIComponent(leaf.run_id)}&format=parquet`}>embeddings</a>{" "}</>)}<a href={`/api/exports/metric_tables?ref=${encodeURIComponent(leaf.run_id)}&format=json`}>metrics</a> · <button type="button" className="secondary" disabled={busy !== null} aria-describedby="report-export-prerequisites" title={busy ? `Wait for ${busy} to finish` : "Export this recorded Run as a reproducible bundle"} onClick={() => void exportBundle(leaf.run_id)} data-testid="bundle-export">bundle</button></li>
+              <li key={leaf.run_id}>{leaf.leaf_id} comparison records · <button type="button" className="governed-download" disabled={busy !== null} onClick={() => void downloadTable("comparison_records", leaf.run_id, "csv")} aria-describedby="report-disclosure-warning-text" data-governed-download="comparisons-csv">CSV</button> {leaf.condition_id !== "EXTERNALLY_COMPUTED" && (<><button type="button" className="governed-download" disabled={busy !== null} onClick={() => void downloadTable("embeddings", leaf.run_id, "parquet")} aria-describedby="report-disclosure-warning-text" data-governed-download="embeddings-parquet">embeddings</button>{" "}</>)}<button type="button" className="governed-download" disabled={busy !== null} onClick={() => void downloadTable("metric_tables", leaf.run_id, "json")} aria-describedby="report-disclosure-warning-text" data-governed-download="metrics-json">metrics</button> · <button type="button" className="secondary" disabled={busy !== null} aria-describedby="report-export-prerequisites report-disclosure-warning-text" title={busy ? `Wait for ${busy} to finish` : "Export this recorded Run as a reproducible bundle"} onClick={() => void exportBundle(leaf.run_id)} data-testid="bundle-export">bundle</button></li>
             ))}
             {datasetAnalyses.slice(-6).map((item) => (
-              <li key={item.analysis_id}>{item.leaf_id} utility statistics · <a href={`/api/exports/statistical_results?ref=${encodeURIComponent(item.analysis_id)}&format=csv`}>CSV</a> · <button type="button" className="secondary" disabled={busy !== null} aria-describedby="report-export-prerequisites" title={busy ? `Wait for ${busy} to finish` : "Export this recorded analysis Run as a reproducible bundle"} onClick={() => void exportBundle(item.run_id)} data-testid="bundle-export-analysis">bundle</button></li>
+              <li key={item.analysis_id}>{item.leaf_id} utility statistics · <button type="button" className="governed-download" disabled={busy !== null} onClick={() => void downloadTable("statistical_results", item.analysis_id, "csv")} aria-describedby="report-disclosure-warning-text" data-governed-download="statistics-csv">CSV</button> · <button type="button" className="secondary" disabled={busy !== null} aria-describedby="report-export-prerequisites report-disclosure-warning-text" title={busy ? `Wait for ${busy} to finish` : "Export this recorded analysis Run as a reproducible bundle"} onClick={() => void exportBundle(item.run_id)} data-testid="bundle-export-analysis">bundle</button></li>
             ))}
-            <li>annotations · <a href={`/api/exports/annotations?ref=${encodeURIComponent(projectId)}&format=json`}>JSON</a></li>
+            <li>annotations · <button type="button" className="governed-download" disabled={busy !== null} onClick={() => void downloadTable("annotations", projectId, "json")} aria-describedby="report-disclosure-warning-text" data-governed-download="annotations-json">JSON</button></li>
           </ul>
         </div>
         <div>
@@ -324,7 +437,7 @@ export function Reports({ projectId, datasetId, onMessage }: ReportsProps) {
               {datasetBundles.map((bundle) => (
                 <tr key={bundle.bundle_id}>
                   <th scope="row" className="mono">{shortHash(bundle.bundle_id, 10)}</th><td className="mono">run {shortHash(bundle.run_id, 10)}</td>
-                  <td>{bundle.download.href ? <a href={bundle.download.href}>.qsexp</a> : <span className="hint">Download unavailable: {bundle.download.reason}</span>}</td>
+                  <td>{bundle.download.href ? <a href={bundle.download.href} aria-describedby="report-disclosure-warning-text" data-governed-download="qsexp">.qsexp</a> : <span className="hint">Download unavailable: {bundle.download.reason}</span>}</td>
                   <td><button type="button" className="secondary" disabled={busy !== null || bundle.download.state !== "VERIFIED"} aria-describedby={bundle.download.state === "VERIFIED" ? "report-export-prerequisites" : `bundle-unavailable-${bundle.bundle_id.replace(/[^a-zA-Z0-9_-]/g, "-")}`} title={bundle.download.state !== "VERIFIED" ? bundle.download.reason ?? "The bundle is unavailable" : busy ? `Wait for ${busy} to finish` : "Reproduce this recorded bundle and compare its values"} onClick={() => void reproduce(bundle)} data-testid="reproduce">Reproduce</button>{bundle.download.state !== "VERIFIED" && <span id={`bundle-unavailable-${bundle.bundle_id.replace(/[^a-zA-Z0-9_-]/g, "-")}`} className="hint">Reproduction unavailable until a verified bundle is regenerated.</span>}</td>
                 </tr>
               ))}

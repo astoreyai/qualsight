@@ -13,6 +13,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import stat
 import sys
 import types
 import urllib.request
@@ -103,6 +104,50 @@ class UpstreamSources:
                 raise UpstreamSourceError(f"{key}: fetched bytes ({digest}, {len(data)} bytes) do not match the pin; refusing")
             path.write_bytes(data)
             acquired[key] = path
+        return acquired
+
+    def acquire_cached(self, keys: tuple[str, ...] | None = None) -> dict[str, Path]:
+        """Prepare pinned sources from verified local bytes without network access."""
+
+        acquired: dict[str, Path] = {}
+        for key in keys or tuple(self.sources):
+            source = self.sources[key]
+            path = self.path_for(key)
+            if path.exists() or path.is_symlink():
+                observed = path.lstat()
+                if stat.S_ISREG(observed.st_mode) and not path.is_symlink():
+                    try:
+                        acquired[key] = self.verify(key)
+                        continue
+                    except UpstreamSourceError:
+                        path.unlink()
+                else:
+                    raise UpstreamSourceError(
+                        f"{key}: managed source target is not a regular file"
+                    )
+            cached = (
+                self.cache_root / path.relative_to(self.root)
+                if self.cache_root != self.root
+                else None
+            )
+            if cached is None or not cached.exists() or cached.is_symlink():
+                raise UpstreamSourceError(
+                    f"{key}: verified local cache is unavailable"
+                )
+            cached_stat = cached.lstat()
+            if not stat.S_ISREG(cached_stat.st_mode):
+                raise UpstreamSourceError(
+                    f"{key}: verified local cache is unavailable"
+                )
+            data = cached.read_bytes()
+            digest = hashlib.sha256(data).hexdigest()
+            if digest != source.sha256 or len(data) != source.size_bytes:
+                raise UpstreamSourceError(
+                    f"{key}: verified local cache differs from the registered pin"
+                )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            acquired[key] = self.verify(key)
         return acquired
 
     def load_module(self, key: str, module_name: str | None = None) -> types.ModuleType:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import os
 from pathlib import Path
 
@@ -21,6 +22,7 @@ class Settings:
     data_dir: Path
     runtime_resource_id: str
     input_resource_ids: tuple[str, ...]
+    source_cache_root: Path | None = None
     actor_id: str = ""  # configured single user (QUALSIGHT_ACTOR); empty → local-user:<login>
     # Direct construction remains opt-in so isolated tests do not mutate their
     # host process's sockets. Environment-driven production startup is guarded
@@ -40,8 +42,13 @@ class Settings:
             raise ValueError("scientific_pending cannot be negative")
         if self.detector_workers < 1 or self.detector_workers > 4:
             raise ValueError("detector_workers must be between one and four")
-        if self.native_execution_timeout_seconds <= 0:
-            raise ValueError("native_execution_timeout_seconds must be positive")
+        if (
+            not math.isfinite(self.native_execution_timeout_seconds)
+            or self.native_execution_timeout_seconds <= 0
+        ):
+            raise ValueError(
+                "native_execution_timeout_seconds must be finite and positive"
+            )
         if self.native_output_limit_bytes < 1:
             raise ValueError("native_output_limit_bytes must be positive")
         if self.shutdown_drain_seconds < 0:
@@ -59,6 +66,19 @@ class Settings:
         runtime = os.environ.get("QUALSIGHT_RUNTIME_RESOURCE_ID") or OFIQ_V112_RUNTIME_RESOURCE_ID
         inputs_raw = os.environ.get("QUALSIGHT_INPUT_RESOURCE_IDS")
         inputs = tuple(item for item in inputs_raw.split(",") if item) if inputs_raw else DEFAULT_INPUT_RESOURCE_IDS
+        source_cache_value = os.environ.get("QUALSIGHT_SOURCE_CACHE_ROOT")
+        source_cache_root = None
+        if source_cache_value is not None:
+            source_cache_path = Path(source_cache_value)
+            if not source_cache_path.is_absolute() or source_cache_path.is_symlink():
+                raise ValueError(
+                    "QUALSIGHT_SOURCE_CACHE_ROOT must name an absolute, non-symlink directory"
+                )
+            source_cache_root = source_cache_path.resolve(strict=True)
+            if not source_cache_root.is_dir():
+                raise ValueError(
+                    "QUALSIGHT_SOURCE_CACHE_ROOT must name an absolute, non-symlink directory"
+                )
         network_value = os.environ.get("QUALSIGHT_NETWORK_GUARD")
         network_guard = network_value is None or network_value.lower() not in {"0", "false", "no", "off"}
         try:
@@ -82,6 +102,7 @@ class Settings:
             data_dir=data_dir,
             runtime_resource_id=runtime,
             input_resource_ids=inputs,
+            source_cache_root=source_cache_root,
             actor_id=os.environ.get("QUALSIGHT_ACTOR", ""),
             network_guard=network_guard,
             scientific_workers=scientific_workers,
@@ -101,3 +122,7 @@ class Settings:
     @property
     def database_path(self) -> Path:
         return self.data_dir / "qualsight.sqlite3"
+
+    @property
+    def upstream_cache_root(self) -> Path:
+        return self.source_cache_root or self.repository_root / "var" / "upstream"

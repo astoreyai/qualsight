@@ -12,6 +12,7 @@ derived sample's chain can be re-executed byte-for-byte.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any
 
 import cv2
@@ -104,13 +105,33 @@ PARAMETER_CONTRACTS: dict[str, dict[str, Any]] = {
 }
 
 
+def validate_parameter(kind: str, value: Any) -> int | float:
+    """Validate one JSON parameter against the operator's published contract."""
+
+    contract = PARAMETER_CONTRACTS.get(kind)
+    if contract is None:
+        raise TransformError(f"unknown transform {kind}")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TransformError(f"{kind} {PARAMETER_NAMES[kind]} must be a JSON number")
+    if contract["value_type"] == "integer" and type(value) is not int:
+        raise TransformError(f"{kind} {PARAMETER_NAMES[kind]} must be a JSON integer")
+    number = float(value)
+    if not math.isfinite(number):
+        raise TransformError(f"{kind} {PARAMETER_NAMES[kind]} must be finite")
+    minimum_ok = number > contract["minimum"] if contract["minimum_exclusive"] else number >= contract["minimum"]
+    maximum_ok = number < contract["maximum"] if contract["maximum_exclusive"] else number <= contract["maximum"]
+    if not minimum_ok or not maximum_ok:
+        raise TransformError(f"{kind} {PARAMETER_NAMES[kind]} is outside its published contract")
+    return int(value) if contract["value_type"] == "integer" else number
+
+
 def apply(kind: str, image_bgr: np.ndarray, parameter: float) -> Encoded:
     operator = OPERATORS.get(kind)
     if operator is None:
         raise TransformError(f"unknown transform {kind}")
     if image_bgr is None or image_bgr.ndim != 3 or image_bgr.dtype != np.uint8:
         raise TransformError("transforms expect a BGR uint8 image")
-    return operator(image_bgr, parameter)
+    return operator(image_bgr, validate_parameter(kind, parameter))
 
 
 def encode(result: Encoded) -> bytes:

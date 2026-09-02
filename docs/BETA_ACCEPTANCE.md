@@ -1,19 +1,21 @@
-# QualSight 0.1.0-beta.2 — beta acceptance record
+# QualSight 0.1.0-beta.3 — release-candidate acceptance record
 
-Every row below names the evidence that closes it. Identifiers are content hashes recorded in the
+This record combines historical accepted evidence with focused beta-3 development evidence. It is not
+final package authority until the frozen committed-tree release gate, installed-package gate, and rollback
+check complete. Every row below names its evidence. Identifiers are content hashes recorded in the
 append-only `atg/ledger.jsonl` and in the persistent store on the reference workstation;
-gate files live in `atg/evidence/`. Nothing here is projected: every number was produced by the
-shipped code on real registered inputs.
+gate files live in `atg/evidence/`. Every recorded number was produced by the identified code on real
+registered inputs; focused `/tmp` artifacts are development evidence, not durable package authority.
 
 ## §57 canonical workflow (no manual Python analysis)
 
 | Step | Where it runs | Evidence |
 |---|---|---|
 | Create project | console *Projects*, `qualsight project-create`, `POST /api/projects` | offline gate 02 `project-created`; docs gate 03 block 1 |
-| Import identity-labeled dataset | LFW funneled release, 13,233 samples, directory identity | offline gate 02 `lfw-imported`; dataset `dataset:sha256:98a15dd7…` |
+| Import identity-labeled dataset | console **Inputs → Dataset → Import real dataset**; LFW funneled release, 13,233 samples, directory identity | offline gate 02 `lfw-imported`; dataset `dataset:sha256:98a15dd7…` |
 | Run OFIQ | registered OFIQ v1.1.2 (787/787 conformance), single image + batch | r-01 UQS 79 (`assessment`); full LFW batch `job:sha256:5c6b51c8…` (13,233 measured, 0 failures) |
-| Inspect quality/components | console *Sample inspector*, *Quality explorer* (28 measures, distributions, drilldown) | console observation 03–09 `explorer` steps |
-| Import/run matcher | six frozen checkpoint runtimes (GPU) under two SCRFD profiles or publisher-prealigned ArcFace-112 pass-through; registered external score artifacts remain `EXTERNALLY_COMPUTED` | historical matrix `matrix:sha256:3769cdaf…` (three matchers × two profiles); all six real loaders and executable catalog are covered by `test_matcher_runtime_real.py`; exact checkpoint acquisition by `test_checkpoint_acquisition_real.py` |
+| Inspect quality/components | console **Inspect quality** and **Inputs → Quality explorer** (28 measures, distributions, drilldown) | console observation 03–09 `explorer` steps |
+| Import/run matcher | beta-required AdaFace IR101, ElasticFace Arc R100, and TransFace-S under two SCRFD profiles; MagFace, TopoFR, TransFace-B, and publisher-prealigned paths are research extensions; registered external score artifacts remain `EXTERNALLY_COMPUTED` | historical matrix `matrix:sha256:3769cdaf…` (three matchers × two profiles); all six real loaders and executable catalog are covered by `test_matcher_runtime_real.py`; exact checkpoint acquisition by `test_checkpoint_acquisition_real.py` |
 | Generate genuine + impostor comparisons | frozen LFW View 2 protocol, 6,000 pairs × 10 folds, every pair retained with explicit failures | protocol `protocol:sha256:68125d45…` |
 | Compute FMR/FNMR + DET | `biometric.verification.*@1.0.0`, Clopper–Pearson 95 %, two failure policies | six leaf Runs (EER ≈ 2.1 % shared, ≈ 2.35 % native); DET overlay figure `2295409…` |
 | Compute ERC | `biometric.quality.utility.*@1.0.0` (registry v1.2.0), fixed MATCHER THRESHOLD, cluster-bootstrap intervals | six utility Runs (e.g. AS `run:sha256:6005f48a…`; AU-ERC 0.0147); verifier 213 checks × 6 |
@@ -22,7 +24,7 @@ shipped code on real registered inputs.
 | Save dashboard | content-addressed layouts, exact reload | dashboard `1e41ab08…`; offline gate 02 `dashboard-saved-and-reloaded` |
 | Generate report | HTML (print) + PDF + JSON, classification-enforced images | report `931d69a0…` (8 permitted LFW images); offline gate 02 `report-built` |
 | Export experiment bundle | `.qsexp` with checksums, no image bytes; reproduction EXACT/WITHIN_TOLERANCE/DIFFERENT/MISSING_DEPENDENCY/MISSING_DATA/BLOCKED | bundles `a86d3566…`, `9be9b4f0…`, `ff98d746…`; reproductions EXACT incl. re-embedding 7,701 images |
-| Trace every result to its exact Run | every API row/figure/report cell carries run ids; `GET /api/runs/{id}` | 50 immutable Runs in the reference store (27 matcher, 13 analysis, 6 batch, 3 single-sample, 1 identification) |
+| Trace every result to its exact Run | every API row/figure/report cell carries run ids; `GET /api/projects/{project_id}/runs/{id}` requires the owning project and the retired global route returns 404 | 50 immutable Runs in the reference store (27 matcher, 13 analysis, 6 batch, 3 single-sample, 1 identification) |
 
 Whole-chain executions: `atg/evidence/2026-08-18-offline-gate-02.json` (product started with the network
 guard, 24 attributed audit events, zero refused connections, exit 0) and
@@ -53,7 +55,7 @@ hashes), matcher and preprocessing (`matcher`, `matcher_preprocessing`, `model_h
 
 | Area | Status |
 |---|---|
-| Projects (load/save, versions, manifests) | done — lifecycle NEW/OPEN/SAVED/CLOSED/ARCHIVED, clone/save-as, versions, purge |
+| Projects (load/save, versions, manifests) | lifecycle NEW/OPEN/SAVED/CLOSED/ARCHIVED, clone, save-as, versions, and purge are implemented in the backend/API. The console currently exposes create/open/save/close/clone/archive/purge; it does not claim Save-as or version-history controls. |
 | Users (single-user; optional local account) | single-user attribution done (QS-H71); optional local-account mode not built (documented as optional) |
 | Data (import, manifests, identity mappings, pair definitions) | done — LFW import, protocol freeze, subset fixture, derived sets |
 | Quality (OFIQ adapter, single image, batch, distributions) | done |
@@ -81,7 +83,8 @@ three downloadable pair-only protocols), three representation-compatible preproc
 controlled transforms, and no admitted remote connection. All checkpoint and pair-dataset transfers are
 explicit setup actions with exact source, size, SHA-256, no-clobber promotion, and durable receipts; scientific
 execution remains offline. The release builder emits committed-tree source/console archives, a real uv/pnpm
-and governed-resource CycloneDX inventory, a complete recorded 13-step beta gate, a lock-bound vulnerability
+and governed-resource CycloneDX inventory, a complete recorded 15-gate chain (including the executable
+user guide and nine-workflow browser aggregate), a lock-bound vulnerability
 audit, checksums, and a unified manifest. It still refuses to call
 the result a portable installer because identity-labeled LFW, SCRFD, native OFIQ, and 199 deployment-specific
 registry paths remain external prerequisites.
@@ -121,11 +124,91 @@ runtime library, executed the registered `r-01-frontal.png` input, and wrote a h
 The builder also supports verified HTTPS acquisition for missing archives and locked Conan packages;
 it does not bundle or redistribute the model and conformance payloads.
 
+## 2026-09-01 beta-3 image-workflow evidence
+
+Beta 3 adds the operator-facing image workflow while preserving the controlled single-user workstation
+boundary. A recorded owner upload becomes the active project-scoped WorkingSample; the inspector renders
+the canonical hash-verified image, SCRFD five-point geometry, OFIQ ADNet-98 geometry, UnifiedQualityScore,
+all 28 recorded scalar/native measures, observed failures, and structured evidence. Direct comparison
+records two independently admitted real images, the operator's explicitly unverified relationship assertion,
+one admitted matcher and preprocessing profile, thresholded decision, crop/detection/embedding evidence,
+and immutable same-pair history. Stress Studio applies all seven bounded deterministic transforms to the
+recorded real input and reconciles every derived image, geometry result, OFIQ trajectory, and artifact hash.
+Quality, matrix-leaf, external-score, direct-pair, derived-set, utility, cross-matcher, degradation,
+identification, figure, report, export, and bundle publication now survives process death without guessing:
+each path durably admits the request and either records an integrity-bound prepared result or an equivalent
+operation-bound completion before SQLite completion is claimed. Restart/retry reconciles only the exact
+project/request/result identity and purges malformed, foreign, and incomplete stages. Transformation work
+is refused above 20,000 output files. Owner protocol creation refuses more than 20,000 source samples or
+20,000 output pairs before materialization and uses ranked sampling rather than constructing all possible
+pairs. Direct matcher inference executes in a terminable child process under the configured hard deadline.
+
+The pre-latest-repair backend baseline ran 225 tests in 1,811.356 seconds: 223 passed and two explicitly
+opt-in large-network tests skipped. Those numbers are historical and are not the final beta-3 tree count.
+The corresponding frontend TypeScript and production build passed under the then-pinned Node 20.20.2/pnpm
+10.28.0 toolchain with 48 modules transformed. The definitive post-repair backend discovery then ran
+303 tests in 4,047.221 seconds: 298 passed, five explicitly opt-in checkpoint/dataset network acquisition
+tests skipped, exit 0, and no SIGBUS recurrence. Focused development-tree Chromium evidence includes:
+
+* pair comparison ephemeral observation (not packaged), SHA-256
+  `b8093103eb1353cb75c4baa5785aa77d54e0217a39f82a532cb67d28021af7ca`, four immutable comparisons
+  across all three relationship states, one request during a held POST, locked in-flight configuration,
+  collapsed secondary artifacts, exact project-scoped geometry, and evidence;
+* single-image stress ephemeral observation (not packaged), SHA-256
+  `7fa000cdb9ee9eb1fb3bbd743a5d5ae315c6564ed612b7a2423057f340874fcd`, a real seven-image job followed
+  by a one-image replacement set, no old-result resurrection, dynamic counts, geometry, OFIQ values,
+  purge, and responsive layouts;
+* Analyze utility overlays ephemeral observation (not packaged), SHA-256
+  `0a772799dd1b89df6eaca90bd5cfb625ec0bf159f985f80ade0a929bb3af5770`, protocol-bound pair universes,
+  all result-determining threshold/bootstrap identities, explicit compatible overlays, and real held-response
+  sequencing for detail and pair filters;
+* final Analyze utility/context sequencing ephemeral observation (not packaged), SHA-256
+  `2c27f070c8dc4f1a5e612331bd917bd278d9f3fa65a65496ad274686ffb61e27`, preserving a newer opened
+  analysis against a late already-recorded start response and binding protocol, matcher leaf, and Run to one
+  active Analyze utility analysis;
+* Manage system ephemeral observation (not packaged), SHA-256 `04e2b594…`, six matchers, three preprocessing
+  profiles, seven transforms, thirteen registered resources, zero providers, held process lease, exact
+  publisher source, real source pull/load/unload, and refusal;
+* upload and purge ephemeral observations (not packaged): SHA-256
+  `784f0826d9fd098a453259ca96a597e3e4378188f9a140f836c741e0025f5a00`; and SHA-256
+  `fcb8bd818aeeec4a1375c258c035cbf502fb553330f6dad996a104fe56477ca4`;
+* final scoped integrated console: `atg/evidence/2026-09-01-console-beta3-scoped-final.json`, SHA-256
+  `e6921165f3db43a4ba8e4a6bfffe37d20a9977a35fd38e0567faa32689062ca4`, 32 completed steps and exit 0.
+
+The integrated observation exercised ten unique left-navigation destinations, real upload and OFIQ work,
+the populated dataset/matcher/utility/report/degradation chain, structured evidence, loading/empty/error
+contracts, keyboard focus and drawer trapping, semantic tables and dialogs, contrast, reduced-motion
+handling, 390 px reflow, and 44 px scientific controls. It found no unexplained disabled control, unlabeled
+or unfocusable interaction, invalid table/dialog, duplicate identifier, heading jump, missing image
+alternative, contrast failure, horizontal overflow, or undersized tested target. These automated and expert
+gates establish interaction correctness; independent DHS operator usability remains external evidence.
+
+The hostile merged-diff review was not waived by the earlier green gates. Repeated review reproduced and repaired public
+derived-lineage paths, unscoped quality-job reads, mutable Parquet chart reads, incomplete Utility overlay
+identities, swallowed comparison-worker diagnostics, artifact read/verify races, non-durable failed-purge
+evidence, duplicate direct-comparison requests, silent comparison-history errors, cross-project purge state,
+old Stress and Utility response resurrection, hard-coded transform counts, misbound structured evidence,
+primary filesystem-path presentation, active-context precedence, and a vacuous project-switch assertion. A final
+hostile pass then reproduced and repaired public dataset source/manifest paths, post-purge comparison admission,
+late already-recorded Utility detail replacement, mixed workflow context, and a browser assertion that could skip
+the first disabled catalog control. The independently rerun durable 32-step observation is
+`atg/evidence/2026-09-01-console-beta3-final-adversarial.json` (SHA-256
+`d70c39fa6f81dbd2d906243fcf4ef0d1fe31ac82c0495550b64ec3f985eb14b5`).
+Every quality-job read or mutation now requires both project and job identity; retired global routes return 404.
+
+This remains a release-candidate evidence record, not a package acceptance claim. The later hostile pass identified
+additional unscoped Run/dataset-study reads, durable failed-purge mutation admission, job-result path projection,
+and path-bearing warning presentation. Those findings are now RED-tested and repaired: all 34 recorded-evidence
+route families require project identity; durable incomplete purges refuse new mutations; job results are path-free;
+new Run warnings are structured and path-free; and legacy path-bearing warnings are sanitized in primary Evidence.
+Packaging remains stopped until the complete post-repair gates and final hostile review pass.
+
 ## Research extensions outside QS-H74 beta acceptance
 
 1:N identification, controlled degradation, and container execution were implemented and locally
 validated after terminal beta acceptance in cycle C25. They remain outside QS-H74 beta acceptance and
-do not change the `0.1.0-beta.2` release authority. Demographic analysis, PAD, capture clients, SSO,
+do not change the original QS-H74 acceptance boundary; beta 3 exposes the already validated controlled
+degradation capability as a project-scoped single-image workflow. Demographic analysis, PAD, capture clients, SSO,
 commercial SDKs, and non-face modalities remain transition-only and are not admitted by this beta.
 
 ## Known limitations carried into the beta
@@ -133,7 +216,7 @@ commercial SDKs, and non-face modalities remain transition-only and are not admi
 * LFW results are QualSight-executed on the funneled release with SCRFD alignment; not published-figure reproductions.
 * Matcher training-set identity exclusion is each matcher's published claim (decision 19).
 * The external score artifact (decision 29) is an independent open-source pipeline, not a vendor file, and shares the buffalo_l detector file with the registered SCRFD-10G model.
-* SCRFD detection runs on the CPU execution provider inside the frozen matcher runtime; embeddings and identification similarity run on the GPU.
+* SCRFD detection runs on the CPU execution provider. Embeddings and identification use the Run-recorded matcher device: CUDA when selected and available with sufficient headroom, otherwise CPU.
 * One transient `setUpClass` error in `test_matcher_api_real` was observed once (2026-08-17) and never reproduced.
 * First-time operator intuitiveness has not been established with independent DHS biometric evaluators. The automated Chromium and expert-review gates establish interaction correctness and accessibility, not human usability.
 * The source/console release is unsigned and has no publisher attestation; the release manifest says so. A clean committed tree is required before it will build.

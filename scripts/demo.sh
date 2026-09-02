@@ -7,7 +7,6 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-export PATH="/usr/bin:$PATH"
 UV="${UV:-$HOME/.local/bin/uv}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 OBS="var/demo/demo-${STAMP}.json"

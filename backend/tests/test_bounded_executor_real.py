@@ -85,12 +85,31 @@ class BoundedExecutorRealTests(unittest.TestCase):
                 )
                 self.assertEqual(imported.status_code, 201, imported.text)
                 dataset_id = imported.json()["dataset_id"]
+                owner_root = data_dir / "real-owner-capacity-input"
+                for subject in ("George_W_Bush", "Tony_Blair"):
+                    subject_root = owner_root / subject
+                    subject_root.mkdir(parents=True)
+                    sources = sorted(
+                        (
+                            Path("/mnt/projects/datasets/lfw/lfw_funneled")
+                            / subject
+                        ).glob("*.jpg")
+                    )[:2]
+                    self.assertEqual(len(sources), 2)
+                    for source in sources:
+                        shutil.copyfile(source, subject_root / source.name)
+                owner_import = client.post(
+                    f"/api/projects/{project_id}/datasets/import-owner-directory",
+                    json={"root": str(owner_root), "name": "Real LFW capacity input"},
+                )
+                self.assertEqual(owner_import.status_code, 201, owner_import.text)
+                owner_dataset_id = owner_import.json()["dataset_id"]
                 live = client.get("/api/live")
                 self.assertEqual(live.status_code, 200, live.text)
                 self.assertEqual(live.json(), {"status": "alive"})
                 self.assertRegex(live.headers["X-QualSight-Request-ID"], r"^[0-9a-f]{32}$")
-                self.assertEqual(live.headers["X-QualSight-API-Version"], "1.0.0")
-                self.assertEqual(client.get("/api/version").json()["contract_version"], "1.0.0")
+                self.assertEqual(live.headers["X-QualSight-API-Version"], "2.0.0-beta.1")
+                self.assertEqual(client.get("/api/version").json()["contract_version"], "2.0.0-beta.1")
                 metrics = client.get("/api/metrics")
                 self.assertEqual(metrics.status_code, 200, metrics.text)
                 self.assertGreater(metrics.json()["http"]["requests"], 0)
@@ -125,6 +144,18 @@ class BoundedExecutorRealTests(unittest.TestCase):
                 )
                 self.assertEqual(refused.status_code, 503, refused.text)
                 self.assertEqual(refused.json()["detail"]["error"], "SCIENTIFIC_WORK_CAPACITY_EXHAUSTED")
+                owner_refused = client.post(
+                    f"/api/projects/{project_id}/datasets/{owner_dataset_id}/protocols/freeze-owner-pairs",
+                    json={"seed": 73},
+                )
+                self.assertEqual(owner_refused.status_code, 503, owner_refused.text)
+                self.assertEqual(
+                    owner_refused.json()["detail"]["error"],
+                    "SCIENTIFIC_WORK_CAPACITY_EXHAUSTED",
+                )
+                protocols = client.get(f"/api/projects/{project_id}/protocols")
+                self.assertEqual(protocols.status_code, 200, protocols.text)
+                self.assertEqual(protocols.json(), [])
                 operations = client.get(f"/api/projects/{project_id}/operations")
                 self.assertEqual(operations.status_code, 200, operations.text)
                 self.assertEqual(len(operations.json()), 1, operations.text)

@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0.0",
+  "report_id": "qualsight-addon-acquisition-public-summary-v1",
+  "distribution_boundary": "CONTROLLED_SINGLE_USER_WORKSTATION_NON_PORTABLE",
+  "authority": {
+    "artifact_identity_authority": false,
+    "rights_authority": false,
+    "runtime_authority": false,
+    "identity_only": true
+  },
+  "omitted_content_classes": [
+    "private owner authorization records",
+    "third-party source and license evidence bytes",
+    "third-party executable, model, dataset, and archive bytes",
+    "deployment runtime observations"
+  ],
+  "original_evidence_identities": [
+    {
+      "repository_relative_path": "resources/upstream/adaface/README.d8114b3c.md",
+      "sha256": "4c9a6bcb3eeed1b4850002538ac9712c4b1c0e3383c3c2828984f97d618911b1",
+      "size_bytes": 14972
+    },
+    {
+      "repository_relative_path": "resources/upstream/addon-download-evidence-2026-08-28.json",
+      "sha256": "865912419e25acb530870e50ae57516daa816d722c8ee7b00bc9f94f55c12db2",
+      "size_bytes": 2370
+    },
+    {
+      "repository_relative_path": "resources/upstream/elasticface/README.5496ec06.md",
+      "sha256": "fd62dd980cf03f47da32382f2a3604b814b274e6a5ab3f2f6b615da9e3751405",
+      "size_bytes": 3440
+    },
+    {
+      "repository_relative_path": "resources/upstream/transface/README.fb6cd56d.md",
+      "sha256": "3fbda289775281dd19d7e03aec6320f0f8f6a24776971c7db85e8a170e23b83a",
+      "size_bytes": 6740
+    }
+  ],
+  "acquisition_contract": {
+    "checkpoint_source_url_hash_and_size_pins_retained": true,
+    "dataset_source_url_hash_and_size_pins_retained": true,
+    "upstream_source_url_hash_and_size_pins_retained": true,
+    "rights_gate_retained": true,
+    "network_acquisition_is_explicit": true,
+    "vendored_third_party_bytes": false
+  },
+  "controlled_locator_projection": {
+    "package_prefix": "/opt/qualsight/external",
+    "runtime_binding_required": true,
+    "environment_variable": "QUALSIGHT_REGISTRY_PATH",
+    "statement": "Packaged locator values are non-portable mount conventions. They do not prove local presence, execution readiness, rights, or redistribution authority. Bind the reviewed controlled-host registry at runtime."
+  }
+}

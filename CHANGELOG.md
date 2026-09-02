@@ -1,5 +1,98 @@
 # Changelog
 
+## 0.1.0-beta.3 (unreleased release candidate) — 2026-09-01
+
+* Reorganized the console around the accepted persistent left-hand workflow: Home, Projects, Inputs,
+  Inspect quality, Compare, Stress test, Analyze utility, Results, Evidence & reports, and Manage system. Workflow entries
+  show exact prerequisites, retain project context, isolate stale asynchronous results, collapse to an
+  accessible mobile drawer, and preserve deterministic hash routes.
+* Owner-uploaded images now become the active recorded WorkingSample. The canonical hash-verified image,
+  SCRFD five-point geometry, OFIQ ADNet-98 landmarks, UnifiedQualityScore, all 28 grouped scalar/native
+  measures, observed failure reasons, chart data, and structured evidence remain in one inspector instead
+  of opening JSON as the primary result.
+* Comparison Studio records two independent real images, a closed unverified relationship assertion,
+  matcher, preprocessing profile, fixed threshold, immutable direct-pair Run, source/crop/detection/
+  embedding evidence, and multi-run comparison history. Operator assertions never authorize outcome
+  correctness or population-performance claims. Matcher execution runs in a terminable child process
+  under a hard deadline; prepared output receipts allow exact restart reconciliation after process death.
+* Stress Studio executes all seven closed transformations on the active recorded sample, renders every
+  hash-verified derivative, compares source/derived SCRFD and OFIQ geometry, and measures the derivatives
+  with OFIQ. Owner-derived execution verifies its complete current-project parent chain before admission.
+  Transform work is durably admitted through the bounded executor, refuses more than 20,000 output files
+  before execution, and reconciles fsynced prepared outputs on retry.
+* Analyze utility exposes every recorded OFIQ measure and explicit compatible multi-analysis overlays. The frozen
+  protocol digest identifies the pair universe; per-Run comparison digests remain verified provenance.
+  Matcher, preprocessing, measure, and composite differences are labelled separately, and incompatible or
+  incomplete records are refused rather than silently combined.
+* Replaced primary raw API navigation with typed in-app Evidence routes across project, sample, matcher,
+  analysis, report, system, and comparison surfaces. Raw JSON remains an explicit secondary action.
+* Manage system now separates Add-ons, Processing profiles, Connections, Runtime & storage, and Audit. It exposes
+  the closed downloadable matcher/dataset catalog, exact publisher URL, verified receipts, load/unload,
+  runtime readiness, live process lease, and zero admitted remote connections without generic plug-in or
+  provider controls.
+* Recorded dataset, sample, image, geometry, quality, derived-set, direct-comparison, direct-Run, and raw
+  artifact reads are project-scoped. Foreign-project and retired unscoped routes return 404. Browser-facing
+  records use opaque identities and links rather than biometric storage paths.
+* Purge previews, results, failures, and history are path-free public receipts containing counts, verification,
+  limitations, and an evidence digest. Complete target paths and operating-system failures remain in the
+  private local purge attestation used for integrity and recovery.
+* Startup now snapshots a database whose current version has an incomplete migration ledger or schema
+  shape before repair. Readiness publishes the kernel-held process-lifetime data-directory lease without
+  disclosing its lock path, re-hashes the registered OFIQ binary/configuration, treats every non-completed
+  purge journal as unresolved, and returns stable path-free dependency codes.
+* Local storage remediation now treats only a file or directory that disappears between secure enumeration
+  and no-follow open as benign. Symlinks, type replacement, access failure, and every other error remain
+  fail-closed. This prevents transient real SQLite WAL/SHM cleanup from aborting CLI crash recovery.
+* Owner-upload and verification-dataset acquisition publication now use staged, fsynced, no-clobber files
+  plus durable receipt authority. Same-size drift, symlinks, short writes, missing receipts, completion-event
+  failure, and restart reconciliation are refused or rolled back without claiming unrecorded bytes.
+* Durable process-death recovery now covers quality batches, matcher-matrix leaves, registered external-score
+  imports, utility/cross-matcher/degradation/identification analyses, and figure/report/export/bundle
+  publication in addition to direct comparisons and derived sets. Prepared identities bind project, request,
+  result, members, sizes, hashes, and the recorded actor; malformed, foreign, partial, and symlinked stages
+  fail closed and remain purgeable.
+* Exact interrupted matcher-matrix retry reconstructs the canonical request, reconciles verified prepared
+  leaves under their original identities, and executes only the missing leaves.
+* Owner-protocol generation now preflights a 20,000-source-sample and 20,000-output-pair ceiling before
+  materialization, uses deterministic ranked sampling instead of allocating all possible pairs, and shares
+  the bounded-work admission contract across API and CLI execution.
+* Annotations now resolve a closed project-owned subject type before persistence and commit the annotation
+  with its audit event in one SQLite transaction. Cross-project/unknown subjects and split evidence are refused.
+* The backend package identity is `0.1.0b3`; workspace and console identity is `0.1.0-beta.3`. Release
+  publication remains no-clobber, so the accepted beta-2 package is preserved for rollback.
+* The exact reviewed Node runtime is now 26.7.0 with pnpm 10.28.0. Install, release, and browser
+  validation use the reviewed `node` selected on `PATH` and fail preflight before dependency mutation
+  when its identity differs; they no longer force the retired Node 20 system binary.
+* Upstream matcher architecture acquisition is now an explicit `qualsight setup` step. The offline
+  gate imports only exact manifest-verified cached sources into its fresh private data directory, sets
+  the setup network scope to disabled, and requires zero authorized or refused external connections.
+  Controlled LFW input resolution is registry-driven rather than bound to a workstation pathname.
+  `QUALSIGHT_SOURCE_CACHE_ROOT` selects an existing absolute, non-symlinked verified cache without
+  silently contacting a publisher or granting network access.
+* Governed table exports now require origin-checked POST requests and download through the console as
+  real attachment bytes; retired GET export routes are refused without changing stored export state.
+  The browser audit verifies the downloaded CSV filename, nonempty byte count, and SHA-256.
+* Release publication rechecks the commit, tree, and clean tracked state immediately before the atomic
+  no-clobber rename. Source projection and extracted-package validation reject raw, encoded, and
+  platform-specific operator-home paths while retaining only reviewed external locator bindings.
+* Release preflight validates the pinned Python, uv, Node, and pnpm toolchain before dependency mutation.
+  Source creation and extracted-package validation reject disguised biometric/runtime bytes, exact
+  registered restricted hashes, secrets, special nodes, and encoded host paths; the map-free console is
+  scanned for raw or encoded private build paths before archiving. Playwright 1.58.0 is pinned for the
+  nine-workflow release browser aggregate. The final SBOM, vulnerability, gate, manifest, commit, and
+  checksum sidecars are also scanned before atomic publication. The source archive embeds exact
+  path/hash/size/safe-mode membership, and the committed-tree validator checks the extracted archive and
+  expected commit before publication. The full backend gate now has a 5,400-second deadline, above the
+  observed 4,047.221-second healthy-suite baseline. Release applies its deterministic safe umask before
+  creating any staged or published path; extracted packages may safely reduce group/world permissions but
+  cannot add permissions, special bits, group/world write, or remove required owner access.
+* The immutable release chain now executes the shipped user-guide command blocks as a required gate and
+  records their evidence beside the offline and nine-workflow browser gates. The installer prints a complete
+  offline verification command with explicit observation and data-directory destinations. The offline gate
+  distinguishes a live listener from a recently closed loopback connection and writes server output to a
+  seekable temporary log, so kernel `TIME_WAIT` state and log volume cannot cause false refusal or pipe
+  backpressure during matcher execution.
+
 ## 0.1.0-beta.2 — 2026-08-31
 
 * OFIQ v1.1.2 can now be rebuilt through a committed Conan 2.18.1 lock, GCC 12 profile, and exact
@@ -99,7 +192,9 @@
   `assess-owner` CLI); identity-labelled directory / CSV-manifest imports with saved reusable field
   mappings; deterministic seeded owner pair protocols executing on the real matcher matrix; purge
   coverage; source kind `OWNER_SUPPLIED_LOCAL_INPUT` on every result.
-* External-score import accepts an interactive field mapping (PRD §12) with saved mappings.
+* External-score import accepts the closed registered artifact from the console. Custom field mappings
+  and saved mapping names remain available through the API/CLI contract; the beta console does not
+  claim an interactive external-score mapping editor.
 * Visual evidence: SCRFD detection overlays (labelled as the matcher pipeline's), OFIQ's own
   ADNet-98 landmarks through a registered auxiliary binary built from the registered v1.1.2 source,
   compared 112×112 crops recomputed under the recorded frozen condition, and a match-evidence panel

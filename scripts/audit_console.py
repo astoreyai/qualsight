@@ -1,8 +1,9 @@
 """Interaction / piping audit: walk every console view on the recorded evidence,
 exercise every drilldown, and resolve every link and image the DOM renders.
 
-Read-mostly on the persistent store: the only mutation is one owner-supplied
-upload of a real LFW copy through the recorded application flow.
+Read-mostly on the persistent store: mutations are one owner-supplied upload
+of a real LFW copy and, when absent, one dashboard assembled through the shipped
+UI from the project's already-recorded real evidence.
 Reproduce/matrix/report builders are not triggered here —
 they are covered by the observation and docs gates.
 
@@ -13,6 +14,7 @@ Exit 0 only when every step succeeded and every resolved URL returned 200.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -21,9 +23,11 @@ import sys
 import tempfile
 import time
 
+from controlled_inputs import lfw_tree_root
+
 ROOT = Path(__file__).resolve().parents[1]
 PORT = 8480
-UPLOAD_SOURCE = Path("/mnt/projects/datasets/lfw/lfw_funneled/John_Howard/John_Howard_0002.jpg")
+UPLOAD_SOURCE = lfw_tree_root(ROOT) / "John_Howard/John_Howard_0002.jpg"
 
 FINDINGS: list[dict] = []
 CHECKED: dict[str, int] = {}
@@ -166,8 +170,36 @@ def main() -> int:
 
             # ---- matchers: leaf -> errors -> evidence --------------------------
             def matchers():
+                goto("data")
+                dataset_select = page.locator("#workbench-dataset")
+                dataset_select.wait_for(state="visible", timeout=60_000)
+                matrix_dataset = dataset_select.locator("option").evaluate_all(
+                    "options => options.find(option => option.textContent?.includes('Local LFW funneled image collection'))?.value ?? null"
+                )
+                assert matrix_dataset, (
+                    "Inputs does not expose the recorded LFW dataset required by the matrix evidence"
+                )
+                dataset_select.select_option(matrix_dataset)
+                page.wait_for_function(
+                    "() => document.querySelector('[data-testid=dataset-facts]')?.textContent?.includes('Local LFW funneled image collection')",
+                    timeout=60_000,
+                )
+                page.wait_for_function(
+                    "datasetId => document.querySelector('[data-context-key=dataset]')?.getAttribute('data-dataset-id') === datasetId",
+                    arg=matrix_dataset,
+                    timeout=60_000,
+                )
                 goto("matchers")
-                page.wait_for_selector("[data-testid=matrix-table]", timeout=60_000)
+                page.wait_for_selector("[data-testid=comparison-studio]", timeout=60_000)
+                dataset_study = page.locator("[data-testid=comparison-mode-dataset]")
+                assert dataset_study.count() == 1, (
+                    "Compare does not expose the accepted Dataset study mode"
+                )
+                dataset_study.click()
+                assert dataset_study.get_attribute("aria-pressed") == "true", (
+                    "Dataset study did not become the active Compare mode"
+                )
+                page.wait_for_selector("[data-testid=matrix-table] button.cell", timeout=60_000)
                 cells = page.evaluate("() => document.querySelectorAll('[data-testid=matrix-table] button.cell').length")
                 assert cells >= 1, "no recorded matcher leaf is available"
                 registered_matchers = page.evaluate(
@@ -203,13 +235,16 @@ def main() -> int:
                 page.fill("[data-testid=matcher-errors] input", "0.9")
                 page.click("[data-testid=matcher-errors] button:has-text('Recompute')")
                 page.wait_for_selector("[data-testid=error-pair]", timeout=120_000)
-                page.click("[data-testid=evidence-open]")
+                page.locator(
+                    "[data-testid=matcher-errors] [data-testid=evidence-open]"
+                ).first.click()
                 scope = "main div[data-view=matchers] "
                 page.wait_for_selector(scope + "[data-testid=evidence-crop-left]", timeout=180_000)
                 decisions = page.evaluate("(s) => document.querySelectorAll(s + '[data-testid=evidence-decisions] tbody tr').length", scope)
                 marker = bool(page.query_selector(scope + "[data-testid=pair-score-marker]"))
                 assert decisions >= 1 and marker, (decisions, marker)
                 return {
+                    "matrix_dataset_id": matrix_dataset,
                     "matrix_cells": cells,
                     "registered_matchers": registered_matchers,
                     "matcher_drilldowns": audited_matchers,
@@ -274,24 +309,77 @@ def main() -> int:
             # ---- reports: thumbs, dashboards, report links, bundles ------------
             def reports():
                 goto("reports")
+                disclosure = page.locator("[data-testid=report-disclosure-warning]")
+                disclosure_text = (disclosure.text_content() or "").lower()
+                assert disclosure.is_visible() and disclosure.get_attribute("role") == "note", "report disclosure warning is not an accessible visible note"
+                assert "disclosure review" in disclosure_text and "deployment-local provenance" in disclosure_text, disclosure_text
                 page.wait_for_selector("[data-testid=figure-thumb]", timeout=60_000)
                 thumbs = page.query_selector_all("[data-testid=figure-thumb]")
                 for thumb in thumbs:
                     thumb.click()
                     page.wait_for_selector("[data-testid=figure-detail] img", timeout=60_000)
                     page.wait_for_function("() => { const i = document.querySelector('[data-testid=figure-detail] img'); return i && i.complete && i.naturalWidth > 0; }", timeout=60_000)
-                return {"figures_opened": len(thumbs), **check_links(page, "reports")}
+                governed_links = page.locator("[data-governed-download]")
+                assert governed_links.count() > 0, "the populated report view has no disclosure-bound downloads"
+                assert all(governed_links.nth(index).get_attribute("aria-describedby") == "report-disclosure-warning-text" for index in range(governed_links.count())), "a governed download is not associated with the disclosure warning"
+                quality_export = page.locator('[data-governed-download="quality-csv"]')
+                assert quality_export.count() == 1 and quality_export.is_enabled(), "the real quality export action is unavailable"
+                with page.expect_download(timeout=60_000) as download_info:
+                    quality_export.click()
+                export_download = download_info.value
+                export_path = export_download.path()
+                assert export_download.suggested_filename.endswith(".csv"), export_download.suggested_filename
+                assert export_path is not None and export_path.is_file(), "the browser did not persist the export response"
+                export_bytes = export_path.read_bytes()
+                assert export_bytes, "the governed quality export is empty"
+                dashboard_buttons = page.locator("[data-testid=dashboard-open]")
+                dashboard_created = False
+                if dashboard_buttons.count() == 0:
+                    dashboard_save = page.locator("[data-testid=dashboard-save]")
+                    assert dashboard_save.count() == 1 and dashboard_save.is_enabled(), (
+                        "the real project has no dashboard and its recorded evidence cannot create one"
+                    )
+                    dashboard_save.click()
+                    page.wait_for_selector("[data-testid=dashboard-detail]", timeout=60_000)
+                    page.wait_for_function(
+                        "() => document.querySelectorAll('[data-testid=dashboard-open]').length > 0",
+                        timeout=60_000,
+                    )
+                    dashboard_created = True
+                assert dashboard_buttons.count() > 0, "the real recorded project has no dashboard to inspect"
+                dashboard_buttons.first.click()
+                page.wait_for_selector("[data-testid=dashboard-detail]", timeout=60_000)
+                non_figure_panels = page.locator("[data-testid=dashboard-panel]:not([data-panel-kind=figure])")
+                summaries = page.locator("[data-testid=dashboard-operator-summary]")
+                raw_disclosures = page.locator("[data-testid=dashboard-raw-data]")
+                assert non_figure_panels.count() > 0, "the real dashboard has no operator-data panel"
+                assert summaries.count() == non_figure_panels.count(), (summaries.count(), non_figure_panels.count())
+                assert raw_disclosures.count() == non_figure_panels.count(), (raw_disclosures.count(), non_figure_panels.count())
+                assert page.locator("[data-testid=dashboard-panel] > pre").count() == 0, "raw JSON remains primary dashboard content"
+                assert all(raw_disclosures.nth(index).get_attribute("open") is None for index in range(raw_disclosures.count())), "raw dashboard JSON is expanded by default"
+                raw_disclosures.first.locator("summary").focus()
+                page.keyboard.press("Enter")
+                assert raw_disclosures.first.get_attribute("open") is not None, "raw dashboard disclosure is not keyboard operable"
+                page.keyboard.press("Enter")
+                assert raw_disclosures.first.get_attribute("open") is None, "raw dashboard disclosure did not collapse from the keyboard"
+                return {"figures_opened": len(thumbs), "dashboard_created": dashboard_created, "governed_downloads": governed_links.count(), "export_filename": export_download.suggested_filename, "export_size_bytes": len(export_bytes), "export_sha256": hashlib.sha256(export_bytes).hexdigest(), "operator_summaries": summaries.count(), "raw_disclosures_collapsed": raw_disclosures.count(), **check_links(page, "reports")}
 
             # ---- advanced + system ---------------------------------------------
             def advanced():
                 goto("advanced")
+                boundary = page.locator("[data-testid=advanced-beta-boundary]")
+                boundary_text = (boundary.text_content() or "").lower()
+                assert boundary.is_visible() and boundary.get_attribute("role") == "note", "Advanced beta boundary is not an accessible visible note"
+                for phrase in ("research extension", "outside beta acceptance", "single-image stress test", "1:n", "container"):
+                    assert phrase in boundary_text, f"Advanced beta boundary omits {phrase}: {boundary_text}"
                 page.wait_for_selector("main div[data-view=advanced] table", timeout=60_000)
-                return check_links(page, "advanced")
+                return {"beta_boundary": (boundary.text_content() or "").strip(), **check_links(page, "advanced")}
 
             def system():
                 goto("system")
-                page.wait_for_selector("[data-testid=matcher-assets] .asset-card", timeout=60_000)
-                assets = page.evaluate("() => document.querySelectorAll('[data-testid=matcher-assets] .asset-card').length")
+                page.wait_for_selector("[data-testid=matcher-assets] tbody tr", timeout=60_000)
+                assets = page.evaluate("() => document.querySelectorAll('[data-testid=matcher-assets] tbody tr').length")
+                page.get_by_role("tab", name="Audit", exact=True).click()
                 resources = page.evaluate("() => document.querySelectorAll('[data-testid=resource-table] .resource-card').length")
                 assert assets == 6, assets
                 assert resources == 13, resources

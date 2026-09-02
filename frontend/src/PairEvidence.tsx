@@ -92,21 +92,21 @@ function ScoreDistribution({ evidence }: { evidence: EvidenceOut }) {
   );
 }
 
-export function PairEvidence({ runId, pairId, onClose }: { runId: string; pairId: string; onClose: () => void }) {
+export function PairEvidence({ projectId, runId, pairId, onClose }: { projectId: string; runId: string; pairId: string; onClose: () => void }) {
   const [evidence, setEvidence] = useState<EvidenceOut | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setEvidence(null);
     setError(null);
-    fetch(`/api/matcher-runs/${encodeURIComponent(runId)}/pairs/${encodeURIComponent(pairId)}/evidence`)
+    fetch(`/api/projects/${encodeURIComponent(projectId)}/matcher-runs/${encodeURIComponent(runId)}/pairs/${encodeURIComponent(pairId)}/evidence`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`${r.status}: ${(await r.json()).detail ?? r.statusText}`);
         return (await r.json()) as EvidenceOut;
       })
       .then(setEvidence)
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
-  }, [runId, pairId]);
+  }, [projectId, runId, pairId]);
 
   if (error) return <p className="error" role="alert">{error}</p>;
   if (!evidence) return <p className="status" role="status">Loading recorded evidence…</p>;

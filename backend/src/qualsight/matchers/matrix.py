@@ -55,6 +55,12 @@ from ..domain.primitives import (
 from ..domain.run import CompletedRun, LogRecord, MetricObservation, RunStatus, ScientificSupportState
 from ..engines.ofiq.adapter import _not_applicable, content_id
 from ..execution.registry_binding import ResourceRegistry
+from ..execution.prepared_output import (
+    PreparedOutputError,
+    create_staging_directory,
+    load_prepared_output,
+    prepare_and_publish,
+)
 from ..metrics.verification import ComparisonInputs, compute_verification_metrics
 from ..provenance import (
     application_version,
@@ -66,6 +72,7 @@ from ..provenance import (
     sha256_file,
 )
 from .alignment import ARCFACE_TEMPLATE_SHA256
+from .bounded import embed_with_deadline, validate_execution_timeout
 from .conditions import (
     CONDITION_DEFINITIONS,
     PREALIGNED_CONDITIONS,
@@ -132,6 +139,114 @@ class LeafResult:
     failed_count: int
 
 
+MATRIX_LEAF_ARTIFACT_NAMES = (
+    "comparisons.parquet",
+    "embeddings.npy",
+    "verification_metrics.json",
+)
+
+
+def recover_prepared_matcher_leaf(
+    directory: Path,
+    *,
+    matrix_id: str,
+    leaf_id: str,
+    project_id: str,
+    dataset_id: str,
+    protocol_id: str,
+    request_sha256: str,
+) -> LeafResult:
+    """Reconstruct one exact matrix leaf from its promoted receipt."""
+
+    try:
+        receipt = load_prepared_output(
+            directory,
+            operation_kind="MATCHER_MATRIX_LEAF",
+            result_id=content_id("matrix-leaf", matrix_id, leaf_id),
+            project_id=project_id,
+            request_sha256=request_sha256,
+            artifact_names=MATRIX_LEAF_ARTIFACT_NAMES,
+        )
+        record = receipt["record"]
+        if set(record) != {
+            "comparison_count",
+            "condition_id",
+            "failed_count",
+            "leaf_id",
+            "matcher_id",
+            "matrix_id",
+            "metrics",
+            "run",
+            "scored_count",
+        }:
+            raise MatrixError("prepared matcher leaf contract differs")
+        matcher_id = MatcherId(record["matcher_id"])
+        condition_id = ConditionId(record["condition_id"])
+        if LEAF_IDS.get((matcher_id, condition_id)) != leaf_id:
+            raise MatrixError("prepared matcher leaf axis identity differs")
+        run = CompletedRun.model_validate_json(
+            json.dumps(record["run"], separators=(",", ":"), ensure_ascii=False)
+        )
+        metrics = record["metrics"]
+        comparisons_path = directory / "comparisons.parquet"
+        embeddings_path = directory / "embeddings.npy"
+        metrics_path = directory / "verification_metrics.json"
+        configuration = json.loads(run.configuration.text)
+        expected_experiment_id = content_id(
+            "experiment",
+            project_id,
+            dataset_id,
+            protocol_id,
+            matcher_id.value,
+            condition_id.value,
+        )
+        if (
+            record["matrix_id"] != matrix_id
+            or record["leaf_id"] != leaf_id
+            or run.project_id != project_id
+            or run.experiment_id != expected_experiment_id
+            or run.matcher.component_id != matcher_id.value
+            or run.matcher_preprocessing.component_id != condition_id.value
+            or configuration.get("matrix_id") != matrix_id
+            or configuration.get("leaf_id") != leaf_id
+            or configuration.get("protocol_id") != protocol_id
+            or {artifact.uri for artifact in run.artifacts}
+            != {str(comparisons_path), str(embeddings_path), str(metrics_path)}
+            or any(
+                sha256_file(Path(artifact.uri)) != artifact.sha256
+                for artifact in run.artifacts
+            )
+            or json.loads(metrics_path.read_text(encoding="utf-8")) != metrics
+        ):
+            raise MatrixError("prepared matcher leaf identity differs")
+        comparison_count = int(record["comparison_count"])
+        scored_count = int(record["scored_count"])
+        failed_count = int(record["failed_count"])
+        if (
+            comparison_count < 1
+            or scored_count < 0
+            or failed_count < 0
+            or scored_count + failed_count != comparison_count
+        ):
+            raise MatrixError("prepared matcher leaf counts differ")
+        return LeafResult(
+            leaf_id,
+            matcher_id,
+            condition_id,
+            run,
+            metrics,
+            comparisons_path,
+            embeddings_path,
+            comparison_count,
+            scored_count,
+            failed_count,
+        )
+    except (PreparedOutputError, OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        if isinstance(error, MatrixError):
+            raise
+        raise MatrixError("prepared matcher leaf failed integrity verification") from error
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc).astimezone()
 
@@ -157,6 +272,7 @@ class MatcherMatrixJob:
         selection_rule: str = "every pair of the frozen protocol",
         runtime_manager: Any | None = None,
         detector_workers: int = 2,
+        execution_timeout_seconds: float,
     ) -> None:
         if not pairs:
             raise MatrixError("the protocol has no pairs")
@@ -206,6 +322,12 @@ class MatcherMatrixJob:
         self.selection_rule = selection_rule
         self.runtime_manager = runtime_manager
         self.detector_workers = detector_workers
+        try:
+            self.execution_timeout_seconds = validate_execution_timeout(
+                execution_timeout_seconds
+            )
+        except ValueError as error:
+            raise MatrixError(str(error)) from error
         scoped_resources = tuple(m.value for m in matchers) + (dataset_resource_of(dataset),)
         if not prealigned_dataset:
             scoped_resources = (SCRFD_RESOURCE_ID, *scoped_resources)
@@ -214,7 +336,19 @@ class MatcherMatrixJob:
             if purpose_scope not in resource.approved_scopes:
                 raise MatrixError(f"{resource_id} does not approve scope {purpose_scope}")
         self.created_at = _now()
-        self.matrix_id = content_id("matrix", project.project_id, protocol.protocol_id, protocol.pairs_sha256, self.created_at.isoformat())
+        self.leaf_ids = tuple(
+            LEAF_IDS[(matcher, condition)]
+            for matcher in self.matchers
+            for condition in self.conditions
+        )
+        self.matrix_id = content_id(
+            "matrix",
+            project.project_id,
+            protocol.protocol_id,
+            protocol.pairs_sha256,
+            json.dumps(sorted(self.leaf_ids), separators=(",", ":")),
+            selection_rule,
+        )
         self.job_dir = job_root / self.matrix_id.replace(":", "_")
         # Ordered sample set shared by every selected leaf Run.
         ordered: dict[str, ProtocolPair] = {}
@@ -333,17 +467,42 @@ class MatcherMatrixJob:
 
     # -- stage 2: one leaf Run per matcher × condition ---------------------------
 
-    def _leaf(self, matcher: FrozenMatcher, condition: ConditionId) -> LeafResult:
+    def _leaf(
+        self,
+        matcher: FrozenMatcher,
+        condition: ConditionId,
+        *,
+        request_sha256: str,
+    ) -> LeafResult:
         templates = self.templates[condition]
         leaf_id = LEAF_IDS[(matcher.matcher_id, condition)]
         started_at = _now()
         clock = time.perf_counter()
-        embeddings = matcher.embed(templates.crops) if templates.crops.shape[0] else np.zeros((0, 512), dtype=np.float32)
+        embeddings = (
+            embed_with_deadline(
+                matcher_id=matcher.matcher_id,
+                registry=self.registry,
+                upstream=self.upstream,
+                crops_bgr=templates.crops,
+                timeout_seconds=self.execution_timeout_seconds,
+                process_label=leaf_id,
+            )
+            if templates.crops.shape[0]
+            else np.zeros((0, 512), dtype=np.float32)
+        )
         embed_seconds = time.perf_counter() - clock
         leaf_dir = self.job_dir / leaf_id.replace(".", "_")
-        leaf_dir.mkdir(parents=True, exist_ok=False)
+        leaf_result_id = content_id("matrix-leaf", self.matrix_id, leaf_id)
+        staging = create_staging_directory(
+            leaf_dir,
+            operation_kind="MATCHER_MATRIX_LEAF",
+            result_id=leaf_result_id,
+            project_id=self.project.project_id,
+            request_sha256=request_sha256,
+        )
         embeddings_path = leaf_dir / "embeddings.npy"
-        np.save(embeddings_path, embeddings)
+        staged_embeddings_path = staging / embeddings_path.name
+        np.save(staged_embeddings_path, embeddings)
         # Comparisons: every protocol pair, in protocol order.
         rows: dict[str, list[Any]] = {k: [] for k in ("pair_id", "fold", "source_order", "label", "left_sample_id", "right_sample_id", "left_subject_id", "right_subject_id", "score", "failure", "failure_side", "left_face_count", "right_face_count")}
         comparison_inputs_scores: list[float] = []
@@ -417,7 +576,8 @@ class MatcherMatrixJob:
             ),
         )
         comparisons_path = leaf_dir / "comparisons.parquet"
-        pq.write_table(table, comparisons_path, compression="zstd")
+        staged_comparisons_path = staging / comparisons_path.name
+        pq.write_table(table, staged_comparisons_path, compression="zstd")
         metrics = compute_verification_metrics(
             ComparisonInputs(
                 scores=np.array(comparison_inputs_scores, dtype=np.float64),
@@ -427,11 +587,47 @@ class MatcherMatrixJob:
             )
         )
         metrics_path = leaf_dir / "verification_metrics.json"
-        metrics_path.write_text(json.dumps(metrics, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
-        run = self._leaf_run(matcher, condition, leaf_id, started_at, embed_seconds, comparisons_path, embeddings_path, metrics_path, metrics, templates, scored, len(self.pairs) - scored)
-        return LeafResult(leaf_id, matcher.matcher_id, condition, run, metrics, comparisons_path, embeddings_path, len(self.pairs), scored, len(self.pairs) - scored)
+        staged_metrics_path = staging / metrics_path.name
+        staged_metrics_path.write_text(json.dumps(metrics, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+        run = self._leaf_run(
+            matcher,
+            condition,
+            leaf_id,
+            started_at,
+            embed_seconds,
+            comparisons_path,
+            embeddings_path,
+            metrics_path,
+            metrics,
+            templates,
+            scored,
+            len(self.pairs) - scored,
+            artifact_source_directory=staging,
+        )
+        leaf = LeafResult(leaf_id, matcher.matcher_id, condition, run, metrics, comparisons_path, embeddings_path, len(self.pairs), scored, len(self.pairs) - scored)
+        prepare_and_publish(
+            staging,
+            leaf_dir,
+            operation_kind="MATCHER_MATRIX_LEAF",
+            result_id=leaf_result_id,
+            project_id=self.project.project_id,
+            request_sha256=request_sha256,
+            artifact_names=MATRIX_LEAF_ARTIFACT_NAMES,
+            record={
+                "comparison_count": leaf.comparison_count,
+                "condition_id": condition.value,
+                "failed_count": leaf.failed_count,
+                "leaf_id": leaf_id,
+                "matcher_id": matcher.matcher_id.value,
+                "matrix_id": self.matrix_id,
+                "metrics": metrics,
+                "run": run.model_dump(mode="json"),
+                "scored_count": leaf.scored_count,
+            },
+        )
+        return leaf
 
-    def _leaf_run(self, matcher: FrozenMatcher, condition: ConditionId, leaf_id: str, started_at: datetime, embed_seconds: float, comparisons_path: Path, embeddings_path: Path, metrics_path: Path, metrics: dict[str, Any], templates: ConditionTemplates, scored: int, failed: int) -> CompletedRun:
+    def _leaf_run(self, matcher: FrozenMatcher, condition: ConditionId, leaf_id: str, started_at: datetime, embed_seconds: float, comparisons_path: Path, embeddings_path: Path, metrics_path: Path, metrics: dict[str, Any], templates: ConditionTemplates, scored: int, failed: int, *, artifact_source_directory: Path | None = None) -> CompletedRun:
         binding = matcher.binding
         matcher_record = self.registry.raw_resource(matcher.matcher_id.value)
         checkpoint_identity = next(item.identity for item in self.registry.resource(matcher.matcher_id.value).artifacts if item.role == "MODEL")
@@ -477,11 +673,16 @@ class MatcherMatrixJob:
             }
         )
         experiment_id = content_id("experiment", self.project.project_id, self.dataset.dataset_id, self.protocol.protocol_id, matcher.matcher_id.value, condition.value)
+        comparison_source_path = (
+            artifact_source_directory / comparisons_path.name
+            if artifact_source_directory is not None
+            else comparisons_path
+        )
         run_id = content_id(
             "run",
             experiment_id,
             started_at.isoformat(),
-            sha256_file(comparisons_path),
+            sha256_file(comparison_source_path),
             binding.checkpoint_sha256,
             self.detector_identity.sha256 if self.detector_identity is not None else condition_sha,
         )
@@ -506,7 +707,12 @@ class MatcherMatrixJob:
                 observations.append(MetricObservation(metric_id=f"biometric.verification.fnmr@1.0.0[EXCLUDE_FAILED_TRIALS]@fmr<={point['target_fmr']}", value=float(point["fnmr"]), unit="rate"))
         artifacts = []
         for path, kind, media in ((comparisons_path, ArtifactKind.TABLE, "application/vnd.apache.parquet"), (metrics_path, ArtifactKind.METRICS, "application/json"), (embeddings_path, ArtifactKind.TABLE, "application/x-npy")):
-            digest = sha256_file(path)
+            source_path = (
+                artifact_source_directory / path.name
+                if artifact_source_directory is not None
+                else path
+            )
+            digest = sha256_file(source_path)
             artifacts.append(
                 Artifact(
                     artifact_id=content_id("artifact", run_id, digest, path.name),
@@ -515,7 +721,7 @@ class MatcherMatrixJob:
                     storage_backend=StorageBackend.PARQUET if path.suffix == ".parquet" else StorageBackend.FILESYSTEM,
                     uri=str(path),
                     sha256=digest,
-                    size_bytes=path.stat().st_size,
+                    size_bytes=source_path.stat().st_size,
                     media_type=media,
                     classification=DataClassification.SENSITIVE_BIOMETRIC_DERIVED,
                     created_at=_now(),
@@ -580,8 +786,48 @@ class MatcherMatrixJob:
 
     # -- run --------------------------------------------------------------------
 
-    def run(self) -> list[LeafResult]:
-        self.job_dir.mkdir(parents=True, exist_ok=False)
+    def run(
+        self,
+        *,
+        request_sha256: str | None = None,
+        resume_interrupted: bool = False,
+    ) -> list[LeafResult]:
+        effective_request_sha256 = request_sha256 or CanonicalJson.from_value(
+            {
+                "dataset_id": self.dataset.dataset_id,
+                "expected_leaf_count": self.expected_leaf_count,
+                "leaf_ids": sorted(self.leaf_ids),
+                "matrix_id": self.matrix_id,
+                "pair_count": len(self.pairs),
+                "protocol_id": self.protocol.protocol_id,
+                "selection_rule": self.selection_rule,
+            }
+        ).sha256
+        recovered_leaves: dict[str, LeafResult] = {}
+        if resume_interrupted:
+            if self.job_dir.is_symlink():
+                raise MatrixError("interrupted matrix output is a symbolic link")
+            self.job_dir.mkdir(parents=True, exist_ok=True)
+            if not self.job_dir.is_dir():
+                raise MatrixError("interrupted matrix output is not a directory")
+            for leaf_id in self.leaf_ids:
+                leaf_directory = self.job_dir / leaf_id.replace(".", "_")
+                if not leaf_directory.exists():
+                    continue
+                leaf = recover_prepared_matcher_leaf(
+                    leaf_directory,
+                    matrix_id=self.matrix_id,
+                    leaf_id=leaf_id,
+                    project_id=self.project.project_id,
+                    dataset_id=self.dataset.dataset_id,
+                    protocol_id=self.protocol.protocol_id,
+                    request_sha256=effective_request_sha256,
+                )
+                if self.store.matcher_leaf(leaf.run.run_id) is None:
+                    self.store.record_matcher_leaf(self, leaf)
+                recovered_leaves[leaf_id] = leaf
+        else:
+            self.job_dir.mkdir(parents=True, exist_ok=False)
         self.progress = {"phase": "preprocess", "detail": ""}
         try:
             self._preprocess_all()
@@ -600,8 +846,21 @@ class MatcherMatrixJob:
                 lease = self.runtime_manager.lease(matcher_id) if self.runtime_manager is not None else nullcontext(FrozenMatcher(matcher_id, self.registry, self.upstream))
                 with lease as matcher:
                     for condition in self.conditions:
-                        self.progress = {"phase": f"leaf:{LEAF_IDS[(matcher_id, condition)]}", "detail": ""}
-                        leaf = self._leaf(matcher, condition)
+                        leaf_id = LEAF_IDS[(matcher_id, condition)]
+                        existing = recovered_leaves.get(leaf_id)
+                        if existing is not None:
+                            self.progress = {
+                                "phase": f"leaf:{leaf_id}",
+                                "detail": "recovered exact prepared leaf",
+                            }
+                            self.leaves.append(existing)
+                            continue
+                        self.progress = {"phase": f"leaf:{leaf_id}", "detail": ""}
+                        leaf = self._leaf(
+                            matcher,
+                            condition,
+                            request_sha256=effective_request_sha256,
+                        )
                         self.store.record_matcher_leaf(self, leaf)
                         self.leaves.append(leaf)
         finally:

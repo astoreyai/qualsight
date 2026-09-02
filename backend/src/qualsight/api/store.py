@@ -17,12 +17,23 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import stat
 import tempfile
 import threading
 
 from typing import Any
 
 from ..domain.entities import Artifact, AuditEvent, AuditEventType, Dataset, Experiment, Project, ProtocolKind, Sample, VerificationProtocol
+from ..domain.comparison import ComparisonLabel
+from ..domain.direct_pair_comparison import DirectPairComparisonRun
+from ..domain.owner_pair import (
+    OperatorRelationshipAssertion,
+    OwnerPairAdmission,
+    OwnerPairIntegrityError,
+    OwnerPairNotFound,
+    OwnerPairRelationship,
+    OwnerPairValidationError,
+)
 from ..domain.primitives import CanonicalJson, ComponentBinding, ComponentState
 from ..domain.run import CompletedRun
 from ..engines.ofiq.adapter import SingleSampleRunBundle
@@ -34,6 +45,9 @@ SCHEMA_MIGRATIONS = (
     (3, "DURABLE_OPERATIONS_AND_PURGE_JOURNAL"),
     (4, "PAIR_PROTOCOLS_WITH_OPTIONAL_FOLD_AUTHORITY"),
     (5, "DURABLE_OPERATION_REQUEST_AND_ATTEMPT_IDENTITIES"),
+    (6, "IMMUTABLE_OWNER_PAIR_ADMISSIONS"),
+    (7, "IMMUTABLE_DIRECT_PAIR_COMPARISON_RUNS"),
+    (8, "NULLABLE_DERIVED_SOURCE_RESOURCE_AUTHORITY"),
 )
 
 SCHEMA = """
@@ -316,7 +330,7 @@ CREATE TABLE IF NOT EXISTS derived_sets (
     derived_set_id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
     source_dataset_id TEXT NOT NULL,
-    source_resource_id TEXT NOT NULL,
+    source_resource_id TEXT,
     derived_dataset_id TEXT NOT NULL,
     directory TEXT NOT NULL,
     record_json TEXT NOT NULL,
@@ -435,6 +449,38 @@ CREATE TABLE IF NOT EXISTS owner_supplied_project_refs (
     record_json TEXT NOT NULL,
     PRIMARY KEY (path, project_id)
 );
+CREATE TABLE IF NOT EXISTS owner_pair_admissions (
+    pair_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(project_id),
+    left_sample_id TEXT NOT NULL REFERENCES samples(sample_id),
+    right_sample_id TEXT NOT NULL REFERENCES samples(sample_id),
+    relationship TEXT NOT NULL CHECK (
+        relationship IN ('SAME_PERSON', 'DIFFERENT_PEOPLE', 'NOT_RECORDED')
+    ),
+    evidence_sha256 TEXT NOT NULL,
+    record_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS owner_pair_admissions_by_project
+ON owner_pair_admissions(project_id, pair_id);
+CREATE TABLE IF NOT EXISTS direct_pair_comparisons (
+    comparison_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL UNIQUE,
+    project_id TEXT NOT NULL REFERENCES projects(project_id),
+    pair_id TEXT NOT NULL REFERENCES owner_pair_admissions(pair_id),
+    left_sample_id TEXT NOT NULL REFERENCES samples(sample_id),
+    right_sample_id TEXT NOT NULL REFERENCES samples(sample_id),
+    left_dataset_id TEXT NOT NULL REFERENCES datasets(dataset_id),
+    right_dataset_id TEXT NOT NULL REFERENCES datasets(dataset_id),
+    matcher_id TEXT NOT NULL,
+    preprocessing_id TEXT NOT NULL,
+    threshold_value REAL NOT NULL,
+    directory TEXT NOT NULL,
+    ended_at TEXT NOT NULL,
+    evidence_sha256 TEXT NOT NULL,
+    record_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS direct_pair_comparisons_by_project
+ON direct_pair_comparisons(project_id, ended_at, comparison_id);
 CREATE TABLE IF NOT EXISTS import_mappings (
     mapping_name TEXT PRIMARY KEY,
     mapping_json TEXT NOT NULL,
@@ -466,6 +512,43 @@ def _evidence(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _current_schema_is_complete(connection: sqlite3.Connection) -> bool:
+    expected = sqlite3.connect(":memory:")
+    try:
+        expected.executescript(SCHEMA)
+        required_objects = expected.execute(
+            "SELECT type, name, tbl_name FROM sqlite_master "
+            "WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        actual_objects = {
+            (str(row[0]), str(row[1]), str(row[2]))
+            for row in connection.execute(
+                "SELECT type, name, tbl_name FROM sqlite_master "
+                "WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+        for object_type, name, table_name in required_objects:
+            if (object_type, name, table_name) not in actual_objects:
+                return False
+            quoted_name = str(name).replace('"', '""')
+            if object_type == "table":
+                if connection.execute(f'PRAGMA table_info("{quoted_name}")').fetchall() != expected.execute(
+                    f'PRAGMA table_info("{quoted_name}")'
+                ).fetchall():
+                    return False
+                if connection.execute(f'PRAGMA foreign_key_list("{quoted_name}")').fetchall() != expected.execute(
+                    f'PRAGMA foreign_key_list("{quoted_name}")'
+                ).fetchall():
+                    return False
+            elif connection.execute(f'PRAGMA index_xinfo("{quoted_name}")').fetchall() != expected.execute(
+                f'PRAGMA index_xinfo("{quoted_name}")'
+            ).fetchall():
+                return False
+        return True
+    finally:
+        expected.close()
+
+
 def _migration_snapshot(database_path: Path) -> Path | None:
     if not database_path.exists() or database_path.stat().st_size == 0:
         return None
@@ -483,7 +566,17 @@ def _migration_snapshot(database_path: Path) -> Path | None:
                 f"database schema version {current} is newer than supported version {target}"
             )
         if current == target:
-            return None
+            try:
+                recorded_history = tuple(
+                    (int(row[0]), str(row[1]))
+                    for row in source.execute(
+                        "SELECT version, name FROM schema_migrations ORDER BY version"
+                    ).fetchall()
+                )
+            except sqlite3.OperationalError:
+                recorded_history = ()
+            if recorded_history == SCHEMA_MIGRATIONS and _current_schema_is_complete(source):
+                return None
         destination = database_path.with_name(
             f"{database_path.name}.pre-migration-v{current}-to-v{target}.snapshot.sqlite3"
         )
@@ -587,7 +680,10 @@ class RunStore:
         database_path.parent.mkdir(parents=True, exist_ok=True)
         self.database_path = database_path
         migration_snapshot = _migration_snapshot(database_path)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._closed = False
+        self._reader_connections: list[sqlite3.Connection] = []
+        self._nested_transaction_index = 0
         # One locked writer connection; every reader thread gets its own
         # connection (QS-S97). Reads on the writer's connection would observe
         # a writer's uncommitted BEGIN..COMMIT window (same-connection reads
@@ -623,6 +719,17 @@ class RunStore:
             raise RuntimeError(
                 f"database schema migration history is unsupported: unknown={sorted(unknown)}, mismatched={sorted(mismatched)}"
             )
+        derived_set_columns = {
+            str(row[1]): row
+            for row in self._connection.execute(
+                "PRAGMA table_info(derived_sets)"
+            ).fetchall()
+        }
+        migrate_derived_source_authority = (
+            int(derived_set_columns["source_resource_id"][3]) == 1
+        )
+        if migrate_derived_source_authority:
+            self._connection.execute("PRAGMA foreign_keys=OFF")
         self._connection.execute("BEGIN IMMEDIATE")
         try:
             self._connection.execute(
@@ -697,6 +804,32 @@ class RunStore:
                 "CREATE UNIQUE INDEX IF NOT EXISTS operations_by_request_attempt "
                 "ON operations(request_id, attempt)"
             )
+            if migrate_derived_source_authority:
+                self._connection.execute(
+                    "CREATE TABLE derived_sets_v8 ("
+                    "derived_set_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, "
+                    "source_dataset_id TEXT NOT NULL, source_resource_id TEXT, "
+                    "derived_dataset_id TEXT NOT NULL, directory TEXT NOT NULL, "
+                    "record_json TEXT NOT NULL, created_at TEXT NOT NULL)"
+                )
+                self._connection.execute(
+                    "INSERT INTO derived_sets_v8 "
+                    "(derived_set_id, project_id, source_dataset_id, source_resource_id, "
+                    "derived_dataset_id, directory, record_json, created_at) "
+                    "SELECT derived_set_id, project_id, source_dataset_id, source_resource_id, "
+                    "derived_dataset_id, directory, record_json, created_at FROM derived_sets"
+                )
+                self._connection.execute("DROP TABLE derived_sets")
+                self._connection.execute(
+                    "ALTER TABLE derived_sets_v8 RENAME TO derived_sets"
+                )
+            foreign_key_violations = self._connection.execute(
+                "PRAGMA foreign_key_check"
+            ).fetchall()
+            if foreign_key_violations:
+                raise sqlite3.IntegrityError(
+                    "database foreign-key check failed during schema migration"
+                )
             applied_at = datetime.now(timezone.utc).astimezone().isoformat()
             for version, name in SCHEMA_MIGRATIONS:
                 self._connection.execute(
@@ -711,20 +844,32 @@ class RunStore:
             if migration_snapshot is not None:
                 _restore_migration_snapshot(database_path, migration_snapshot)
             raise
+        if migrate_derived_source_authority:
+            self._connection.execute("PRAGMA foreign_keys=ON")
         self._readers = threading.local()
 
     def _read(self) -> sqlite3.Connection:
-        connection = getattr(self._readers, "connection", None)
-        if connection is None:
-            connection = sqlite3.connect(str(self.database_path), check_same_thread=False, isolation_level=None)
-            connection.execute("PRAGMA busy_timeout=30000")
-            connection.execute("PRAGMA query_only=ON")
-            self._readers.connection = connection
-        return connection
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("run store is closed")
+            connection = getattr(self._readers, "connection", None)
+            if connection is None:
+                connection = sqlite3.connect(str(self.database_path), check_same_thread=False, isolation_level=None)
+                connection.execute("PRAGMA busy_timeout=30000")
+                connection.execute("PRAGMA query_only=ON")
+                self._readers.connection = connection
+                self._reader_connections.append(connection)
+            return connection
 
     def close(self) -> None:
-        # Reader connections are per-thread and close with their threads.
-        self._connection.close()
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            for connection in self._reader_connections:
+                connection.close()
+            self._reader_connections.clear()
+            self._connection.close()
 
     def snapshot_database(self, destination: Path) -> dict[str, object]:
         """Write one consistent, private, no-clobber snapshot for out-of-process inspection."""
@@ -777,7 +922,7 @@ class RunStore:
         }
         unresolved_purges = int(
             connection.execute(
-                "SELECT COUNT(*) FROM purge_journal WHERE state NOT IN ('COMPLETED', 'FAILED')"
+                "SELECT COUNT(*) FROM purge_journal WHERE state != 'COMPLETED'"
             ).fetchone()[0]
         )
         return {
@@ -792,6 +937,30 @@ class RunStore:
         if row is None:
             return None
         return {description[0]: value for description, value in zip(cursor.description, row)}
+
+    def _begin_write_transaction(self) -> str | None:
+        """Begin a write, nesting as a savepoint inside exact recovery."""
+
+        if not self._connection.in_transaction:
+            self._connection.execute("BEGIN")
+            return None
+        self._nested_transaction_index += 1
+        savepoint = f"qualsight_nested_{self._nested_transaction_index}"
+        self._connection.execute(f"SAVEPOINT {savepoint}")
+        return savepoint
+
+    def _rollback_write_transaction(self, savepoint: str | None) -> None:
+        if savepoint is None:
+            self._connection.execute("ROLLBACK")
+            return
+        self._connection.execute(f"ROLLBACK TO {savepoint}")
+        self._connection.execute(f"RELEASE {savepoint}")
+
+    def _commit_write_transaction(self, savepoint: str | None) -> None:
+        if savepoint is None:
+            self._connection.execute("COMMIT")
+            return
+        self._connection.execute(f"RELEASE {savepoint}")
 
     # -- writes ----------------------------------------------------------------
 
@@ -957,12 +1126,544 @@ class RunStore:
             assert finished is not None
             return finished
 
+    def reconcile_prepared_operation(
+        self,
+        operation_id: str,
+        *,
+        allow_running_partial_matrix: bool = False,
+    ) -> dict[str, Any] | None:
+        """Complete an exact promoted result without re-executing scientific work."""
+
+        supported = {
+            "QUALITY_BATCH",
+            "MATCHER_MATRIX",
+            "EXTERNAL_SCORE_IMPORT",
+            "DIRECT_PAIR_COMPARISON",
+            "DERIVED_SET",
+            "UTILITY_ANALYSIS",
+            "CROSS_MATCHER_ANALYSIS",
+            "DEGRADATION_ANALYSIS",
+            "IDENTIFICATION_SEARCH",
+        }
+        requested = self.operation(operation_id)
+        if requested is None:
+            return None
+        latest = self.latest_operation_attempt(str(requested["request_id"]))
+        if latest is None or latest["operation_kind"] not in supported:
+            return None
+        if latest["state"] == "COMPLETED":
+            return latest
+        if latest["state"] not in {"RUNNING", "FAILED", "INTERRUPTED"}:
+            return None
+        if not latest["output_path"]:
+            return None
+        try:
+            request = json.loads(str(latest["request_json"]))
+            request_sha256 = CanonicalJson.from_value(request).sha256
+            directory = Path(str(latest["output_path"]))
+            project_id = str(latest["project_id"])
+            result_id = str(latest["result_id"])
+            operation_kind = str(latest["operation_kind"])
+            payload: Any
+            cleanup_paths: tuple[Path, ...] = ()
+            partial_matrix = False
+            if operation_kind == "QUALITY_BATCH":
+                from types import SimpleNamespace
+
+                from ..engines.ofiq.batch import recover_prepared_quality_batch
+
+                prepared = recover_prepared_quality_batch(
+                    directory,
+                    job_id=result_id,
+                    project_id=project_id,
+                    request_sha256=request_sha256,
+                )
+                if prepared.run is None or prepared.job["state"] != "COMPLETED":
+                    return None
+                project = self.project(project_id)
+                dataset = self.dataset(str(prepared.job["dataset_id"]))
+                if project is None or dataset is None or dataset.project_id != project_id:
+                    return None
+                payload = (
+                    SimpleNamespace(
+                        job_id=result_id,
+                        project=project,
+                        dataset=dataset,
+                        samples=prepared.results,
+                        results=prepared.results,
+                        _cancel_requested=False,
+                        created_at=datetime.fromisoformat(prepared.job["created_at"]),
+                        started_at=datetime.fromisoformat(prepared.job["started_at"]),
+                        parquet_path=Path(prepared.job["parquet_path"]),
+                        resource_use=prepared.job["resource_use"],
+                        selection_rule=prepared.job["selection_rule"],
+                        engine_version=prepared.job["engine_version"],
+                    ),
+                    prepared,
+                )
+            elif operation_kind == "MATCHER_MATRIX":
+                from types import SimpleNamespace
+
+                from ..matchers.matrix import (
+                    LEAF_IDS,
+                    recover_prepared_matcher_leaf,
+                )
+
+                dataset_id = str(request["dataset_id"])
+                protocol_id = str(request["protocol_id"])
+                expected_leaf_count = int(request["expected_leaf_count"])
+                leaf_ids = request["leaf_ids"]
+                if (
+                    not isinstance(leaf_ids, list)
+                    or len(leaf_ids) != expected_leaf_count
+                    or len(set(leaf_ids)) != expected_leaf_count
+                    or not set(leaf_ids).issubset(set(LEAF_IDS.values()))
+                ):
+                    return None
+                project = self.project(project_id)
+                dataset = self.dataset(dataset_id)
+                protocol = self.protocol(protocol_id)
+                if (
+                    project is None
+                    or dataset is None
+                    or dataset.project_id != project_id
+                    or protocol is None
+                    or protocol.project_id != project_id
+                    or protocol.dataset_id != dataset_id
+                ):
+                    return None
+                expected_directories = {
+                    leaf_id.replace(".", "_") for leaf_id in leaf_ids
+                }
+                expected_temporary_files = {
+                    f".{condition.value.lower()}-crops.npy"
+                    for (matcher, condition), leaf_id in LEAF_IDS.items()
+                    if leaf_id in leaf_ids
+                }
+                for member in directory.iterdir():
+                    observed = member.lstat()
+                    if member.name in expected_directories:
+                        if member.is_symlink() or not stat.S_ISDIR(observed.st_mode):
+                            return None
+                    elif member.name in expected_temporary_files:
+                        if member.is_symlink() or not stat.S_ISREG(observed.st_mode):
+                            return None
+                    else:
+                        return None
+                available_leaf_ids = tuple(
+                    leaf_id
+                    for leaf_id in leaf_ids
+                    if (directory / leaf_id.replace(".", "_")).is_dir()
+                )
+                if not available_leaf_ids:
+                    return None
+                leaves = tuple(
+                    recover_prepared_matcher_leaf(
+                        directory / leaf_id.replace(".", "_"),
+                        matrix_id=result_id,
+                        leaf_id=leaf_id,
+                        project_id=project_id,
+                        dataset_id=dataset_id,
+                        protocol_id=protocol_id,
+                        request_sha256=request_sha256,
+                    )
+                    for leaf_id in available_leaf_ids
+                )
+                partial_matrix = len(leaves) != expected_leaf_count
+                if (
+                    partial_matrix
+                    and latest["state"] == "RUNNING"
+                    and not allow_running_partial_matrix
+                ):
+                    return None
+                payload = (
+                    SimpleNamespace(
+                        matrix_id=result_id,
+                        dataset=dataset,
+                        protocol=protocol,
+                        expected_leaf_count=expected_leaf_count,
+                    ),
+                    leaves,
+                )
+                cleanup_paths = tuple(
+                    directory / name for name in expected_temporary_files
+                ) if not partial_matrix else ()
+            elif operation_kind == "EXTERNAL_SCORE_IMPORT":
+                from types import SimpleNamespace
+
+                from ..importers.external_scores import (
+                    EXTERNAL_LEAF_ID,
+                    recover_prepared_external_score_import,
+                )
+
+                expected_request_keys = {
+                    "dataset_id",
+                    "field_mapping",
+                    "matrix_id",
+                    "protocol_id",
+                    "purpose_scope",
+                    "resource_id",
+                    "score_sha256",
+                    "sidecar_sha256",
+                }
+                if (
+                    set(request) != expected_request_keys
+                    or request["matrix_id"] != result_id
+                ):
+                    raise ValueError("external-score operation request identity differs")
+                dataset_id = str(request["dataset_id"])
+                protocol_id = str(request["protocol_id"])
+                project = self.project(project_id)
+                dataset = self.dataset(dataset_id)
+                protocol = self.protocol(protocol_id)
+                if (
+                    project is None
+                    or dataset is None
+                    or dataset.project_id != project_id
+                    or protocol is None
+                    or protocol.project_id != project_id
+                    or protocol.dataset_id != dataset_id
+                ):
+                    raise ValueError("external-score operation ownership differs")
+                leaf = recover_prepared_external_score_import(
+                    directory / EXTERNAL_LEAF_ID.replace(".", "_"),
+                    matrix_id=result_id,
+                    project_id=project_id,
+                    dataset_id=dataset_id,
+                    protocol_id=protocol_id,
+                    resource_id=str(request["resource_id"]),
+                    request_sha256=request_sha256,
+                )
+                payload = (
+                    SimpleNamespace(
+                        matrix_id=result_id,
+                        dataset=dataset,
+                        protocol=protocol,
+                        expected_leaf_count=1,
+                    ),
+                    leaf,
+                )
+            elif operation_kind == "DIRECT_PAIR_COMPARISON":
+                from ..matchers.direct_pair import recover_prepared_direct_pair
+
+                payload = recover_prepared_direct_pair(
+                    directory,
+                    comparison_id=str(latest["request_id"]),
+                    run_id=result_id,
+                    project_id=project_id,
+                    request_sha256=request_sha256,
+                )
+            elif operation_kind == "DERIVED_SET":
+                from ..matchers.matrix import dataset_resource_of
+                from ..transforms.derived import _recover_prepared_set
+
+                sample_ids = request["sample_ids"]
+                if not isinstance(sample_ids, list) or len(sample_ids) != len(set(sample_ids)):
+                    return None
+                project = self.project(project_id)
+                dataset = self.dataset(str(request["dataset_id"]))
+                samples = [self.sample(str(sample_id)) for sample_id in sample_ids]
+                if (
+                    project is None
+                    or dataset is None
+                    or dataset.project_id != project_id
+                    or any(sample is None or sample.dataset_id != dataset.dataset_id for sample in samples)
+                ):
+                    return None
+                payload = _recover_prepared_set(
+                    directory,
+                    derived_set_id=result_id,
+                    project=project,
+                    dataset=dataset,
+                    dataset_resource_id=dataset_resource_of(dataset),
+                    samples=[sample for sample in samples if sample is not None],
+                    transforms=request["transforms"],
+                    request_sha256=request_sha256,
+                )
+            elif operation_kind == "UTILITY_ANALYSIS":
+                from ..analysis.utility import recover_prepared_utility_analysis
+
+                payload = recover_prepared_utility_analysis(
+                    directory,
+                    analysis_id=result_id,
+                    project_id=project_id,
+                    request_sha256=request_sha256,
+                )
+            elif operation_kind == "CROSS_MATCHER_ANALYSIS":
+                from ..analysis.crossmatcher import recover_prepared_cross_matcher_analysis
+
+                payload = recover_prepared_cross_matcher_analysis(
+                    directory,
+                    analysis_id=result_id,
+                    project_id=project_id,
+                    request_sha256=request_sha256,
+                )
+            elif operation_kind == "DEGRADATION_ANALYSIS":
+                from ..transforms.degradation import recover_prepared_degradation_analysis
+
+                payload = recover_prepared_degradation_analysis(
+                    directory,
+                    analysis_id=result_id,
+                    project_id=project_id,
+                    request_sha256=request_sha256,
+                )
+            else:
+                from ..identification.search import recover_prepared_identification_search
+
+                payload = recover_prepared_identification_search(
+                    directory,
+                    search_id=result_id,
+                    project_id=project_id,
+                    request_sha256=request_sha256,
+                )
+        except Exception:
+            return None
+
+        completed_at = datetime.now(timezone.utc).isoformat()
+        with serialized_owner_file_mutation(), self._lock:
+            connection = self._connection
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = connection.execute(
+                    "SELECT * FROM operations WHERE request_id = ? ORDER BY attempt DESC LIMIT 1",
+                    (latest["request_id"],),
+                )
+                current = self._row(cursor, cursor.fetchone())
+                if (
+                    current is None
+                    or current["operation_id"] != latest["operation_id"]
+                    or current["state"] != latest["state"]
+                    or current["request_json"] != latest["request_json"]
+                    or current["output_path"] != latest["output_path"]
+                    or current["result_id"] != latest["result_id"]
+                ):
+                    connection.execute("ROLLBACK")
+                    return None
+                active_operation_id = str(current["operation_id"])
+                if partial_matrix:
+                    job, leaves = payload
+                    for leaf in leaves:
+                        if self.matcher_leaf(leaf.run.run_id) is None:
+                            self.record_matcher_leaf(job, leaf)
+                    recorded_count = int(
+                        connection.execute(
+                            "SELECT COUNT(*) FROM matcher_leaves WHERE matrix_id = ?",
+                            (result_id,),
+                        ).fetchone()[0]
+                    )
+                    if recorded_count != len(leaves):
+                        raise ImmutableRecordConflict(
+                            "prepared partial matcher matrix leaf count differs"
+                        )
+                    partial_error = (
+                        f"recovered {recorded_count} of {job.expected_leaf_count} "
+                        "verified matcher leaves after interrupted execution"
+                    )
+                    if current["state"] == "RUNNING":
+                        cursor = connection.execute(
+                            "UPDATE operations SET state = 'INTERRUPTED', ended_at = ?, error = ? "
+                            "WHERE operation_id = ? AND state = 'RUNNING'",
+                            (completed_at, partial_error, active_operation_id),
+                        )
+                        if cursor.rowcount != 1:
+                            raise ImmutableRecordConflict(
+                                "partial matcher matrix operation could not be interrupted"
+                            )
+                    elif current["state"] == "FAILED":
+                        attempt = int(current["attempt"]) + 1
+                        active_operation_id = (
+                            "operation-attempt:sha256:"
+                            + _evidence(f"{current['request_id']}:{attempt}")
+                        )
+                        connection.execute(
+                            "INSERT INTO operations "
+                            "(operation_id, request_id, attempt, supersedes_operation_id, result_id, operation_kind, "
+                            "project_id, state, accepted_at, started_at, ended_at, error, request_json, output_path) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, 'INTERRUPTED', ?, ?, ?, ?, ?, ?)",
+                            (
+                                active_operation_id,
+                                current["request_id"],
+                                attempt,
+                                current["operation_id"],
+                                current["result_id"],
+                                current["operation_kind"],
+                                current["project_id"],
+                                completed_at,
+                                completed_at,
+                                completed_at,
+                                partial_error,
+                                current["request_json"],
+                                current["output_path"],
+                            ),
+                        )
+                    connection.execute("COMMIT")
+                    cursor = connection.execute(
+                        "SELECT * FROM operations WHERE operation_id = ?",
+                        (active_operation_id,),
+                    )
+                    return self._row(cursor, cursor.fetchone())
+                if current["state"] in {"FAILED", "INTERRUPTED"}:
+                    attempt = int(current["attempt"]) + 1
+                    active_operation_id = (
+                        "operation-attempt:sha256:"
+                        + _evidence(f"{current['request_id']}:{attempt}")
+                    )
+                    connection.execute(
+                        "INSERT INTO operations "
+                        "(operation_id, request_id, attempt, supersedes_operation_id, result_id, operation_kind, "
+                        "project_id, state, accepted_at, started_at, request_json, output_path) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, 'RUNNING', ?, ?, ?, ?)",
+                        (
+                            active_operation_id,
+                            current["request_id"],
+                            attempt,
+                            current["operation_id"],
+                            current["result_id"],
+                            current["operation_kind"],
+                            current["project_id"],
+                            completed_at,
+                            completed_at,
+                            current["request_json"],
+                            current["output_path"],
+                        ),
+                    )
+                if operation_kind == "QUALITY_BATCH":
+                    job, prepared = payload
+                    self.record_batch_job(
+                        job,
+                        prepared.experiment,
+                        prepared.run,
+                        list(prepared.artifacts),
+                    )
+                    self.finish_job(result_id, prepared.job["prepared_at"], "COMPLETED")
+                elif operation_kind == "MATCHER_MATRIX":
+                    job, leaves = payload
+                    for leaf in leaves:
+                        if self.matcher_leaf(leaf.run.run_id) is None:
+                            self.record_matcher_leaf(job, leaf)
+                    recorded_count = int(
+                        connection.execute(
+                            "SELECT COUNT(*) FROM matcher_leaves WHERE matrix_id = ?",
+                            (result_id,),
+                        ).fetchone()[0]
+                    )
+                    if recorded_count != len(leaves):
+                        raise ImmutableRecordConflict(
+                            "prepared matcher matrix leaf count differs"
+                        )
+                elif operation_kind == "EXTERNAL_SCORE_IMPORT":
+                    job, leaf = payload
+                    existing = self.matcher_leaf(leaf.run.run_id)
+                    if existing is None:
+                        self.record_matcher_leaf(job, leaf)
+                    else:
+                        stored_run = self.run(leaf.run.run_id)
+                        expected_metrics = json.dumps(
+                            leaf.metrics,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            allow_nan=False,
+                        )
+                        matcher_id = str(
+                            getattr(leaf.matcher_id, "value", leaf.matcher_id)
+                        )
+                        condition_id = str(
+                            getattr(leaf.condition_id, "value", leaf.condition_id)
+                        )
+                        expected_leaf = {
+                            "matrix_id": job.matrix_id,
+                            "leaf_id": leaf.leaf_id,
+                            "project_id": leaf.run.project_id,
+                            "dataset_id": job.dataset.dataset_id,
+                            "protocol_id": job.protocol.protocol_id,
+                            "matcher_id": matcher_id,
+                            "condition_id": condition_id,
+                            "comparisons_parquet": str(leaf.comparisons_parquet),
+                            "comparisons_sha256": hashlib.sha256(
+                                leaf.comparisons_parquet.read_bytes()
+                            ).hexdigest(),
+                            "metrics_json": expected_metrics,
+                            "metrics_sha256": _evidence(expected_metrics),
+                            "comparison_count": leaf.comparison_count,
+                            "scored_count": leaf.scored_count,
+                            "failed_count": leaf.failed_count,
+                            "expected_leaf_count": 1,
+                        }
+                        if (
+                            stored_run is None
+                            or stored_run[0] != leaf.run
+                            or any(
+                                existing.get(key) != value
+                                for key, value in expected_leaf.items()
+                            )
+                        ):
+                            raise ImmutableRecordConflict(
+                                "prepared external-score import differs from its recorded leaf"
+                            )
+                elif operation_kind == "DIRECT_PAIR_COMPARISON":
+                    self.record_direct_pair_comparison(
+                        payload,
+                        operation_id=active_operation_id,
+                        finalize_operation=False,
+                    )
+                elif operation_kind == "DERIVED_SET":
+                    self.record_derived_set(payload)
+                elif operation_kind == "UTILITY_ANALYSIS":
+                    self.record_utility_analysis(payload)
+                elif operation_kind == "CROSS_MATCHER_ANALYSIS":
+                    self.record_cross_matcher_analysis(payload)
+                elif operation_kind == "DEGRADATION_ANALYSIS":
+                    self.record_degradation_analysis(payload)
+                else:
+                    protocol = self.identification_protocol(str(request["protocol_id"]))
+                    if protocol is None:
+                        raise ImmutableRecordConflict(
+                            "identification protocol is unavailable during recovery"
+                        )
+                    self.record_identification_search(payload, protocol)
+                cursor = connection.execute(
+                    "UPDATE operations SET state = 'COMPLETED', ended_at = ?, error = NULL "
+                    "WHERE operation_id = ? AND state = 'RUNNING'",
+                    (completed_at, active_operation_id),
+                )
+                if cursor.rowcount != 1:
+                    raise ImmutableRecordConflict(
+                        "prepared result operation could not be completed"
+                    )
+            except Exception:
+                connection.execute("ROLLBACK")
+                return None
+            connection.execute("COMMIT")
+            cursor = connection.execute(
+                "SELECT * FROM operations WHERE operation_id = ?",
+                (active_operation_id,),
+            )
+            completed = self._row(cursor, cursor.fetchone())
+        for cleanup_path in cleanup_paths:
+            try:
+                observed = cleanup_path.lstat()
+                if stat.S_ISREG(observed.st_mode) and not cleanup_path.is_symlink():
+                    cleanup_path.unlink()
+            except FileNotFoundError:
+                pass
+        return completed
+
     def reconcile_interrupted_operations(self) -> list[dict[str, Any]]:
-        """Mark work abandoned by the previous process without attempting scientific replay."""
+        """Recover validated prepared results and interrupt all other abandoned work."""
+
+        recovery_cursor = self._read().execute(
+            "SELECT operation_id FROM operations "
+            "WHERE state IN ('RUNNING', 'FAILED', 'INTERRUPTED') "
+            "ORDER BY accepted_at, operation_id"
+        )
+        for row in recovery_cursor.fetchall():
+            self.reconcile_prepared_operation(
+                str(row[0]), allow_running_partial_matrix=True
+            )
 
         ended_at = datetime.now(timezone.utc).isoformat()
         interrupted_error = "process ended before a terminal state was recorded; execution was not resumed automatically"
-        with self._lock:
+        with serialized_owner_file_mutation(), self._lock:
             cursor = self._connection.execute(
                 "SELECT * FROM operations WHERE state IN ('QUEUED', 'RUNNING') ORDER BY accepted_at, operation_id"
             )
@@ -993,12 +1694,138 @@ class RunStore:
                     ).fetchone()[0]
                     if int(count) == expected:
                         terminal_state = "COMPLETED"
-                else:
+                elif operation_kind == "DIRECT_PAIR_COMPARISON":
+                    recorded = self._connection.execute(
+                        "SELECT 1 FROM direct_pair_comparisons WHERE comparison_id = ?",
+                        (operation_id,),
+                    ).fetchone()
+                    if recorded is not None:
+                        terminal_state = "COMPLETED"
+                    elif operation["state"] == "RUNNING" and operation["output_path"]:
+                        from ..matchers.direct_pair import (
+                            DirectPairComparisonError,
+                            recover_prepared_direct_pair,
+                        )
+
+                        try:
+                            run = recover_prepared_direct_pair(
+                                Path(str(operation["output_path"])),
+                                comparison_id=str(operation_id),
+                                run_id=str(result_id),
+                                project_id=str(operation["project_id"]),
+                                request_sha256=CanonicalJson.from_value(
+                                    json.loads(operation["request_json"])
+                                ).sha256,
+                            )
+                            self.record_direct_pair_comparison(run)
+                            terminal_state = "COMPLETED"
+                        except (
+                            DirectPairComparisonError,
+                            ImmutableRecordConflict,
+                            OwnerPairIntegrityError,
+                            OwnerPairNotFound,
+                        ):
+                            terminal_error = (
+                                "prepared direct comparison output failed integrity "
+                                "verification; execution was not resumed automatically"
+                            )
+                elif operation_kind in {
+                    "UTILITY_ANALYSIS",
+                    "CROSS_MATCHER_ANALYSIS",
+                    "DEGRADATION_ANALYSIS",
+                    "IDENTIFICATION_SEARCH",
+                }:
                     result_table_and_key = {
                         "UTILITY_ANALYSIS": ("utility_analyses", "analysis_id"),
-                        "CROSS_MATCHER_ANALYSIS": ("cross_matcher_analyses", "analysis_id"),
-                        "DEGRADATION_ANALYSIS": ("degradation_analyses", "analysis_id"),
-                        "IDENTIFICATION_SEARCH": ("identification_searches", "search_id"),
+                        "CROSS_MATCHER_ANALYSIS": (
+                            "cross_matcher_analyses",
+                            "analysis_id",
+                        ),
+                        "DEGRADATION_ANALYSIS": (
+                            "degradation_analyses",
+                            "analysis_id",
+                        ),
+                        "IDENTIFICATION_SEARCH": (
+                            "identification_searches",
+                            "search_id",
+                        ),
+                    }[operation_kind]
+                    table, key = result_table_and_key
+                    recorded = self._connection.execute(
+                        f"SELECT 1 FROM {table} WHERE {key} = ?",
+                        (result_id,),
+                    ).fetchone()
+                    if recorded is not None:
+                        terminal_state = "COMPLETED"
+                    elif operation["state"] == "RUNNING" and operation["output_path"]:
+                        request = json.loads(operation["request_json"])
+                        request_sha256 = CanonicalJson.from_value(request).sha256
+                        directory = Path(str(operation["output_path"]))
+                        try:
+                            if operation_kind == "UTILITY_ANALYSIS":
+                                from ..analysis.utility import (
+                                    recover_prepared_utility_analysis,
+                                )
+
+                                result = recover_prepared_utility_analysis(
+                                    directory,
+                                    analysis_id=str(result_id),
+                                    project_id=str(operation["project_id"]),
+                                    request_sha256=request_sha256,
+                                )
+                                self.record_utility_analysis(result)
+                            elif operation_kind == "CROSS_MATCHER_ANALYSIS":
+                                from ..analysis.crossmatcher import (
+                                    recover_prepared_cross_matcher_analysis,
+                                )
+
+                                result = recover_prepared_cross_matcher_analysis(
+                                    directory,
+                                    analysis_id=str(result_id),
+                                    project_id=str(operation["project_id"]),
+                                    request_sha256=request_sha256,
+                                )
+                                self.record_cross_matcher_analysis(result)
+                            elif operation_kind == "DEGRADATION_ANALYSIS":
+                                from ..transforms.degradation import (
+                                    recover_prepared_degradation_analysis,
+                                )
+
+                                result = recover_prepared_degradation_analysis(
+                                    directory,
+                                    analysis_id=str(result_id),
+                                    project_id=str(operation["project_id"]),
+                                    request_sha256=request_sha256,
+                                )
+                                self.record_degradation_analysis(result)
+                            else:
+                                from ..identification.search import (
+                                    recover_prepared_identification_search,
+                                )
+
+                                result = recover_prepared_identification_search(
+                                    directory,
+                                    search_id=str(result_id),
+                                    project_id=str(operation["project_id"]),
+                                    request_sha256=request_sha256,
+                                )
+                                protocol = self.identification_protocol(
+                                    str(request["protocol_id"])
+                                )
+                                if protocol is None:
+                                    raise ImmutableRecordConflict(
+                                        "identification protocol is unavailable during recovery"
+                                    )
+                                self.record_identification_search(result, protocol)
+                            terminal_state = "COMPLETED"
+                        except Exception:
+                            terminal_error = (
+                                "prepared scientific output failed integrity verification; "
+                                "execution was not resumed automatically"
+                            )
+                else:
+                    result_table_and_key = {
+                        "DERIVED_SET": ("derived_sets", "derived_set_id"),
                     }.get(operation_kind)
                     if result_table_and_key is not None:
                         table, key = result_table_and_key
@@ -1010,7 +1837,7 @@ class RunStore:
                             terminal_state = "COMPLETED"
                 if terminal_state is None:
                     terminal_state = "INTERRUPTED"
-                    terminal_error = interrupted_error
+                    terminal_error = terminal_error or interrupted_error
                 self._connection.execute(
                     "UPDATE operations SET state = ?, ended_at = ?, error = ? WHERE operation_id = ? AND state IN ('QUEUED', 'RUNNING')",
                     (terminal_state, ended_at, terminal_error, operation_id),
@@ -1326,11 +2153,24 @@ class RunStore:
             records.append(record)
         return records
 
-    def purge_project_records(self, project_id: str) -> dict[str, Any]:
-        """Remove application-managed project data while retaining the project/audit tombstone."""
+    def purge_project_records(self, project_id: str, *, purge_id: str) -> dict[str, Any]:
+        """Delete project metadata and durably attest its counts in one transaction."""
 
         with self._lock:
             connection = self._connection
+            journal = connection.execute(
+                "SELECT progress_json FROM purge_journal "
+                "WHERE purge_id = ? AND project_id = ? AND state != 'COMPLETED'",
+                (purge_id, project_id),
+            ).fetchone()
+            if journal is None:
+                raise ImmutableRecordConflict(
+                    f"purge journal is not unresolved for project: {purge_id}"
+                )
+            progress = json.loads(journal[0])
+            recorded_metadata = progress.get("metadata")
+            if isinstance(recorded_metadata, dict) and recorded_metadata.get("verified") is True:
+                return recorded_metadata
             dataset_ids = [row[0] for row in connection.execute("SELECT dataset_id FROM datasets WHERE project_id = ?", (project_id,)).fetchall()]
             run_ids = [row[0] for row in connection.execute("SELECT run_id FROM runs WHERE project_id = ?", (project_id,)).fetchall()]
             job_ids = [row[0] for row in connection.execute("SELECT job_id FROM jobs WHERE project_id = ?", (project_id,)).fetchall()]
@@ -1357,7 +2197,9 @@ class RunStore:
                 delete("protocols", "DELETE FROM protocols WHERE project_id = ?", (project_id,))
                 delete("quality_results", "DELETE FROM quality_results WHERE job_id IN (SELECT job_id FROM jobs WHERE project_id = ?)", (project_id,))
                 delete("jobs", "DELETE FROM jobs WHERE project_id = ?", (project_id,))
+                delete("direct_pair_comparisons", "DELETE FROM direct_pair_comparisons WHERE project_id = ?", (project_id,))
                 delete("operations", "DELETE FROM operations WHERE project_id = ?", (project_id,))
+                delete("owner_pair_admissions", "DELETE FROM owner_pair_admissions WHERE project_id = ?", (project_id,))
                 delete("artifacts", "DELETE FROM artifacts WHERE run_id IN (SELECT run_id FROM runs WHERE project_id = ?)", (project_id,))
                 delete("runs", "DELETE FROM runs WHERE project_id = ?", (project_id,))
                 delete("experiments", "DELETE FROM experiments WHERE project_id = ?", (project_id,))
@@ -1370,44 +2212,64 @@ class RunStore:
                     "DELETE FROM owner_supplied_inputs WHERE NOT EXISTS "
                     "(SELECT 1 FROM owner_supplied_project_refs AS refs WHERE refs.path = owner_supplied_inputs.path)",
                 )
+                remaining = {
+                    "datasets": connection.execute("SELECT COUNT(*) FROM datasets WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "experiments": connection.execute("SELECT COUNT(*) FROM experiments WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "runs": connection.execute("SELECT COUNT(*) FROM runs WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "jobs": connection.execute("SELECT COUNT(*) FROM jobs WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "operations": connection.execute("SELECT COUNT(*) FROM operations WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "direct_pair_comparisons": connection.execute("SELECT COUNT(*) FROM direct_pair_comparisons WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "owner_pair_admissions": connection.execute("SELECT COUNT(*) FROM owner_pair_admissions WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "protocols": connection.execute("SELECT COUNT(*) FROM protocols WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "matcher_leaves": connection.execute("SELECT COUNT(*) FROM matcher_leaves WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "utility_analyses": connection.execute("SELECT COUNT(*) FROM utility_analyses WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "cross_matcher_analyses": connection.execute("SELECT COUNT(*) FROM cross_matcher_analyses WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "annotations": connection.execute("SELECT COUNT(*) FROM annotations WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "figures": connection.execute("SELECT COUNT(*) FROM figures WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "dashboards": connection.execute("SELECT COUNT(*) FROM dashboards WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "reports": connection.execute("SELECT COUNT(*) FROM reports WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "identification_protocols": connection.execute("SELECT COUNT(*) FROM identification_protocols WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "identification_searches": connection.execute("SELECT COUNT(*) FROM identification_searches WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "derived_sets": connection.execute("SELECT COUNT(*) FROM derived_sets WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "degradation_analyses": connection.execute("SELECT COUNT(*) FROM degradation_analyses WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "owner_supplied_inputs": connection.execute("SELECT COUNT(*) FROM owner_supplied_project_refs WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "bundles": connection.execute("SELECT COUNT(*) FROM bundles WHERE project_id = ?", (project_id,)).fetchone()[0],
+                    "reproductions": connection.execute("SELECT COUNT(*) FROM reproductions WHERE project_id = ?", (project_id,)).fetchone()[0],
+                }
+                if dataset_ids:
+                    markers = ",".join("?" for _ in dataset_ids)
+                    remaining["samples"] = connection.execute(f"SELECT COUNT(*) FROM samples WHERE dataset_id IN ({markers})", dataset_ids).fetchone()[0]
+                    remaining["quality_results_by_dataset"] = connection.execute(f"SELECT COUNT(*) FROM quality_results WHERE dataset_id IN ({markers})", dataset_ids).fetchone()[0]
+                if run_ids:
+                    markers = ",".join("?" for _ in run_ids)
+                    remaining["artifacts"] = connection.execute(f"SELECT COUNT(*) FROM artifacts WHERE run_id IN ({markers})", run_ids).fetchone()[0]
+                if job_ids:
+                    markers = ",".join("?" for _ in job_ids)
+                    remaining["quality_results_by_job"] = connection.execute(f"SELECT COUNT(*) FROM quality_results WHERE job_id IN ({markers})", job_ids).fetchone()[0]
+                metadata = {"removed": removed, "remaining": remaining, "verified": not any(remaining.values())}
+                progress["metadata"] = metadata
+                progress_json = json.dumps(
+                    progress,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+                updated_at = datetime.now(timezone.utc).isoformat()
+                state = "METADATA_VERIFIED" if metadata["verified"] else "FILES_VERIFIED"
+                cursor = connection.execute(
+                    "UPDATE purge_journal SET state = ?, updated_at = ?, progress_json = ?, error = NULL "
+                    "WHERE purge_id = ? AND project_id = ? AND state != 'COMPLETED'",
+                    (state, updated_at, progress_json, purge_id, project_id),
+                )
+                if cursor.rowcount != 1:
+                    raise ImmutableRecordConflict(
+                        f"purge journal cannot attest metadata deletion: {purge_id}"
+                    )
             except BaseException:
                 connection.execute("ROLLBACK")
                 raise
             connection.execute("COMMIT")
-
-            remaining = {
-                "datasets": connection.execute("SELECT COUNT(*) FROM datasets WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "experiments": connection.execute("SELECT COUNT(*) FROM experiments WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "runs": connection.execute("SELECT COUNT(*) FROM runs WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "jobs": connection.execute("SELECT COUNT(*) FROM jobs WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "operations": connection.execute("SELECT COUNT(*) FROM operations WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "protocols": connection.execute("SELECT COUNT(*) FROM protocols WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "matcher_leaves": connection.execute("SELECT COUNT(*) FROM matcher_leaves WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "utility_analyses": connection.execute("SELECT COUNT(*) FROM utility_analyses WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "cross_matcher_analyses": connection.execute("SELECT COUNT(*) FROM cross_matcher_analyses WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "annotations": connection.execute("SELECT COUNT(*) FROM annotations WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "figures": connection.execute("SELECT COUNT(*) FROM figures WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "dashboards": connection.execute("SELECT COUNT(*) FROM dashboards WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "reports": connection.execute("SELECT COUNT(*) FROM reports WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "identification_protocols": connection.execute("SELECT COUNT(*) FROM identification_protocols WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "identification_searches": connection.execute("SELECT COUNT(*) FROM identification_searches WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "derived_sets": connection.execute("SELECT COUNT(*) FROM derived_sets WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "degradation_analyses": connection.execute("SELECT COUNT(*) FROM degradation_analyses WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "owner_supplied_inputs": connection.execute("SELECT COUNT(*) FROM owner_supplied_project_refs WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "bundles": connection.execute("SELECT COUNT(*) FROM bundles WHERE project_id = ?", (project_id,)).fetchone()[0],
-                "reproductions": connection.execute("SELECT COUNT(*) FROM reproductions WHERE project_id = ?", (project_id,)).fetchone()[0],
-            }
-            if dataset_ids:
-                markers = ",".join("?" for _ in dataset_ids)
-                remaining["samples"] = connection.execute(f"SELECT COUNT(*) FROM samples WHERE dataset_id IN ({markers})", dataset_ids).fetchone()[0]
-                remaining["quality_results_by_dataset"] = connection.execute(f"SELECT COUNT(*) FROM quality_results WHERE dataset_id IN ({markers})", dataset_ids).fetchone()[0]
-            if run_ids:
-                markers = ",".join("?" for _ in run_ids)
-                remaining["artifacts"] = connection.execute(f"SELECT COUNT(*) FROM artifacts WHERE run_id IN ({markers})", run_ids).fetchone()[0]
-            if job_ids:
-                markers = ",".join("?" for _ in job_ids)
-                remaining["quality_results_by_job"] = connection.execute(f"SELECT COUNT(*) FROM quality_results WHERE job_id IN ({markers})", job_ids).fetchone()[0]
-            return {"removed": removed, "remaining": remaining, "verified": not any(remaining.values())}
+            return metadata
 
     def record_dataset_import(
         self,
@@ -1627,7 +2489,7 @@ class RunStore:
         """Persist a batch job: experiment, optional COMPLETED Run, artifacts, job row, audit."""
 
         with self._lock:
-            self._connection.execute("BEGIN")
+            transaction = self._begin_write_transaction()
             try:
                 experiment_json = experiment.model_dump_json()
                 self._insert_once(
@@ -1747,20 +2609,22 @@ class RunStore:
                     )
                     self._insert_audit_event(event)
             except BaseException:
-                self._connection.execute("ROLLBACK")
+                self._rollback_write_transaction(transaction)
                 raise
-            self._connection.execute("COMMIT")
+            self._commit_write_transaction(transaction)
 
     def record_matcher_leaf(self, job: Any, leaf: Any) -> None:
         run = leaf.run
         run_json = run.model_dump_json()
         run_sha = _evidence(run_json)
         metrics_text = json.dumps(leaf.metrics, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        matcher_id = str(getattr(leaf.matcher_id, "value", leaf.matcher_id))
+        condition_id = str(getattr(leaf.condition_id, "value", leaf.condition_id))
         experiment = Experiment(
             experiment_id=run.experiment_id,
             project_id=run.project_id,
             dataset_id=job.dataset.dataset_id,
-            name=f"{leaf.leaf_id}: {leaf.matcher_id.value} × {leaf.condition_id.value}",
+            name=f"{leaf.leaf_id}: {matcher_id} × {condition_id}",
             created_by=run.user_id,
             created_at=run.start_time,
             protocol=VerificationProtocol(
@@ -1773,14 +2637,14 @@ class RunStore:
         )
         experiment_json = experiment.model_dump_json()
         with self._lock:
-            self._connection.execute("BEGIN")
+            transaction = self._begin_write_transaction()
             try:
                 self._insert_once("experiments", "experiment_id", experiment.experiment_id, byte_exact=False, columns={
                     "experiment_id": experiment.experiment_id, "project_id": experiment.project_id, "dataset_id": experiment.dataset_id,
                     "evidence_sha256": _evidence(experiment_json), "record_json": experiment_json})
                 self._insert_once("runs", "run_id", run.run_id, byte_exact=True, columns={
                     "run_id": run.run_id, "project_id": run.project_id, "experiment_id": run.experiment_id, "sample_id": None,
-                    "run_kind": "MATCHER", "status": run.status.value, "engine_resource_id": leaf.matcher_id.value,
+                    "run_kind": "MATCHER", "status": run.status.value, "engine_resource_id": matcher_id,
                     "engine_version": run.matcher.version or "", "start_time": run.start_time.isoformat(), "end_time": run.end_time.isoformat(),
                     "evidence_sha256": run_sha, "record_json": run_json})
                 for artifact in run.artifacts:
@@ -1791,7 +2655,7 @@ class RunStore:
                 self._connection.execute(
                     "INSERT INTO matcher_leaves (run_id, matrix_id, leaf_id, project_id, dataset_id, protocol_id, matcher_id, condition_id, comparisons_parquet, comparisons_sha256, metrics_json, metrics_sha256, comparison_count, scored_count, failed_count, expected_leaf_count, created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (run.run_id, job.matrix_id, leaf.leaf_id, run.project_id, job.dataset.dataset_id, job.protocol.protocol_id, leaf.matcher_id.value, leaf.condition_id.value,
+                    (run.run_id, job.matrix_id, leaf.leaf_id, run.project_id, job.dataset.dataset_id, job.protocol.protocol_id, matcher_id, condition_id,
                      str(leaf.comparisons_parquet), hashlib.sha256(leaf.comparisons_parquet.read_bytes()).hexdigest(), metrics_text, _evidence(metrics_text),
                      leaf.comparison_count, leaf.scored_count, leaf.failed_count, int(getattr(job, "expected_leaf_count", 1)), run.end_time.isoformat()),
                 )
@@ -1802,9 +2666,50 @@ class RunStore:
                     current_evidence_sha256=run_sha, local_only=True)
                 self._insert_audit_event(event)
             except BaseException:
-                self._connection.execute("ROLLBACK")
+                self._rollback_write_transaction(transaction)
                 raise
-            self._connection.execute("COMMIT")
+            self._commit_write_transaction(transaction)
+
+    def record_external_score_import(
+        self,
+        job: Any,
+        leaf: Any,
+        *,
+        operation_id: str,
+    ) -> None:
+        """Atomically persist one external leaf and complete its durable operation."""
+
+        with self._lock:
+            transaction = self._begin_write_transaction()
+            try:
+                operation = self._connection.execute(
+                    "SELECT operation_kind, project_id, result_id, state FROM operations "
+                    "WHERE operation_id = ?",
+                    (operation_id,),
+                ).fetchone()
+                if operation != (
+                    "EXTERNAL_SCORE_IMPORT",
+                    leaf.run.project_id,
+                    job.matrix_id,
+                    "RUNNING",
+                ):
+                    raise ImmutableRecordConflict(
+                        "external-score result is not bound to its running operation"
+                    )
+                self.record_matcher_leaf(job, leaf)
+                cursor = self._connection.execute(
+                    "UPDATE operations SET state = 'COMPLETED', ended_at = ?, error = NULL "
+                    "WHERE operation_id = ? AND state = 'RUNNING'",
+                    (leaf.run.end_time.isoformat(), operation_id),
+                )
+                if cursor.rowcount != 1:
+                    raise ImmutableRecordConflict(
+                        "external-score operation could not be completed"
+                    )
+            except BaseException:
+                self._rollback_write_transaction(transaction)
+                raise
+            self._commit_write_transaction(transaction)
 
     def record_utility_analysis(self, result: Any) -> None:
         run = result.run
@@ -1813,7 +2718,7 @@ class RunStore:
         experiment_json = result.experiment.model_dump_json()
         summary_text = json.dumps(result.summary, sort_keys=True, separators=(",", ":"), allow_nan=False)
         with self._lock:
-            self._connection.execute("BEGIN")
+            transaction = self._begin_write_transaction()
             try:
                 self._insert_once("experiments", "experiment_id", result.experiment.experiment_id, byte_exact=False, columns={
                     "experiment_id": result.experiment.experiment_id, "project_id": result.experiment.project_id, "dataset_id": result.experiment.dataset_id,
@@ -1842,9 +2747,9 @@ class RunStore:
                     current_evidence_sha256=run_sha, local_only=True)
                 self._insert_audit_event(event)
             except BaseException:
-                self._connection.execute("ROLLBACK")
+                self._rollback_write_transaction(transaction)
                 raise
-            self._connection.execute("COMMIT")
+            self._commit_write_transaction(transaction)
 
     def _record_analysis_run(self, run: CompletedRun, experiment: Experiment, details: dict[str, Any]) -> str:
         """Insert the immutable Run, its experiment, artifacts, and RUN_COMPLETED audit event inside the caller's transaction."""
@@ -1876,7 +2781,7 @@ class RunStore:
         run = result.run
         summary_text = json.dumps(result.summary, sort_keys=True, separators=(",", ":"), allow_nan=False)
         with self._lock:
-            self._connection.execute("BEGIN")
+            transaction = self._begin_write_transaction()
             try:
                 self._record_analysis_run(run, result.experiment, {"analysis_kind": "CROSS_MATCHER", "analysis_id": result.analysis_id, "matrix_id": result.summary["matrix_id"], "quality_job_id": result.summary["quality_job_id"]})
                 self._connection.execute(
@@ -1886,9 +2791,9 @@ class RunStore:
                      str(result.directory), hashlib.sha256(result.document_path.read_bytes()).hexdigest(), hashlib.sha256(result.pairs_path.read_bytes()).hexdigest(), summary_text, run.end_time.isoformat()),
                 )
             except BaseException:
-                self._connection.execute("ROLLBACK")
+                self._rollback_write_transaction(transaction)
                 raise
-            self._connection.execute("COMMIT")
+            self._commit_write_transaction(transaction)
 
     def cross_matcher_analyses(self, *, project_id: str | None = None, matrix_id: str | None = None) -> list[dict[str, Any]]:
         clauses, params = [], []
@@ -1905,17 +2810,65 @@ class RunStore:
         row = cursor.fetchone()
         return {d[0]: v for d, v in zip(cursor.description, row)} if row else None
 
+    def annotation_subject_owned_by_project(
+        self, *, project_id: str, subject_type: str, subject_id: str
+    ) -> bool:
+        """Resolve the closed set of annotatable evidence subjects to an owning project."""
+
+        if subject_type == "Project":
+            row = self._read().execute(
+                "SELECT 1 FROM projects WHERE project_id = ? AND project_id = ?",
+                (subject_id, project_id),
+            ).fetchone()
+        elif subject_type == "PROTOCOL_PAIR":
+            row = self._read().execute(
+                "SELECT 1 FROM protocol_pairs AS pair "
+                "JOIN protocols AS protocol ON protocol.protocol_id = pair.protocol_id "
+                "WHERE pair.pair_id = ? AND protocol.project_id = ? LIMIT 1",
+                (subject_id, project_id),
+            ).fetchone()
+        else:
+            raise ValueError(f"unsupported annotation subject type: {subject_type}")
+        return row is not None
+
     def record_annotation(self, *, project_id: str, subject_type: str, subject_id: str, actor_id: str, text: str, context: dict[str, Any]) -> dict[str, Any]:
         created_at = datetime.now(timezone.utc).astimezone().isoformat()
         context_text = json.dumps(context, sort_keys=True, separators=(",", ":"), allow_nan=False)
         evidence = _evidence(json.dumps({"project_id": project_id, "subject_type": subject_type, "subject_id": subject_id, "actor_id": actor_id, "created_at": created_at, "text": text, "context": context}, sort_keys=True))
         annotation_id = f"annotation:sha256:{evidence}"
+        occurred = datetime.now(timezone.utc).astimezone()
+        payload = CanonicalJson.from_value({
+            "event_type": AuditEventType.ANNOTATION_MODIFIED.value,
+            "subject_type": subject_type,
+            "subject_id": subject_id,
+            "occurred_at": occurred.isoformat(),
+            "annotation_id": annotation_id,
+            "evidence_sha256": evidence,
+        })
+        audit_event = AuditEvent(
+            audit_event_id=f"audit-event:sha256:{hashlib.sha256((project_id + subject_id + AuditEventType.ANNOTATION_MODIFIED.value + occurred.isoformat() + payload.sha256).encode('utf-8')).hexdigest()}",
+            project_id=project_id,
+            actor_id=actor_id,
+            event_type=AuditEventType.ANNOTATION_MODIFIED,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            occurred_at=occurred,
+            details=payload,
+            current_evidence_sha256=payload.sha256,
+            local_only=True,
+        )
         with self._lock:
-            self._connection.execute(
-                "INSERT INTO annotations (annotation_id, project_id, subject_type, subject_id, actor_id, created_at, text, context_json, evidence_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (annotation_id, project_id, subject_type, subject_id, actor_id, created_at, text, context_text, evidence),
-            )
-            self._connection.commit()
+            self._connection.execute("BEGIN")
+            try:
+                self._connection.execute(
+                    "INSERT INTO annotations (annotation_id, project_id, subject_type, subject_id, actor_id, created_at, text, context_json, evidence_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (annotation_id, project_id, subject_type, subject_id, actor_id, created_at, text, context_text, evidence),
+                )
+                self._insert_audit_event(audit_event)
+            except BaseException:
+                self._connection.execute("ROLLBACK")
+                raise
+            self._connection.execute("COMMIT")
         return {"annotation_id": annotation_id, "project_id": project_id, "subject_type": subject_type, "subject_id": subject_id, "actor_id": actor_id, "created_at": created_at, "text": text, "context": context, "evidence_sha256": evidence}
 
     def annotations(self, *, subject_id: str | None = None, project_id: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
@@ -2006,6 +2959,146 @@ class RunStore:
                                      (record["bundle_id"], record["project_id"], record["run_id"], record["path"], record["sha256"], json.dumps(record["manifest"], sort_keys=True), record["created_at"]))
             self._connection.commit()
 
+    def record_reporting_publication(
+        self,
+        publication_kind: str,
+        record: dict[str, Any],
+        audit_event: AuditEvent,
+    ) -> None:
+        """Atomically persist one prepared reporting record and its audit event."""
+
+        identities = {
+            "FIGURE": ("Figure", "figure_id"),
+            "REPORT": ("Report", "report_id"),
+            "EXPERIMENT_BUNDLE": ("Bundle", "bundle_id"),
+            "TABULAR_EXPORT": ("Export", "export_id"),
+        }
+        if publication_kind not in identities:
+            raise ValueError("reporting publication kind is not supported")
+        subject_type, identity_key = identities[publication_kind]
+        if (
+            record.get("project_id") != audit_event.project_id
+            or record.get(identity_key) != audit_event.subject_id
+            or audit_event.subject_type != subject_type
+            or audit_event.event_type != AuditEventType.ARTIFACT_EXPORTED
+        ):
+            raise ValueError("reporting publication and audit identities differ")
+
+        def insert_exact(
+            table: str,
+            key_column: str,
+            key: str,
+            columns: dict[str, Any],
+        ) -> None:
+            names = tuple(columns)
+            existing = self._connection.execute(
+                f"SELECT {', '.join(names)} FROM {table} WHERE {key_column} = ?",
+                (key,),
+            ).fetchone()
+            expected = tuple(columns[name] for name in names)
+            if existing is not None:
+                if tuple(existing) != expected:
+                    raise ImmutableRecordConflict(
+                        f"{table}.{key} is already recorded with different bytes"
+                    )
+                return
+            self._connection.execute(
+                f"INSERT INTO {table} ({', '.join(names)}) VALUES ({', '.join('?' for _ in names)})",
+                expected,
+            )
+
+        with self._lock:
+            self._connection.execute("BEGIN")
+            try:
+                if publication_kind == "FIGURE":
+                    provenance_text = json.dumps(
+                        {
+                            key: value
+                            for key, value in record.items()
+                            if key != "provenance_sha256"
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    )
+                    provenance_path = (
+                        Path(record["directory"]) / "figure.provenance.json"
+                    )
+                    provenance_sha256 = hashlib.sha256(
+                        provenance_path.read_bytes()
+                    ).hexdigest()
+                    if record.get("provenance_sha256") != provenance_sha256:
+                        raise ValueError(
+                            "figure provenance bytes differ from the prepared receipt"
+                        )
+                    insert_exact(
+                        "figures",
+                        "figure_id",
+                        record["figure_id"],
+                        {
+                            "figure_id": record["figure_id"],
+                            "project_id": record["project_id"],
+                            "kind": record["kind"],
+                            "title": record["title"],
+                            "directory": record["directory"],
+                            "source_run_ids_json": json.dumps(
+                                record["source_run_ids"]
+                            ),
+                            "provenance_json": provenance_text,
+                            "provenance_sha256": provenance_sha256,
+                            "created_at": record["created_at"],
+                        },
+                    )
+                elif publication_kind == "REPORT":
+                    provenance_path = (
+                        Path(record["directory"]) / "report.provenance.json"
+                    )
+                    insert_exact(
+                        "reports",
+                        "report_id",
+                        record["report_id"],
+                        {
+                            "report_id": record["report_id"],
+                            "project_id": record["project_id"],
+                            "title": record["title"],
+                            "directory": record["directory"],
+                            "spec_json": json.dumps(record["spec"], sort_keys=True),
+                            "provenance_json": json.dumps(
+                                record["provenance"], sort_keys=True
+                            ),
+                            "html_sha256": record["files"]["html"]["sha256"],
+                            "pdf_sha256": record["files"]["pdf"]["sha256"],
+                            "json_sha256": record["files"]["json"]["sha256"],
+                            "provenance_sha256": hashlib.sha256(
+                                provenance_path.read_bytes()
+                            ).hexdigest(),
+                            "created_by": record["created_by"],
+                            "created_at": record["created_at"],
+                        },
+                    )
+                elif publication_kind == "EXPERIMENT_BUNDLE":
+                    insert_exact(
+                        "bundles",
+                        "bundle_id",
+                        record["bundle_id"],
+                        {
+                            "bundle_id": record["bundle_id"],
+                            "project_id": record["project_id"],
+                            "run_id": record["run_id"],
+                            "path": record["path"],
+                            "sha256": record["sha256"],
+                            "manifest_json": json.dumps(
+                                record["manifest"], sort_keys=True
+                            ),
+                            "created_at": record["created_at"],
+                        },
+                    )
+                self._insert_audit_event(audit_event)
+            except BaseException:
+                self._connection.execute("ROLLBACK")
+                raise
+            self._connection.execute("COMMIT")
+
     def experiment_bundles(self, *, project_id: str | None = None, run_id: str | None = None) -> list[dict[str, Any]]:
         clauses, params = [], []
         if project_id is not None:
@@ -2054,16 +3147,16 @@ class RunStore:
         metrics_text = json.dumps(result.metrics, sort_keys=True, separators=(",", ":"), allow_nan=False)
         summary_text = json.dumps(result.summary, sort_keys=True, separators=(",", ":"), allow_nan=False)
         with self._lock:
-            self._connection.execute("BEGIN")
+            transaction = self._begin_write_transaction()
             try:
                 self._record_analysis_run(run, result.experiment, {"analysis_kind": "IDENTIFICATION_SEARCH", "search_id": result.search_id, "protocol_id": protocol["protocol_id"], "matcher_id": result.summary["matcher_id"], "condition_id": result.summary["condition_id"]})
                 self._connection.execute("UPDATE runs SET run_kind = 'IDENTIFICATION' WHERE run_id = ?", (run.run_id,))
                 self._connection.execute("INSERT INTO identification_searches (search_id, run_id, project_id, protocol_id, matcher_id, condition_id, directory, candidates_parquet, candidates_sha256, metrics_json, metrics_sha256, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                          (result.search_id, run.run_id, run.project_id, protocol["protocol_id"], result.summary["matcher_id"], result.summary["condition_id"], str(result.directory), str(result.candidates_parquet), hashlib.sha256(result.candidates_parquet.read_bytes()).hexdigest(), metrics_text, _evidence(metrics_text), summary_text, run.end_time.isoformat()))
             except BaseException:
-                self._connection.execute("ROLLBACK")
+                self._rollback_write_transaction(transaction)
                 raise
-            self._connection.execute("COMMIT")
+            self._commit_write_transaction(transaction)
 
     def identification_search(self, search_id: str) -> dict[str, Any] | None:
         cursor = self._read().execute("SELECT * FROM identification_searches WHERE search_id = ? OR run_id = ?", (search_id, search_id))
@@ -2077,7 +3170,7 @@ class RunStore:
     def record_derived_set(self, result: Any) -> None:
         dataset_json = result.dataset.model_dump_json()
         with self._lock:
-            self._connection.execute("BEGIN")
+            transaction = self._begin_write_transaction()
             try:
                 self._insert_once("datasets", "dataset_id", result.dataset.dataset_id, byte_exact=True, columns={
                     "dataset_id": result.dataset.dataset_id, "project_id": result.dataset.project_id, "evidence_sha256": _evidence(dataset_json), "record_json": dataset_json})
@@ -2090,9 +3183,9 @@ class RunStore:
                 self._connection.executemany("INSERT INTO derived_samples (derived_sample_id, derived_set_id, parent_sample_id, transform, parameter, level_index, path, sha256, chain_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                              [(r["derived_sample_id"], result.derived_set_id, r["parent_sample_id"], r["transform"], r["parameter"], r["level_index"], r["path"], r["sha256"], json.dumps(r["chain"], sort_keys=True)) for r in result.rows])
             except BaseException:
-                self._connection.execute("ROLLBACK")
+                self._rollback_write_transaction(transaction)
                 raise
-            self._connection.execute("COMMIT")
+            self._commit_write_transaction(transaction)
 
     def derived_set(self, derived_set_id: str) -> dict[str, Any] | None:
         row = self._read().execute("SELECT record_json FROM derived_sets WHERE derived_set_id = ? OR derived_dataset_id = ?", (derived_set_id, derived_set_id)).fetchone()
@@ -2115,32 +3208,83 @@ class RunStore:
         # Lock order: owner-file boundary, then the RunStore writer lock.
         with serialized_owner_file_mutation():
             with self._lock:
-                row = self._connection.execute(
-                    "SELECT sha256 FROM owner_supplied_inputs WHERE path = ?", (record["path"],)
-                ).fetchone()
-                if row is not None:
-                    if row[0] != record["sha256"]:
-                        raise ImmutableRecordConflict(
-                            f"owner-supplied path {record['path']} was already admitted with different bytes"
+                transaction = self._begin_write_transaction()
+                try:
+                    row = self._connection.execute(
+                        "SELECT sha256 FROM owner_supplied_inputs WHERE path = ?", (record["path"],)
+                    ).fetchone()
+                    if row is not None:
+                        if row[0] != record["sha256"]:
+                            raise ImmutableRecordConflict(
+                                f"owner-supplied path {record['path']} was already admitted with different bytes"
+                            )
+                    else:
+                        self._connection.execute(
+                            "INSERT INTO owner_supplied_inputs (path, sha256, project_id, actor_id, original_name, size_bytes, storage, source_kind, admitted_at, record_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (
+                                record["path"], record["sha256"], record["project_id"], record["actor_id"],
+                                record["original_name"], record["size_bytes"], record["storage"],
+                                record["source_kind"], record["admitted_at"],
+                                json.dumps(record, sort_keys=True, separators=(",", ":")),
+                            ),
                         )
-                else:
                     self._connection.execute(
-                        "INSERT INTO owner_supplied_inputs (path, sha256, project_id, actor_id, original_name, size_bytes, storage, source_kind, admitted_at, record_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        "INSERT OR IGNORE INTO owner_supplied_project_refs (path, project_id, record_json) VALUES (?, ?, ?)",
                         (
-                            record["path"], record["sha256"], record["project_id"], record["actor_id"],
-                            record["original_name"], record["size_bytes"], record["storage"],
-                            record["source_kind"], record["admitted_at"],
+                            record["path"],
+                            record["project_id"],
                             json.dumps(record, sort_keys=True, separators=(",", ":")),
                         ),
                     )
-                self._connection.execute(
-                    "INSERT OR IGNORE INTO owner_supplied_project_refs (path, project_id, record_json) VALUES (?, ?, ?)",
-                    (
-                        record["path"],
-                        record["project_id"],
-                        json.dumps(record, sort_keys=True, separators=(",", ":")),
-                    ),
-                )
+                except BaseException:
+                    self._rollback_write_transaction(transaction)
+                    raise
+                self._commit_write_transaction(transaction)
+
+    def reconcile_prepared_owner_publications(
+        self, data_dir: Path
+    ) -> list[dict[str, str]]:
+        """Record and finalize exact project-bound owner-input receipts."""
+
+        from ..importers.owner_supplied import (
+            finalize_prepared_owner_protocol,
+            finalize_prepared_owner_input_admission,
+            prepared_owner_input_admissions,
+            prepared_owner_protocols,
+            recover_prepared_owner_input_admission,
+            recover_prepared_owner_protocol,
+        )
+
+        reconciled: list[dict[str, str]] = []
+        for receipt_path in prepared_owner_input_admissions(data_dir):
+            prepared = recover_prepared_owner_input_admission(
+                receipt_path, data_dir=data_dir
+            )
+            self.record_owner_supplied(prepared.record)
+            finalize_prepared_owner_input_admission(prepared)
+            reconciled.append(
+                {
+                    "publication_kind": "OWNER_INPUT_ADMISSION",
+                    "project_id": prepared.project_id,
+                    "request_sha256": prepared.request_sha256,
+                }
+            )
+        for receipt_path in prepared_owner_protocols(data_dir):
+            prepared = recover_prepared_owner_protocol(
+                receipt_path, data_dir=data_dir
+            )
+            self.record_protocol(
+                prepared.record, list(prepared.pairs), prepared.audit_event
+            )
+            finalize_prepared_owner_protocol(prepared)
+            reconciled.append(
+                {
+                    "publication_kind": "OWNER_PAIR_PROTOCOL",
+                    "project_id": prepared.record.project_id,
+                    "request_sha256": prepared.request_sha256,
+                }
+            )
+        return reconciled
 
     def owner_supplied_by_path(self, path: str) -> dict[str, Any] | None:
         row = self._read().execute(
@@ -2163,6 +3307,496 @@ class RunStore:
             (path, project_id),
         ).fetchone()
         return row is not None
+
+    def _owner_pair_sample_locked(self, project_id: str, sample_id: str) -> Sample:
+        row = self._connection.execute(
+            "SELECT samples.record_json, samples.evidence_sha256, samples.source_path, samples.sha256, "
+            "datasets.record_json, datasets.evidence_sha256, inputs.record_json, inputs.sha256 "
+            "FROM samples "
+            "JOIN datasets ON datasets.dataset_id = samples.dataset_id "
+            "JOIN owner_supplied_project_refs AS refs "
+            "ON refs.path = samples.source_path AND refs.project_id = datasets.project_id "
+            "JOIN owner_supplied_inputs AS inputs ON inputs.path = refs.path "
+            "WHERE samples.sample_id = ? AND datasets.project_id = ?",
+            (sample_id, project_id),
+        ).fetchone()
+        if row is None:
+            raise OwnerPairNotFound(
+                "owner-supplied sample is not recorded for this project"
+            )
+        (
+            sample_json,
+            sample_evidence,
+            sample_path,
+            sample_sha256,
+            dataset_json,
+            dataset_evidence,
+            owner_json,
+            owner_sha256,
+        ) = row
+        if _evidence(sample_json) != sample_evidence or _evidence(dataset_json) != dataset_evidence:
+            raise OwnerPairIntegrityError("owner-supplied sample evidence failed integrity verification")
+        try:
+            sample = Sample.model_validate_json(sample_json)
+            dataset = Dataset.model_validate_json(dataset_json)
+            owner = json.loads(owner_json)
+            dataset_manifest = json.loads(dataset.manifest.text)
+            sample_metadata = json.loads(sample.metadata.text)
+        except (ValueError, TypeError, json.JSONDecodeError) as error:
+            raise OwnerPairIntegrityError(
+                "owner-supplied sample evidence failed integrity verification"
+            ) from error
+        if (
+            sample.sample_id != sample_id
+            or sample.dataset_id != dataset.dataset_id
+            or dataset.project_id != project_id
+            or sample.source_path != sample_path
+            or sample.sha256 != sample_sha256
+            or sample.sha256 != owner_sha256
+            or owner.get("path") != sample.source_path
+            or owner.get("sha256") != sample.sha256
+            or owner.get("source_kind") != "OWNER_SUPPLIED_LOCAL_INPUT"
+            or dataset_manifest.get("source_kind") != "OWNER_SUPPLIED_LOCAL_INPUT"
+            or sample_metadata.get("source_kind") != "OWNER_SUPPLIED_LOCAL_INPUT"
+        ):
+            raise OwnerPairIntegrityError(
+                "owner-supplied sample evidence failed integrity verification"
+            )
+        path = Path(sample.source_path)
+        if path.is_symlink() or not path.is_file():
+            raise OwnerPairIntegrityError(
+                "owner-supplied sample bytes failed integrity verification"
+            )
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != sample.sha256:
+            raise OwnerPairIntegrityError(
+                "owner-supplied sample bytes failed integrity verification"
+            )
+        return sample
+
+    def record_owner_pair_admission(
+        self,
+        *,
+        project_id: str,
+        left_sample_id: str,
+        right_sample_id: str,
+        relationship: OwnerPairRelationship,
+        actor_id: str,
+    ) -> tuple[OwnerPairAdmission, bool]:
+        """Validate two project-owned bytes and persist their assertion + audit atomically."""
+
+        pair_digest = hashlib.sha256()
+        for part in (
+            "owner-pair-admission-v1",
+            project_id,
+            left_sample_id,
+            right_sample_id,
+            relationship.value,
+            actor_id,
+        ):
+            pair_digest.update(part.encode("utf-8"))
+            pair_digest.update(b"\x00")
+        pair_id = f"owner-pair:sha256:{pair_digest.hexdigest()}"
+
+        # Fixed order: caller's project guard -> owner-file lock -> store writer.
+        with serialized_owner_file_mutation():
+            with self._lock:
+                self._connection.execute("BEGIN")
+                try:
+                    left = self._owner_pair_sample_locked(project_id, left_sample_id)
+                    right = self._owner_pair_sample_locked(project_id, right_sample_id)
+                    if left.sample_id == right.sample_id or left.sha256 == right.sha256:
+                        raise OwnerPairValidationError(
+                            "a direct pair requires two different owner-supplied images"
+                        )
+
+                    existing = self._connection.execute(
+                        "SELECT project_id, left_sample_id, right_sample_id, relationship, "
+                        "record_json, evidence_sha256 FROM owner_pair_admissions WHERE pair_id = ?",
+                        (pair_id,),
+                    ).fetchone()
+                    if existing is not None:
+                        (
+                            stored_project_id,
+                            stored_left_sample_id,
+                            stored_right_sample_id,
+                            stored_relationship,
+                            record_json,
+                            evidence_sha256,
+                        ) = existing
+                        if _evidence(record_json) != evidence_sha256:
+                            raise OwnerPairIntegrityError(
+                                "recorded owner-pair evidence failed integrity verification"
+                            )
+                        try:
+                            record = OwnerPairAdmission.model_validate_json(record_json)
+                        except ValueError as error:
+                            raise OwnerPairIntegrityError(
+                                "recorded owner-pair evidence failed integrity verification"
+                            ) from error
+                        if (
+                            stored_project_id != project_id
+                            or stored_left_sample_id != left.sample_id
+                            or stored_right_sample_id != right.sample_id
+                            or stored_relationship != relationship.value
+                            or record.pair_id != pair_id
+                            or record.project_id != project_id
+                            or record.left_sample_id != left.sample_id
+                            or record.right_sample_id != right.sample_id
+                            or record.left_sha256 != left.sha256
+                            or record.right_sha256 != right.sha256
+                            or record.relationship is not relationship
+                            or record.relationship_assertion.asserted_by != actor_id
+                        ):
+                            raise OwnerPairIntegrityError(
+                                "recorded owner-pair evidence failed integrity verification"
+                            )
+                        self._connection.execute("COMMIT")
+                        return record, False
+
+                    asserted_at = datetime.now(timezone.utc).astimezone()
+                    comparison_label = {
+                        OwnerPairRelationship.SAME_PERSON: ComparisonLabel.MATED,
+                        OwnerPairRelationship.DIFFERENT_PEOPLE: ComparisonLabel.NON_MATED,
+                        OwnerPairRelationship.NOT_RECORDED: None,
+                    }[relationship]
+                    record = OwnerPairAdmission.model_validate(
+                        {
+                            "schema_version": "1.0.0",
+                            "pair_id": pair_id,
+                            "project_id": project_id,
+                            "left_sample_id": left.sample_id,
+                            "right_sample_id": right.sample_id,
+                            "left_sha256": left.sha256,
+                            "right_sha256": right.sha256,
+                            "relationship": relationship,
+                            "comparison_label": comparison_label,
+                            "relationship_assertion": OperatorRelationshipAssertion(
+                                state="OPERATOR_ASSERTED_UNVERIFIED",
+                                relationship=relationship,
+                                asserted_by=actor_id,
+                                asserted_at=asserted_at,
+                            ),
+                            "population_error_claims_allowed": False,
+                            "outcome_correctness_allowed": False,
+                            "source_kind": "OWNER_SUPPLIED_LOCAL_INPUT",
+                            "local_only": True,
+                        }
+                    )
+                    record_json = record.model_dump_json()
+                    evidence_sha256 = _evidence(record_json)
+                    self._connection.execute(
+                        "INSERT INTO owner_pair_admissions "
+                        "(pair_id, project_id, left_sample_id, right_sample_id, relationship, evidence_sha256, record_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            pair_id,
+                            project_id,
+                            left.sample_id,
+                            right.sample_id,
+                            relationship.value,
+                            evidence_sha256,
+                            record_json,
+                        ),
+                    )
+                    audit_details = CanonicalJson.from_value(
+                        {
+                            "left_sample_id": left.sample_id,
+                            "left_sha256": left.sha256,
+                            "outcome_correctness_allowed": record.outcome_correctness_allowed,
+                            "population_error_claims_allowed": False,
+                            "relationship": relationship.value,
+                            "relationship_assertion_state": "OPERATOR_ASSERTED_UNVERIFIED",
+                            "right_sample_id": right.sample_id,
+                            "right_sha256": right.sha256,
+                            "source_kind": "OWNER_SUPPLIED_LOCAL_INPUT",
+                        }
+                    )
+                    self._insert_audit_event(
+                        AuditEvent(
+                            audit_event_id=(
+                                f"audit-event:sha256:{hashlib.sha256((pair_id + evidence_sha256).encode('utf-8')).hexdigest()}"
+                            ),
+                            project_id=project_id,
+                            actor_id=actor_id,
+                            event_type=AuditEventType.OWNER_PAIR_ADMITTED,
+                            subject_type="OwnerPairAdmission",
+                            subject_id=pair_id,
+                            occurred_at=asserted_at,
+                            details=audit_details,
+                            current_evidence_sha256=evidence_sha256,
+                            local_only=True,
+                        )
+                    )
+                except BaseException:
+                    self._connection.execute("ROLLBACK")
+                    raise
+                self._connection.execute("COMMIT")
+                return record, True
+
+    def owner_pair(self, project_id: str, pair_id: str) -> OwnerPairAdmission:
+        """Return one project-owned pair after revalidating its record and both source bytes."""
+
+        with serialized_owner_file_mutation():
+            with self._lock:
+                row = self._connection.execute(
+                    "SELECT project_id, left_sample_id, right_sample_id, relationship, "
+                    "record_json, evidence_sha256 FROM owner_pair_admissions WHERE pair_id = ?",
+                    (pair_id,),
+                ).fetchone()
+                if row is None or row[0] != project_id:
+                    raise OwnerPairNotFound(
+                        "owner pair is not recorded for this project"
+                    )
+                (
+                    stored_project_id,
+                    left_sample_id,
+                    right_sample_id,
+                    relationship,
+                    record_json,
+                    evidence_sha256,
+                ) = row
+                if _evidence(record_json) != evidence_sha256:
+                    raise OwnerPairIntegrityError(
+                        "recorded owner-pair evidence failed integrity verification"
+                    )
+                try:
+                    record = OwnerPairAdmission.model_validate_json(record_json)
+                except ValueError as error:
+                    raise OwnerPairIntegrityError(
+                        "recorded owner-pair evidence failed integrity verification"
+                    ) from error
+                left = self._owner_pair_sample_locked(project_id, left_sample_id)
+                right = self._owner_pair_sample_locked(project_id, right_sample_id)
+                if (
+                    record.pair_id != pair_id
+                    or record.project_id != stored_project_id
+                    or record.left_sample_id != left.sample_id
+                    or record.right_sample_id != right.sample_id
+                    or record.left_sha256 != left.sha256
+                    or record.right_sha256 != right.sha256
+                    or record.relationship.value != relationship
+                ):
+                    raise OwnerPairIntegrityError(
+                        "recorded owner-pair evidence failed integrity verification"
+                    )
+                return record
+
+    def record_direct_pair_comparison(
+        self,
+        run: DirectPairComparisonRun,
+        *,
+        operation_id: str | None = None,
+        finalize_operation: bool = True,
+    ) -> None:
+        """Atomically persist one immutable direct Run, audit, and terminal operation."""
+
+        record_json = run.model_dump_json()
+        evidence_sha256 = _evidence(record_json)
+        active_operation_id = operation_id or run.comparison_id
+        with serialized_owner_file_mutation():
+            with self._lock:
+                connection = self._connection
+                transaction = self._begin_write_transaction()
+                try:
+                    existing = connection.execute(
+                        "SELECT record_json, evidence_sha256 FROM direct_pair_comparisons "
+                        "WHERE comparison_id = ?",
+                        (run.comparison_id,),
+                    ).fetchone()
+                    if existing is not None:
+                        if existing != (record_json, evidence_sha256):
+                            raise ImmutableRecordConflict(
+                                "direct comparison already exists with different evidence"
+                            )
+                        self._commit_write_transaction(transaction)
+                        return
+                    operation = connection.execute(
+                        "SELECT project_id, state, result_id, request_json FROM operations "
+                        "WHERE operation_id = ?",
+                        (active_operation_id,),
+                    ).fetchone()
+                    if operation is None or operation[0] != run.project_id:
+                        raise ImmutableRecordConflict(
+                            "direct comparison operation is not recorded in this project"
+                        )
+                    if operation[1] != "RUNNING" or operation[2] != run.run_id:
+                        raise ImmutableRecordConflict(
+                            "direct comparison operation is not in its executable state"
+                        )
+                    if CanonicalJson.from_value(json.loads(operation[3])).sha256 != run.request_sha256:
+                        raise ImmutableRecordConflict(
+                            "direct comparison request differs from its admitted operation"
+                        )
+                    pair_row = connection.execute(
+                        "SELECT project_id, left_sample_id, right_sample_id, record_json, evidence_sha256 "
+                        "FROM owner_pair_admissions WHERE pair_id = ?",
+                        (run.pair_id,),
+                    ).fetchone()
+                    if pair_row is None or pair_row[0] != run.project_id:
+                        raise ImmutableRecordConflict(
+                            "direct comparison pair is not recorded in this project"
+                        )
+                    if _evidence(pair_row[3]) != pair_row[4]:
+                        raise OwnerPairIntegrityError(
+                            "recorded owner-pair evidence failed integrity verification"
+                        )
+                    pair = OwnerPairAdmission.model_validate_json(pair_row[3])
+                    left = self._owner_pair_sample_locked(run.project_id, run.left_sample_id)
+                    right = self._owner_pair_sample_locked(run.project_id, run.right_sample_id)
+                    if (
+                        pair.pair_id != run.pair_id
+                        or pair_row[1] != run.left_sample_id
+                        or pair_row[2] != run.right_sample_id
+                        or pair.relationship is not run.relationship
+                        or pair.relationship_assertion != run.relationship_assertion
+                        or left.dataset_id != run.left_dataset_id
+                        or right.dataset_id != run.right_dataset_id
+                        or left.sha256 != run.left_source_sha256
+                        or right.sha256 != run.right_source_sha256
+                    ):
+                        raise ImmutableRecordConflict(
+                            "direct comparison Run differs from its admitted pair inputs"
+                        )
+                    connection.execute(
+                        "INSERT INTO direct_pair_comparisons "
+                        "(comparison_id, run_id, project_id, pair_id, left_sample_id, "
+                        "right_sample_id, left_dataset_id, right_dataset_id, matcher_id, "
+                        "preprocessing_id, threshold_value, directory, ended_at, evidence_sha256, record_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            run.comparison_id,
+                            run.run_id,
+                            run.project_id,
+                            run.pair_id,
+                            run.left_sample_id,
+                            run.right_sample_id,
+                            run.left_dataset_id,
+                            run.right_dataset_id,
+                            run.matcher_id,
+                            run.preprocessing_id,
+                            float(run.threshold.value),
+                            run.output_directory,
+                            run.ended_at.isoformat(),
+                            evidence_sha256,
+                            record_json,
+                        ),
+                    )
+                    audit_details = CanonicalJson.from_value(
+                        {
+                            "comparison_id": run.comparison_id,
+                            "matcher_id": run.matcher_id,
+                            "pair_id": run.pair_id,
+                            "population_error_claims_allowed": False,
+                            "preprocessing_id": run.preprocessing_id,
+                            "run_id": run.run_id,
+                            "threshold_contract_id": run.threshold.contract_id,
+                            "threshold_value": run.threshold.value,
+                        }
+                    )
+                    self._insert_audit_event(
+                        AuditEvent(
+                            audit_event_id=(
+                                "audit-event:sha256:"
+                                + hashlib.sha256(
+                                    (run.run_id + evidence_sha256).encode("utf-8")
+                                ).hexdigest()
+                            ),
+                            project_id=run.project_id,
+                            actor_id=run.actor_id,
+                            event_type=AuditEventType.RUN_COMPLETED,
+                            subject_type="DirectPairComparisonRun",
+                            subject_id=run.run_id,
+                            occurred_at=run.ended_at,
+                            details=audit_details,
+                            current_evidence_sha256=evidence_sha256,
+                            local_only=True,
+                        )
+                    )
+                    if finalize_operation:
+                        cursor = connection.execute(
+                            "UPDATE operations SET state = 'COMPLETED', ended_at = ?, error = NULL "
+                            "WHERE operation_id = ? AND state = 'RUNNING'",
+                            (run.ended_at.isoformat(), active_operation_id),
+                        )
+                        if cursor.rowcount != 1:
+                            raise ImmutableRecordConflict(
+                                "direct comparison operation could not be finalized"
+                            )
+                except BaseException:
+                    self._rollback_write_transaction(transaction)
+                    raise
+                self._commit_write_transaction(transaction)
+
+    def direct_pair_comparison(
+        self, comparison_id: str
+    ) -> DirectPairComparisonRun | None:
+        row = self._read().execute(
+            "SELECT comparison_id, run_id, project_id, pair_id, left_sample_id, "
+            "right_sample_id, left_dataset_id, right_dataset_id, matcher_id, "
+            "preprocessing_id, threshold_value, directory, record_json, evidence_sha256 "
+            "FROM direct_pair_comparisons WHERE comparison_id = ?",
+            (comparison_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        record_json, evidence_sha256 = row[-2:]
+        if _evidence(record_json) != evidence_sha256:
+            raise ImmutableRecordConflict(
+                "recorded direct comparison evidence failed integrity verification"
+            )
+        try:
+            run = DirectPairComparisonRun.model_validate_json(record_json)
+        except ValueError as error:
+            raise ImmutableRecordConflict(
+                "recorded direct comparison evidence failed integrity verification"
+            ) from error
+        indexed = (
+            run.comparison_id,
+            run.run_id,
+            run.project_id,
+            run.pair_id,
+            run.left_sample_id,
+            run.right_sample_id,
+            run.left_dataset_id,
+            run.right_dataset_id,
+            run.matcher_id,
+            run.preprocessing_id,
+            float(run.threshold.value),
+            run.output_directory,
+        )
+        if tuple(row[:12]) != indexed:
+            raise ImmutableRecordConflict(
+                "recorded direct comparison evidence failed integrity verification"
+            )
+        return run
+
+    def direct_pair_comparison_by_run(
+        self, run_id: str
+    ) -> DirectPairComparisonRun | None:
+        row = self._read().execute(
+            "SELECT comparison_id FROM direct_pair_comparisons WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        return self.direct_pair_comparison(row[0]) if row is not None else None
+
+    def direct_pair_comparisons_for_project(
+        self, project_id: str
+    ) -> list[DirectPairComparisonRun]:
+        ids = self._read().execute(
+            "SELECT comparison_id FROM direct_pair_comparisons WHERE project_id = ? "
+            "ORDER BY ended_at DESC, comparison_id",
+            (project_id,),
+        ).fetchall()
+        records: list[DirectPairComparisonRun] = []
+        for (comparison_id,) in ids:
+            record = self.direct_pair_comparison(comparison_id)
+            assert record is not None
+            records.append(record)
+        return records
 
     def record_import_mapping(self, mapping_name: str, mapping: dict[str, str], actor_id: str, created_at: str) -> None:
         with self._lock:
@@ -2198,15 +3832,15 @@ class RunStore:
         run = result.run
         summary_text = json.dumps(result.summary, sort_keys=True, separators=(",", ":"), allow_nan=False)
         with self._lock:
-            self._connection.execute("BEGIN")
+            transaction = self._begin_write_transaction()
             try:
                 self._record_analysis_run(run, result.experiment, {"analysis_kind": "DEGRADATION_RESPONSE", "analysis_id": result.analysis_id, "derived_set_id": result.summary["derived_set_id"], "matcher_id": result.summary["matcher_id"]})
                 self._connection.execute("INSERT INTO degradation_analyses (analysis_id, run_id, project_id, derived_set_id, quality_job_id, matcher_id, condition_id, directory, document_sha256, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                          (result.analysis_id, run.run_id, run.project_id, result.summary["derived_set_id"], result.document["sources"]["quality_job_id"], result.summary["matcher_id"], result.summary["condition_id"], str(result.directory), hashlib.sha256(result.document_path.read_bytes()).hexdigest(), summary_text, run.end_time.isoformat()))
             except BaseException:
-                self._connection.execute("ROLLBACK")
+                self._rollback_write_transaction(transaction)
                 raise
-            self._connection.execute("COMMIT")
+            self._commit_write_transaction(transaction)
 
     def degradation_analysis(self, analysis_id: str) -> dict[str, Any] | None:
         cursor = self._read().execute("SELECT * FROM degradation_analyses WHERE analysis_id = ? OR run_id = ?", (analysis_id, analysis_id))
@@ -2334,6 +3968,34 @@ class RunStore:
         where = " WHERE project_id = ?" if project_id is not None else ""
         cursor = self._read().execute(f"SELECT record_json FROM purges{where} ORDER BY created_at", (project_id,) if project_id is not None else ())
         return [json.loads(row[0]) for row in cursor.fetchall()]
+
+    def purge_evidence(self, evidence_sha256: str) -> dict[str, Any] | None:
+        """Resolve one public purge receipt hash to its complete private evidence."""
+
+        def canonical_sha256(record: dict[str, Any]) -> str:
+            canonical = json.dumps(
+                record,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                default=str,
+            ).encode("utf-8")
+            return hashlib.sha256(canonical).hexdigest()
+
+        for (record_json,) in self._read().execute(
+            "SELECT record_json FROM purges ORDER BY created_at"
+        ).fetchall():
+            record = json.loads(record_json)
+            if canonical_sha256(record) == evidence_sha256:
+                return record
+        for (progress_json,) in self._read().execute(
+            "SELECT progress_json FROM purge_journal ORDER BY created_at"
+        ).fetchall():
+            progress = json.loads(progress_json)
+            for record in progress.get("failure_evidence_history", []):
+                if isinstance(record, dict) and canonical_sha256(record) == evidence_sha256:
+                    return record
+        return None
 
     def reproductions(self, *, original_run_id: str | None = None, project_id: str | None = None) -> list[dict[str, Any]]:
         clauses, params = [], []

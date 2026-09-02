@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from qualsight.api import Settings, create_app
 from qualsight.execution.registry_binding import OFIQ_INPUT_RESOURCE_ID, OFIQ_V112_RUNTIME_RESOURCE_ID
+from qualsight.security.purge import purge_targets
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -49,7 +50,7 @@ class RealMatcherApiTests(unittest.TestCase):
         cls.matrix_id = started.json()["matrix_id"]
         deadline = time.monotonic() + 600
         while time.monotonic() < deadline:
-            status = cls.client.get(f"/api/matrices/{cls.matrix_id}").json()
+            status = cls.client.get(f"/api/projects/{cls.project_id}/matrices/{cls.matrix_id}").json()
             if status["progress"]["phase"] in {"completed", "failed"}:
                 break
             time.sleep(1)
@@ -65,9 +66,21 @@ class RealMatcherApiTests(unittest.TestCase):
         route = next(
             route
             for route in cls.client.app.routes
-            if getattr(route, "path", None) == "/api/reports/{report_id}/file"
+            if getattr(route, "path", None) == "/api/projects/{project_id}/reports/{report_id}/file"
         )
         return inspect.getclosurevars(route.endpoint).nonlocals["store"]()
+
+    @classmethod
+    def _private_job(cls, job_id: str) -> dict:
+        record = cls._run_store().job(job_id)
+        assert record is not None, job_id
+        return record
+
+    @classmethod
+    def _private_run(cls, run_id: str):
+        record = cls._run_store().run(run_id)
+        assert record is not None, run_id
+        return record[0]
 
     def test_matrix_records_twelve_leaves_with_separate_identities(self) -> None:
         self.assertEqual(self.status["progress"]["phase"], "completed", self.status)
@@ -107,7 +120,7 @@ class RealMatcherApiTests(unittest.TestCase):
             self.assertEqual(started.status_code, 202, started.text)
             deadline = time.monotonic() + 300
             while time.monotonic() < deadline:
-                status = self.client.get(f"/api/matrices/{started.json()['matrix_id']}").json()
+                status = self.client.get(f"/api/projects/{self.project_id}/matrices/{started.json()['matrix_id']}").json()
                 if status["progress"]["phase"] in {"completed", "failed"}:
                     break
                 time.sleep(0.5)
@@ -130,7 +143,7 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertEqual(len({item["run_id"] for item in observed.values()}), 2)
         with TestClient(create_app(self.settings), base_url="http://127.0.0.1") as restarted:
             for item in observed.values():
-                persisted = restarted.get(f"/api/matrices/{item['matrix_id']}")
+                persisted = restarted.get(f"/api/projects/{self.project_id}/matrices/{item['matrix_id']}")
                 self.assertEqual(persisted.status_code, 200, persisted.text)
                 self.assertEqual(persisted.json()["progress"]["phase"], "completed", persisted.json())
                 self.assertEqual(persisted.json()["progress"]["detail"], "1/1 leaves recorded")
@@ -178,7 +191,9 @@ class RealMatcherApiTests(unittest.TestCase):
         job_id = started.json()["job_id"]
         deadline = time.monotonic() + 300
         while time.monotonic() < deadline:
-            job = cls.client.get(f"/api/jobs/{job_id}").json()
+            job = cls.client.get(
+                f"/api/projects/{cls.project_id}/jobs/{job_id}"
+            ).json()
             if job["ended_at"]:
                 break
             time.sleep(0.5)
@@ -193,7 +208,7 @@ class RealMatcherApiTests(unittest.TestCase):
         job = self._quality_job()
         job_id = job["job_id"]
         leaf = self.status["leaves"][0]
-        response = self.client.get(f"/api/matcher-runs/{leaf['run_id']}/erc", params={"quality_job_id": job_id, "policy": "pair.quality.min", "threshold": 0.8})
+        response = self.client.get(f"/api/projects/{self.project_id}/matcher-runs/{leaf['run_id']}/erc", params={"quality_job_id": job_id, "policy": "pair.quality.min", "threshold": 0.8})
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         erc = body["erc"]
@@ -203,7 +218,8 @@ class RealMatcherApiTests(unittest.TestCase):
         fnmr = erc["curves"]["FNMR"]
         self.assertEqual(fnmr["comparison_units"], 5)
         # Independent recomputation: min UQS per mated pair, worst rejected first, FNMR at 0.8.
-        quality = {r["sample_id"]: r["UnifiedQualityScore.scalar"] for r in pq.read_table(job["parquet_path"]).to_pylist()}
+        quality_path = self._private_job(job_id)["parquet_path"]
+        quality = {r["sample_id"]: r["UnifiedQualityScore.scalar"] for r in pq.read_table(quality_path).to_pylist()}
         comparisons = self.client.get(leaf["links"]["comparisons"], params={"label": "MATED", "limit": 100}).json()["rows"]
         units = sorted(((min(quality[r["left_sample_id"]], quality[r["right_sample_id"]]), r["score"]) for r in comparisons), key=lambda item: item[0])
         n = len(units)
@@ -219,12 +235,12 @@ class RealMatcherApiTests(unittest.TestCase):
         # FMR-ERC is reported separately over the non-mated units, never pooled.
         self.assertEqual(erc["curves"]["FMR"]["comparison_units"], 5)
         self.assertIn("metric registry v1.2.0", erc["derived_summaries"]["FNMR"]["note"])
-        unknown_policy = self.client.get(f"/api/matcher-runs/{leaf['run_id']}/erc", params={"quality_job_id": job_id, "policy": "pair.quality.nope"})
+        unknown_policy = self.client.get(f"/api/projects/{self.project_id}/matcher-runs/{leaf['run_id']}/erc", params={"quality_job_id": job_id, "policy": "pair.quality.nope"})
         self.assertEqual(unknown_policy.status_code, 422)
 
     def test_unknown_run_is_a_typed_404(self) -> None:
-        self.assertEqual(self.client.get("/api/matcher-runs/run:sha256:" + "0" * 64 + "/metrics").status_code, 404)
-        self.assertEqual(self.client.get("/api/matrices/matrix:sha256:" + "0" * 64).status_code, 404)
+        self.assertEqual(self.client.get(f"/api/projects/{self.project_id}/matcher-runs/run:sha256:" + "0" * 64 + "/metrics").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/projects/{self.project_id}/matrices/matrix:sha256:" + "0" * 64).status_code, 404)
 
 
 
@@ -245,7 +261,7 @@ class RealMatcherApiTests(unittest.TestCase):
         analysis_id = started.json()["analysis_id"]
         deadline = time.monotonic() + 300
         while time.monotonic() < deadline:
-            status = self.client.get(f"/api/utility-analyses/{analysis_id}").json()
+            status = self.client.get(f"/api/projects/{self.project_id}/utility-analyses/{analysis_id}").json()
             if status["state"] in {"COMPLETED", "FAILED"}:
                 break
             time.sleep(0.5)
@@ -312,9 +328,10 @@ class RealMatcherApiTests(unittest.TestCase):
         )
         # Independent recomputation script over the recorded artifacts.
         row_directory = None
-        for artifact in run["artifacts"]:
-            if artifact["uri"].endswith("utility.json"):
-                row_directory = Path(artifact["uri"]).parent
+        self.assertTrue(all("uri" not in artifact for artifact in run["artifacts"]))
+        for artifact in self._private_run(summary["run_id"]).artifacts:
+            if artifact.uri.endswith("utility.json"):
+                row_directory = Path(artifact.uri).parent
         self.assertIsNotNone(row_directory)
         verified = subprocess.run([sys.executable, str(ROOT / "scripts" / "verify_utility_analysis.py"), str(row_directory)], capture_output=True, text=True, check=False)
         self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
@@ -325,6 +342,404 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertTrue(again.json()["already_recorded"])
         listed = self.client.get(f"/api/projects/{self.project_id}/utility-analyses").json()
         self.assertIn(analysis_id, [item["analysis_id"] for item in listed])
+
+    def test_utility_overlay_excludes_incompatible_real_analyses_with_reasons(self) -> None:
+        """Only explicitly selected matcher/preprocessing axes may vary in a real ERC overlay."""
+
+        def complete(
+            leaf_id: str,
+            *,
+            measure: str = "UnifiedQualityScore",
+            matcher_threshold: float = 0.8,
+            quality_threshold: float = 40.0,
+            partial_interval: float = 0.2,
+            bootstrap_replicates: int = 0,
+            seed: int = 23,
+        ) -> dict:
+            leaf = next(item for item in self.status["leaves"] if item["leaf_id"] == leaf_id)
+            started = self.client.post(
+                f"/api/projects/{self.project_id}/utility-analyses",
+                json={
+                    "matcher_run_id": leaf["run_id"],
+                    "quality_job_id": self._quality_job()["job_id"],
+                    "quality_measure": measure,
+                    "pair_quality_policy": "pair.quality.min",
+                    "matcher_threshold": matcher_threshold,
+                    "quality_threshold": quality_threshold,
+                    "partial_interval": partial_interval,
+                    "bootstrap_replicates": bootstrap_replicates,
+                    "seed": seed,
+                },
+            )
+            self.assertIn(started.status_code, (200, 202), started.text)
+            analysis_id = started.json()["analysis_id"]
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                status = self.client.get(f"/api/projects/{self.project_id}/utility-analyses/{analysis_id}").json()
+                if status["state"] in {"COMPLETED", "FAILED"}:
+                    break
+                time.sleep(0.05)
+            self.assertEqual(status["state"], "COMPLETED", status)
+            return status["summary"]
+
+        baseline = complete("QS-C22.AS")
+        matcher_axis = complete("QS-C22.ES")
+        preprocessing_axis = complete("QS-C22.AN")
+        composite_axis = complete("QS-C22.EN")
+        wrong_measure = complete("QS-C22.AS", measure="Sharpness")
+        wrong_matcher_threshold = complete("QS-C22.AS", matcher_threshold=0.81)
+        wrong_quality_threshold = complete("QS-C22.AS", quality_threshold=41.0)
+        wrong_partial_interval = complete("QS-C22.AS", partial_interval=0.25)
+        wrong_uncertainty = complete(
+            "QS-C22.AS", bootstrap_replicates=10, seed=29
+        )
+        legacy = dict(baseline)
+        legacy.pop("overlay_identity")
+
+        identity = baseline["overlay_identity"]
+        self.assertEqual(identity["schema_version"], "1.0.0")
+        self.assertEqual(identity["project_id"], self.project_id)
+        self.assertEqual(identity["dataset_id"], self.dataset_id)
+        self.assertEqual(identity["protocol_id"], self.protocol_id)
+        self.assertEqual(
+            identity["quality_parquet_sha256"],
+            hashlib.sha256(
+                Path(self._private_job(self._quality_job()["job_id"])["parquet_path"]).read_bytes()
+            ).hexdigest(),
+        )
+        self.assertEqual(
+            identity["metric_registry"],
+            {
+                "id": "qualsight-core-metrics",
+                "version": "1.2.0",
+                "definition_sha256": hashlib.sha256(
+                    (ROOT / "metrics" / "metric-registry.json").read_bytes()
+                ).hexdigest(),
+            },
+        )
+        self.assertEqual(identity["pair_quality_policy"]["id"], "pair.quality.min")
+        self.assertEqual(identity["pair_quality_policy"]["version"], "1.0.0")
+        self.assertEqual(identity["matcher_threshold_value"], 0.8)
+        self.assertEqual(
+            identity["quality_policy_threshold"],
+            {
+                "kind": "QUALITY_POLICY_THRESHOLD",
+                "source": "CALLER_SUPPLIED",
+                "value": 40.0,
+            },
+        )
+        self.assertEqual(identity["partial_interval"], 0.2)
+        self.assertEqual(identity["bootstrap_replicates"], 0)
+        self.assertEqual(identity["seed"], 23)
+        self.assertEqual(
+            identity["threshold_score_semantics"],
+            {
+                "threshold_kind": "MATCHER_THRESHOLD",
+                "threshold_source": "CALLER_SUPPLIED",
+                "threshold_selection": "CALLER_SUPPLIED_SELECTION_EVIDENCE_NOT_RECORDED",
+                "target_fmr": None,
+                "failure_policy": None,
+                "evaluation_scope": "DESCRIPTIVE_APPLICATION_TO_RECORDED_TRIALS",
+                "score_direction": "HIGHER_IS_MORE_SIMILAR",
+                "equality_rule": "ACCEPT_WHEN_SCORE_GE_THRESHOLD",
+            },
+        )
+        recorded_document = self.client.get(baseline["links"]["analysis"]).json()
+        self.assertEqual(recorded_document["utility"]["overlay_identity"], identity)
+
+        from qualsight.analysis.utility import classify_utility_overlay
+
+        matcher_result = classify_utility_overlay(
+            baseline, matcher_axis, comparison_axes=("MATCHER",)
+        )
+        self.assertEqual(
+            matcher_result,
+            {"eligible": True, "comparison_axis": "MATCHER", "reasons": []},
+        )
+        self.assertNotEqual(
+            baseline["overlay_identity"]["comparisons_sha256"],
+            matcher_axis["overlay_identity"]["comparisons_sha256"],
+        )
+        self.assertEqual(
+            baseline["overlay_identity"]["pair_universe_sha256"],
+            matcher_axis["overlay_identity"]["pair_universe_sha256"],
+        )
+
+        rejected_preprocessing = classify_utility_overlay(
+            baseline, preprocessing_axis, comparison_axes=("MATCHER",)
+        )
+        self.assertFalse(rejected_preprocessing["eligible"])
+        self.assertIn(
+            "PREPROCESSING_AXIS_NOT_SELECTED",
+            rejected_preprocessing["reasons"],
+        )
+
+        accepted_composite = classify_utility_overlay(
+            baseline,
+            composite_axis,
+            comparison_axes=("MATCHER", "PREPROCESSING"),
+        )
+        self.assertEqual(accepted_composite["comparison_axis"], "COMPOSITE")
+        self.assertTrue(accepted_composite["eligible"])
+
+        rejected_measure = classify_utility_overlay(
+            baseline,
+            wrong_measure,
+            comparison_axes=("MATCHER", "PREPROCESSING"),
+        )
+        self.assertFalse(rejected_measure["eligible"])
+        self.assertIn("QUALITY_MEASURE_MISMATCH", rejected_measure["reasons"])
+
+        for candidate, expected_reason in (
+            (wrong_matcher_threshold, "MATCHER_THRESHOLD_MISMATCH"),
+            (wrong_quality_threshold, "QUALITY_POLICY_THRESHOLD_MISMATCH"),
+            (wrong_partial_interval, "PARTIAL_INTERVAL_MISMATCH"),
+            (wrong_uncertainty, "BOOTSTRAP_CONFIGURATION_MISMATCH"),
+        ):
+            with self.subTest(expected_reason=expected_reason):
+                rejected_configuration = classify_utility_overlay(
+                    baseline,
+                    candidate,
+                    comparison_axes=("MATCHER", "PREPROCESSING"),
+                )
+                self.assertFalse(rejected_configuration["eligible"])
+                self.assertIn(expected_reason, rejected_configuration["reasons"])
+
+        rejected_legacy = classify_utility_overlay(
+            baseline, legacy, comparison_axes=("MATCHER", "PREPROCESSING")
+        )
+        self.assertEqual(
+            rejected_legacy,
+            {
+                "eligible": False,
+                "comparison_axis": "UNKNOWN",
+                "reasons": ["INCOMPLETE_OVERLAY_IDENTITY"],
+            },
+        )
+
+        candidates = [matcher_axis, preprocessing_axis, wrong_measure, legacy]
+        eligible = [
+            item["analysis_id"]
+            for item in candidates
+            if classify_utility_overlay(
+                baseline, item, comparison_axes=("MATCHER",)
+            )["eligible"]
+        ]
+        self.assertEqual(eligible, [matcher_axis["analysis_id"]])
+
+    def test_quality_measure_catalog_executes_every_recorded_measure_and_rejects_unrecorded_measure(self) -> None:
+        """Every selector option executes from the real job; caller-invented names are refused."""
+
+        import pyarrow.parquet as pq
+        import subprocess
+        import sys
+
+        from qualsight.engines.ofiq.batch import MEASURE_NAMES
+
+        job = self._quality_job()
+        private_parquet_path = Path(self._private_job(job["job_id"])["parquet_path"])
+        schema = pq.read_schema(private_parquet_path)
+        recorded = {
+            name[: -len(".scalar")]
+            for name in schema.names
+            if name.endswith(".scalar")
+        }
+        expected = [name for name in MEASURE_NAMES if name in recorded]
+        expected.extend(sorted(recorded - set(MEASURE_NAMES)))
+
+        catalog = self.client.get(
+            f"/api/projects/{self.project_id}/jobs/{job['job_id']}/quality-measures"
+        )
+        self.assertEqual(catalog.status_code, 200, catalog.text)
+        body = catalog.json()
+        self.assertEqual(body["job_id"], job["job_id"])
+        self.assertEqual(body["run_id"], job["run_id"])
+        self.assertEqual(
+            body["parquet_sha256"],
+            hashlib.sha256(private_parquet_path.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(body["measures"], expected)
+        self.assertEqual(set(body["measures"]), recorded)
+        self.assertEqual(len(body["measures"]), 28)
+        self.assertEqual(body["default_measure"], "UnifiedQualityScore")
+
+        leaf = self.status["leaves"][0]
+        for measure in body["measures"]:
+            started = self.client.post(
+                f"/api/projects/{self.project_id}/utility-analyses",
+                json={
+                    "matcher_run_id": leaf["run_id"],
+                    "quality_job_id": job["job_id"],
+                    "quality_measure": measure,
+                    "matcher_threshold": 0.8,
+                    "quality_threshold": 40.0,
+                    "bootstrap_replicates": 0,
+                    "seed": 19,
+                },
+            )
+            self.assertEqual(started.status_code, 202, started.text)
+            analysis_id = started.json()["analysis_id"]
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                status = self.client.get(
+                    f"/api/projects/{self.project_id}/utility-analyses/{analysis_id}"
+                ).json()
+                if status["state"] in {"COMPLETED", "FAILED"}:
+                    break
+                time.sleep(0.05)
+            self.assertEqual(status["state"], "COMPLETED", status)
+            self.assertEqual(status["summary"]["quality_measure"], measure)
+            run = self.client.get(status["summary"]["links"]["run"]).json()["run"]
+            self.assertTrue(all("uri" not in artifact for artifact in run["artifacts"]))
+            utility_path = next(
+                Path(artifact.uri)
+                for artifact in self._private_run(status["summary"]["run_id"]).artifacts
+                if artifact.uri.endswith("utility.json")
+            )
+            verified = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "verify_utility_analysis.py"),
+                    str(utility_path.parent),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                verified.returncode,
+                0,
+                f"{measure}: {verified.stdout}{verified.stderr}",
+            )
+
+        rejected = self.client.post(
+            f"/api/projects/{self.project_id}/utility-analyses",
+            json={
+                "matcher_run_id": leaf["run_id"],
+                "quality_job_id": job["job_id"],
+                "quality_measure": "NotRecordedByTheSelectedJob",
+                "matcher_threshold": 0.8,
+                "quality_threshold": 40.0,
+                "bootstrap_replicates": 0,
+            },
+        )
+        self.assertEqual(rejected.status_code, 409, rejected.text)
+        self.assertEqual(
+            rejected.json()["detail"],
+            "quality measure NotRecordedByTheSelectedJob is not a scalar column of the quality job",
+        )
+
+    def test_quality_measure_catalog_refuses_recorded_parquet_hash_drift(self) -> None:
+        """A valid Parquet from a different real job cannot speak for this job's recorded hash."""
+
+        job = self._quality_job()
+        samples = self.client.get(
+            f"/api/projects/{self.project_id}/datasets/{self.dataset_id}/samples",
+            params={"limit": 1},
+        ).json()
+        self.assertEqual(len(samples), 1)
+        replacement_started = self.client.post(
+            f"/api/projects/{self.project_id}/datasets/{self.dataset_id}/quality-batch",
+            json={
+                "selection": {
+                    "kind": "sample_ids",
+                    "sample_ids": [samples[0]["sample_id"]],
+                },
+                "chunks": 1,
+            },
+        )
+        self.assertEqual(replacement_started.status_code, 202, replacement_started.text)
+        replacement_job_id = replacement_started.json()["job_id"]
+        deadline = time.monotonic() + 300
+        while time.monotonic() < deadline:
+            replacement_job = self.client.get(
+                f"/api/projects/{self.project_id}/jobs/{replacement_job_id}"
+            ).json()
+            if replacement_job["state"] in {"COMPLETED", "FAILED"}:
+                break
+            time.sleep(0.05)
+        self.assertEqual(replacement_job["state"], "COMPLETED", replacement_job)
+
+        target_path = Path(self._private_job(job["job_id"])["parquet_path"])
+        original_bytes = target_path.read_bytes()
+        replacement_bytes = Path(
+            self._private_job(replacement_job["job_id"])["parquet_path"]
+        ).read_bytes()
+        self.assertNotEqual(
+            hashlib.sha256(original_bytes).hexdigest(),
+            hashlib.sha256(replacement_bytes).hexdigest(),
+        )
+        try:
+            target_path.write_bytes(replacement_bytes)
+            refused = self.client.get(
+                f"/api/projects/{self.project_id}/jobs/{job['job_id']}/quality-measures"
+            )
+            self.assertEqual(refused.status_code, 409, refused.text)
+            self.assertEqual(
+                refused.json()["detail"],
+                "quality job result artifact hash does not match its recorded SHA-256",
+            )
+            refused_distribution = self.client.get(
+                f"/api/projects/{self.project_id}/jobs/{job['job_id']}/distribution",
+                params={"measure": "UnifiedQualityScore"},
+            )
+            self.assertEqual(
+                refused_distribution.status_code,
+                409,
+                refused_distribution.text,
+            )
+            self.assertEqual(
+                refused_distribution.json()["detail"],
+                "quality job result artifact hash does not match its recorded SHA-256",
+            )
+        finally:
+            target_path.write_bytes(original_bytes)
+        self.assertEqual(
+            hashlib.sha256(target_path.read_bytes()).hexdigest(),
+            hashlib.sha256(original_bytes).hexdigest(),
+        )
+
+    def test_quality_job_surface_requires_the_owning_project_identity(self) -> None:
+        job = self._quality_job()
+        job_id = job["job_id"]
+        foreign = self.client.post(
+            "/api/projects",
+            json={
+                "name": "foreign quality job read boundary",
+                "description": "Real project-identity refusal gate.",
+                "purpose_scope": RESEARCH_SCOPE,
+            },
+        )
+        self.assertEqual(foreign.status_code, 201, foreign.text)
+        foreign_project_id = foreign.json()["project_id"]
+        suffixes = (
+            "",
+            "/quality-measures",
+            "/distribution",
+            "/drilldown",
+            "/results",
+        )
+        for suffix in suffixes:
+            with self.subTest(boundary="owner", suffix=suffix):
+                response = self.client.get(
+                    f"/api/projects/{self.project_id}/jobs/{job_id}{suffix}"
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+            with self.subTest(boundary="foreign", suffix=suffix):
+                response = self.client.get(
+                    f"/api/projects/{foreign_project_id}/jobs/{job_id}{suffix}"
+                )
+                self.assertEqual(response.status_code, 404, response.text)
+            with self.subTest(boundary="retired-global", suffix=suffix):
+                response = self.client.get(f"/api/jobs/{job_id}{suffix}")
+                self.assertEqual(response.status_code, 404, response.text)
+
+        foreign_cancel = self.client.post(
+            f"/api/projects/{foreign_project_id}/jobs/{job_id}/cancel"
+        )
+        self.assertEqual(foreign_cancel.status_code, 404, foreign_cancel.text)
+        retired_cancel = self.client.post(f"/api/jobs/{job_id}/cancel")
+        self.assertEqual(retired_cancel.status_code, 404, retired_cancel.text)
 
     def test_utility_recorded_threshold_preserves_scientific_support(self) -> None:
         """A utility analysis must carry the recorded operating point's support boundary."""
@@ -344,7 +759,7 @@ class RealMatcherApiTests(unittest.TestCase):
         analysis_id = started.json()["analysis_id"]
         deadline = time.monotonic() + 300
         while time.monotonic() < deadline:
-            status = self.client.get(f"/api/utility-analyses/{analysis_id}").json()
+            status = self.client.get(f"/api/projects/{self.project_id}/utility-analyses/{analysis_id}").json()
             if status["state"] in {"COMPLETED", "FAILED"}:
                 break
             time.sleep(0.5)
@@ -414,7 +829,7 @@ class RealMatcherApiTests(unittest.TestCase):
             analysis_id = started.json()["analysis_id"]
             deadline = time.monotonic() + 300
             while time.monotonic() < deadline:
-                status = self.client.get(f"/api/utility-analyses/{analysis_id}").json()
+                status = self.client.get(f"/api/projects/{self.project_id}/utility-analyses/{analysis_id}").json()
                 if status["state"] in {"COMPLETED", "FAILED"}:
                     break
                 time.sleep(0.5)
@@ -436,7 +851,7 @@ class RealMatcherApiTests(unittest.TestCase):
             cross_id = cross_started.json()["analysis_id"]
             cross_deadline = time.monotonic() + 600
             while time.monotonic() < cross_deadline:
-                cross_status = self.client.get(f"/api/cross-matcher/{cross_id}").json()
+                cross_status = self.client.get(f"/api/projects/{self.project_id}/cross-matcher/{cross_id}").json()
                 if cross_status["state"] in {"COMPLETED", "FAILED"}:
                     break
                 time.sleep(0.5)
@@ -469,7 +884,7 @@ class RealMatcherApiTests(unittest.TestCase):
         import subprocess
         import sys
 
-        sets = self.client.get(f"/api/matrices/{self.matrix_id}/sets").json()
+        sets = self.client.get(f"/api/projects/{self.project_id}/matrices/{self.matrix_id}/sets").json()
         self.assertTrue(sets["same_protocol"])
         self.assertEqual(sets["matcher_contrasts_available"], 30)
         self.assertEqual(sets["preprocessing_contrasts_available"], 6)
@@ -481,7 +896,7 @@ class RealMatcherApiTests(unittest.TestCase):
         analysis_id = started.json()["analysis_id"]
         deadline = time.monotonic() + 600
         while time.monotonic() < deadline:
-            status = self.client.get(f"/api/cross-matcher/{analysis_id}").json()
+            status = self.client.get(f"/api/projects/{self.project_id}/cross-matcher/{analysis_id}").json()
             if status["state"] in {"COMPLETED", "FAILED"}:
                 break
             time.sleep(0.5)
@@ -563,18 +978,19 @@ class RealMatcherApiTests(unittest.TestCase):
             self.assertEqual(self.client.get(row["links"]["run_a"]).status_code, 200)
             self.assertEqual(self.client.get(row["links"]["run_b"]).status_code, 200)
         # Annotations are append-only records attached to a pair and echoed by the workbench.
-        note = self.client.post("/api/annotations", json={"project_id": self.project_id, "subject_type": "PROTOCOL_PAIR", "subject_id": pairs["rows"][0]["pair_id"], "text": "reviewed in the QS-E42 gate", "context": {"contrast_id": contrast["contrast_id"], "analysis_id": analysis_id}})
+        note = self.client.post(f"/api/projects/{self.project_id}/annotations", json={"subject_type": "PROTOCOL_PAIR", "subject_id": pairs["rows"][0]["pair_id"], "text": "reviewed in the QS-E42 gate", "context": {"contrast_id": contrast["contrast_id"], "analysis_id": analysis_id}})
         self.assertEqual(note.status_code, 201, note.text)
-        listed = self.client.get("/api/annotations", params={"subject_id": pairs["rows"][0]["pair_id"]}).json()
+        listed = self.client.get(f"/api/projects/{self.project_id}/annotations", params={"subject_id": pairs["rows"][0]["pair_id"]}).json()
         self.assertEqual(len(listed), 1)
         self.assertEqual(listed[0]["text"], "reviewed in the QS-E42 gate")
         again = self.client.get(status["summary"]["links"]["pairs"], params={"contrast_id": contrast["contrast_id"], "limit": 100}).json()
         self.assertEqual(len(again["rows"][0]["annotations"]), 1)
         # Independent recomputation of overlaps, Jaccard, transferred thresholds, and areas from the recorded artifacts.
         directory = None
-        for artifact in run["artifacts"]:
-            if artifact["uri"].endswith("crossmatcher.json"):
-                directory = Path(artifact["uri"]).parent
+        self.assertTrue(all("uri" not in artifact for artifact in run["artifacts"]))
+        for artifact in self._private_run(status["summary"]["run_id"]).artifacts:
+            if artifact.uri.endswith("crossmatcher.json"):
+                directory = Path(artifact.uri).parent
         self.assertIsNotNone(directory)
         database_path = self.data_dir / "qualsight.sqlite3"
         sidecar_paths = [Path(f"{database_path}-wal"), Path(f"{database_path}-shm")]
@@ -618,7 +1034,7 @@ class RealMatcherApiTests(unittest.TestCase):
         analysis_id = started.json()["analysis_id"]
         deadline = time.monotonic() + 300
         while time.monotonic() < deadline:
-            status = self.client.get(f"/api/utility-analyses/{analysis_id}").json()
+            status = self.client.get(f"/api/projects/{self.project_id}/utility-analyses/{analysis_id}").json()
             if status["state"] in {"COMPLETED", "FAILED"}:
                 break
             time.sleep(0.5)
@@ -653,8 +1069,11 @@ class RealMatcherApiTests(unittest.TestCase):
         provenance = self.client.get(det["files"]["provenance"]).json()
         self.assertEqual(provenance["metric_definitions"][0], ["biometric.verification.det", "1.0.0"])
         self.assertTrue(all(t["kind"] == "MATCHER_THRESHOLD" for t in provenance["thresholds"]))
-        figure_detail = self.client.get(f"/api/figures/{det['figure_id']}").json()
-        figure_provenance_path = Path(figure_detail["provenance"]["directory"]) / "figure.provenance.json"
+        figure_detail = self.client.get(f"/api/projects/{self.project_id}/figures/{det['figure_id']}").json()
+        self.assertNotIn("provenance", figure_detail)
+        private_figure = self._run_store().figure(det["figure_id"])
+        self.assertIsNotNone(private_figure)
+        figure_provenance_path = Path(private_figure["directory"]) / "figure.provenance.json"
         original_figure_provenance = figure_provenance_path.read_bytes()
         original_figure_provenance_sha256 = hashlib.sha256(original_figure_provenance).hexdigest()
         self.assertEqual(det["provenance_sha256"], original_figure_provenance_sha256)
@@ -680,7 +1099,7 @@ class RealMatcherApiTests(unittest.TestCase):
         panels = [{"kind": "figure", "ref": det["figure_id"]}, {"kind": "figure", "ref": figures["erc_overlay"]["figure_id"]}, {"kind": "operating_points", "ref": leaf["run_id"]}, {"kind": "policy_table", "ref": analysis_id}]
         saved = self.client.post(f"/api/projects/{self.project_id}/dashboards", json={"name": "fixture dashboard", "template": "FIQA Evaluation", "columns": 2, "panels": panels})
         self.assertEqual(saved.status_code, 201, saved.text)
-        loaded = self.client.get(f"/api/dashboards/{saved.json()['dashboard_id']}").json()
+        loaded = self.client.get(f"/api/projects/{self.project_id}/dashboards/{saved.json()['dashboard_id']}").json()
         self.assertEqual(loaded["layout"], saved.json()["layout"])
         self.assertEqual([p["kind"] for p in loaded["panels"]], [p["kind"] for p in panels])
         self.assertTrue(all(p["run_ids"] for p in loaded["panels"]))
@@ -691,13 +1110,18 @@ class RealMatcherApiTests(unittest.TestCase):
         report = self.client.post(f"/api/projects/{self.project_id}/reports", json={"spec": spec})
         self.assertEqual(report.status_code, 201, report.text)
         body = report.json()
-        self.assertEqual(body["images_embedded"], 0)
+        self.assertNotIn("directory", body)
+        self.assertNotIn("files", body)
+        self.assertNotIn("provenance", body)
+        private_report = self._run_store().report(body["report_id"])
+        self.assertIsNotNone(private_report)
+        private_report_provenance = json.loads(private_report["provenance_json"])
         self.assertEqual(
-            body["provenance"]["metric_registry"],
+            private_report_provenance["metric_registry"],
             {"id": "qualsight-core-metrics", "version": "1.2.0"},
         )
         self.assertEqual(
-            body["provenance"]["scientific_support"],
+            private_report_provenance["scientific_support"],
             {
                 "overall_state": "NOT_SUPPORTED",
                 "auto_approved": False,
@@ -705,10 +1129,10 @@ class RealMatcherApiTests(unittest.TestCase):
             },
         )
         self.assertTrue(
-            body["provenance"]["runs"]
+            private_report_provenance["runs"]
             and all(
                 run["scientific_support"] == "NOT_ASSESSED"
-                for run in body["provenance"]["runs"]
+                for run in private_report_provenance["runs"]
             )
         )
         html_text = self.client.get(body["links"]["html"]).text
@@ -751,16 +1175,17 @@ class RealMatcherApiTests(unittest.TestCase):
         pdf = self.client.get(body["links"]["pdf"])
         self.assertEqual(pdf.status_code, 200)
         self.assertTrue(pdf.content.startswith(b"%PDF"))
-        report_path = Path(body["files"]["html"]["path"])
-        provenance_path = Path(body["directory"]) / "report.provenance.json"
+        report_path = Path(private_report["directory"]) / "report.html"
+        report_json_path = Path(private_report["directory"]) / "report.json"
+        provenance_path = Path(private_report["directory"]) / "report.provenance.json"
         original_report = report_path.read_bytes()
         original_provenance = provenance_path.read_bytes()
         report_route = next(
             route
             for route in self.client.app.routes
-            if getattr(route, "path", None) == "/api/reports/{report_id}/file"
+            if getattr(route, "path", None) == "/api/projects/{project_id}/reports/{report_id}/file"
         )
-        prepared_response = report_route.endpoint(body["report_id"], "html")
+        prepared_response = report_route.endpoint(self.project_id, body["report_id"], "html")
         replacement = report_path.with_name("report-race-replacement.html")
         self.assertGreater(len(original_report), 1)
         replacement.write_bytes(original_report[:-1])
@@ -789,16 +1214,16 @@ class RealMatcherApiTests(unittest.TestCase):
                 for message in messages
                 if message["type"] == "http.response.body"
             )
-            self.assertEqual(hashlib.sha256(streamed).hexdigest(), body["files"]["html"]["sha256"])
+            self.assertEqual(hashlib.sha256(streamed).hexdigest(), private_report["html_sha256"])
         finally:
             report_path.write_bytes(original_report)
         try:
-            report_path.write_bytes(original_report + Path(body["files"]["json"]["path"]).read_bytes())
+            report_path.write_bytes(original_report + report_json_path.read_bytes())
             tampered_provenance = json.loads(original_provenance)
             tampered_provenance["files"]["html"]["sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
             provenance_path.write_text(json.dumps(tampered_provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             self.assertEqual(self.client.get(body["links"]["html"]).status_code, 409)
-            self.assertEqual(self.client.get(f"/api/reports/{body['report_id']}/file", params={"format": "provenance"}).status_code, 409)
+            self.assertEqual(self.client.get(f"/api/projects/{self.project_id}/reports/{body['report_id']}/file", params={"format": "provenance"}).status_code, 409)
             listed_report = next(item for item in self.client.get(f"/api/projects/{self.project_id}/reports").json() if item["report_id"] == body["report_id"])
             self.assertEqual(listed_report["downloads"]["html"]["state"], "DRIFTED")
             self.assertNotIn("html", listed_report["links"])
@@ -806,56 +1231,188 @@ class RealMatcherApiTests(unittest.TestCase):
             report_path.write_bytes(original_report)
             provenance_path.write_bytes(original_provenance)
         permitted = self.client.post(f"/api/projects/{self.project_id}/reports", json={"spec": {**spec, "image_policy": "INCLUDE_PERMITTED"}}).json()
-        self.assertGreaterEqual(permitted["images_embedded"] + permitted["images_withheld"], 0)
-        self.assertEqual(permitted["provenance"]["image_policy"], "INCLUDE_PERMITTED")
-        self.assertTrue(permitted["provenance"]["runs"] and all(run["evidence_sha256"] for run in permitted["provenance"]["runs"]))
+        permitted_row = self._run_store().report(permitted["report_id"])
+        self.assertIsNotNone(permitted_row)
+        permitted_record = json.loads(
+            (Path(permitted_row["directory"]) / "report.provenance.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertGreaterEqual(
+            permitted_record["images_embedded"] + permitted_record["images_withheld"], 0
+        )
+        self.assertEqual(permitted_record["provenance"]["image_policy"], "INCLUDE_PERMITTED")
+        self.assertTrue(
+            permitted_record["provenance"]["runs"]
+            and all(
+                run["evidence_sha256"]
+                for run in permitted_record["provenance"]["runs"]
+            )
+        )
         # Exports carry run identifiers and classification headers; every category and format serves a file.
         for category, ref in (("quality_results", job["job_id"]), ("comparison_records", leaf["run_id"]), ("embeddings", leaf["run_id"]), ("metric_tables", leaf["run_id"]), ("statistical_results", analysis_id), ("annotations", self.project_id)):
             for fmt in ("csv", "json", "parquet"):
-                response = self.client.get(f"/api/exports/{category}", params={"ref": ref, "format": fmt})
+                response = self.client.post(f"/api/projects/{self.project_id}/exports/{category}", params={"ref": ref, "format": fmt})
                 self.assertEqual(response.status_code, 200, (category, fmt, response.text[:200]))
                 self.assertIn(response.headers["X-QualSight-Classification"], {"SENSITIVE_BIOMETRIC_DERIVED", "PRIVATE"})
-        embeddings = self.client.get("/api/exports/embeddings", params={"ref": leaf["run_id"], "format": "json"}).json()
+        export_files_before_retired_get = {
+            path.relative_to(self.data_dir / "exports"): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in (self.data_dir / "exports").rglob("*")
+            if path.is_file()
+        }
+        retired_get = self.client.get(
+            f"/api/projects/{self.project_id}/exports/embeddings",
+            params={"ref": leaf["run_id"], "format": "json"},
+        )
+        self.assertEqual(retired_get.status_code, 404, retired_get.text)
+        self.assertEqual(retired_get.json(), {"detail": "API route is not available"})
+        self.assertEqual(
+            {
+                path.relative_to(self.data_dir / "exports"): hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in (self.data_dir / "exports").rglob("*")
+                if path.is_file()
+            },
+            export_files_before_retired_get,
+        )
+        cross_site = self.client.post(
+            f"/api/projects/{self.project_id}/exports/embeddings",
+            params={"ref": leaf["run_id"], "format": "json"},
+            headers={"Origin": "https://attacker.invalid"},
+        )
+        self.assertEqual(cross_site.status_code, 403, cross_site.text)
+        embeddings = self.client.post(f"/api/projects/{self.project_id}/exports/embeddings", params={"ref": leaf["run_id"], "format": "json"}).json()
         self.assertTrue(all(row["run_id"] == leaf["run_id"] and len(row["embedding"]) == 512 for row in embeddings["rows"]))
+        foreign = self.client.post(
+            "/api/projects",
+            json={
+                "name": "artifact authorization foreign project",
+                "description": "Real project used to prove recorded artifact isolation.",
+                "purpose_scope": RESEARCH_SCOPE,
+            },
+        )
+        self.assertEqual(foreign.status_code, 201, foreign.text)
+        foreign_project_id = foreign.json()["project_id"]
+        export_root = self.data_dir / "exports"
+        exports_before_denial = sorted(path.relative_to(export_root) for path in export_root.rglob("*") if path.is_file())
+        denied_export = self.client.post(
+            f"/api/projects/{foreign_project_id}/exports/embeddings",
+            params={"ref": leaf["run_id"], "format": "json"},
+        )
+        self.assertEqual(denied_export.status_code, 404, denied_export.text)
+        self.assertEqual(
+            sorted(path.relative_to(export_root) for path in export_root.rglob("*") if path.is_file()),
+            exports_before_denial,
+        )
+        denied_figure = self.client.get(
+            f"/api/projects/{foreign_project_id}/figures/{det['figure_id']}/file"
+        )
+        denied_report = self.client.get(
+            f"/api/projects/{foreign_project_id}/reports/{body['report_id']}/file"
+        )
+        for response in (denied_export, denied_figure, denied_report):
+            lowered_headers = {name.lower() for name in response.headers}
+            self.assertNotIn("content-disposition", lowered_headers)
+            self.assertFalse(
+                any("sha256" in name or "classification" in name for name in lowered_headers)
+            )
         # Bundle: portable package with checksums and no image bytes; reproduction re-executes the analysis and reports EXACT.
         run_id = status["summary"]["run_id"]
         bundle = self.client.post(f"/api/projects/{self.project_id}/bundles", json={"run_id": run_id})
         self.assertEqual(bundle.status_code, 201, bundle.text)
         record = bundle.json()
-        with zipfile.ZipFile(record["path"]) as archive:
+        self.assertNotIn("path", record)
+        private_bundle = next(
+            item
+            for item in self._run_store().experiment_bundles(project_id=self.project_id)
+            if item["bundle_id"] == record["bundle_id"]
+        )
+        private_bundle_path = Path(private_bundle["path"])
+        denied_bundle = self.client.get(
+            f"/api/projects/{foreign_project_id}/bundles/{record['bundle_id']}/file"
+        )
+        self.assertEqual(denied_bundle.status_code, 404, denied_bundle.text)
+        lowered_bundle_headers = {name.lower() for name in denied_bundle.headers}
+        self.assertNotIn("content-disposition", lowered_bundle_headers)
+        self.assertFalse(
+            any("sha256" in name or "classification" in name for name in lowered_bundle_headers)
+        )
+        with zipfile.ZipFile(private_bundle_path) as archive:
             names = set(archive.namelist())
             self.assertTrue({"manifest.json", "experiment.yaml", "protocol.yaml", "dataset-manifest.json", "environment.json", "metrics.json", "results.parquet", "checksums.sha256", "README.md"} <= names, names)
             self.assertFalse(any(name.endswith((".jpg", ".jpeg", ".png")) and not name.startswith("figures/") for name in names))
-        reproduced = self.client.post("/api/reproductions", json={"bundle_path": record["path"]})
+        reproduced = self.client.post(f"/api/projects/{self.project_id}/reproductions", json={"bundle_id": record["bundle_id"]})
         self.assertEqual(reproduced.status_code, 201, reproduced.text)
-        self.assertEqual(reproduced.json()["state"], "EXACT", reproduced.json())
-        self.assertGreater(reproduced.json()["compared_values"], 100)
-        self.assertEqual([s["step"] for s in reproduced.json()["steps"]], ["validate-checksums", "validate-dependencies", "validate-model-versions", "validate-input-hashes", "execute-and-compare"])
+        reproduction_payload = reproduced.json()
+        self.assertEqual(reproduction_payload["state"], "EXACT", reproduction_payload)
+        self.assertGreater(reproduction_payload["compared_values"], 100)
+        self.assertEqual([s["step"] for s in reproduction_payload["steps"]], ["validate-checksums", "validate-dependencies", "validate-model-versions", "validate-input-hashes", "execute-and-compare"])
+        model_validation = next(
+            step
+            for step in reproduction_payload["steps"]
+            if step["step"] == "validate-model-versions"
+        )
+        self.assertNotIn("missing_or_drifted", model_validation)
+        self.assertEqual(model_validation["missing_or_drifted_count"], 0)
+        self.assertFalse(
+            {"error", "exception", "message", "reason", "stderr", "traceback"}
+            & {key for step in reproduction_payload["steps"] for key in step}
+        )
+        private_reproduction = json.loads(
+            self._run_store().reproductions(
+                original_run_id=run_id,
+                project_id=self.project_id,
+            )[0]["report_json"]
+        )
+        private_model_validation = next(
+            step
+            for step in private_reproduction["steps"]
+            if step["step"] == "validate-model-versions"
+        )
+        self.assertIn("missing_or_drifted", private_model_validation)
         # A matcher-leaf bundle re-runs the matcher on the bundled pairs (fixture: ten pairs) and reproduces the recorded scores.
         leaf_bundle = self.client.post(f"/api/projects/{self.project_id}/bundles", json={"run_id": leaf["run_id"]}).json()
-        leaf_reproduced = self.client.post("/api/reproductions", json={"bundle_path": leaf_bundle["path"]}).json()
+        leaf_reproduced = self.client.post(f"/api/projects/{self.project_id}/reproductions", json={"bundle_id": leaf_bundle["bundle_id"]}).json()
         self.assertIn(leaf_reproduced["state"], {"EXACT", "WITHIN_TOLERANCE"}, leaf_reproduced)
+        recorded_before_refusal = self.client.get(
+            f"/api/projects/{self.project_id}/reproductions",
+            params={"original_run_id": run_id},
+        ).json()
+        self.assertEqual(len(recorded_before_refusal), 1)
+        denied_reproduction = self.client.post(
+            f"/api/projects/{foreign_project_id}/reproductions",
+            json={"bundle_id": record["bundle_id"]},
+        )
+        self.assertEqual(denied_reproduction.status_code, 404, denied_reproduction.text)
+        self.assertEqual(
+            self.client.get(f"/api/projects/{foreign_project_id}/reproductions").json(),
+            [],
+        )
         # A tampered bundle is BLOCKED at the checksum step; the target results are untouched.
-        tampered = Path(record["path"]).with_name("tampered.qsexp")
-        with zipfile.ZipFile(record["path"]) as source, zipfile.ZipFile(tampered, "w") as target:
-            for item in source.infolist():
-                data = source.read(item.filename)
-                if item.filename == "metrics.json":
-                    data = data.replace(b"1.0.0", b"9.9.9", 1)
-                target.writestr(item, data)
-        blocked = self.client.post("/api/reproductions", json={"bundle_path": str(tampered)}).json()
-        self.assertEqual(blocked["state"], "BLOCKED")
-        bundle_path = Path(record["path"])
-        original_bundle = bundle_path.read_bytes()
-        try:
-            bundle_path.write_bytes(tampered.read_bytes())
-            listed_bundle = next(item for item in self.client.get(f"/api/projects/{self.project_id}/bundles").json() if item["bundle_id"] == record["bundle_id"])
-            self.assertEqual(listed_bundle["download"]["state"], "DRIFTED")
-            self.assertNotIn("download", listed_bundle["links"])
-        finally:
-            bundle_path.write_bytes(original_bundle)
-        listed = self.client.get("/api/reproductions", params={"original_run_id": run_id}).json()
-        self.assertGreaterEqual(len(listed), 2)
+        with tempfile.TemporaryDirectory(
+            prefix="qualsight-tampered-bundle-"
+        ) as tamper_scratch:
+            tampered = Path(tamper_scratch) / "tampered.qsexp"
+            with zipfile.ZipFile(private_bundle_path) as source, zipfile.ZipFile(
+                tampered, "w"
+            ) as target:
+                for item in source.infolist():
+                    data = source.read(item.filename)
+                    if item.filename == "metrics.json":
+                        data = data.replace(b"1.0.0", b"9.9.9", 1)
+                    target.writestr(item, data)
+            bundle_path = private_bundle_path
+            original_bundle = bundle_path.read_bytes()
+            try:
+                bundle_path.write_bytes(tampered.read_bytes())
+                blocked = self.client.post(f"/api/projects/{self.project_id}/reproductions", json={"bundle_id": record["bundle_id"]})
+                self.assertEqual(blocked.status_code, 409, blocked.text)
+                listed_bundle = next(item for item in self.client.get(f"/api/projects/{self.project_id}/bundles").json() if item["bundle_id"] == record["bundle_id"])
+                self.assertEqual(listed_bundle["download"]["state"], "DRIFTED")
+                self.assertNotIn("download", listed_bundle["links"])
+            finally:
+                bundle_path.write_bytes(original_bundle)
+        listed = self.client.get(f"/api/projects/{self.project_id}/reproductions", params={"original_run_id": run_id}).json()
+        self.assertEqual(listed, recorded_before_refusal)
 
     def test_network_guard_refuses_non_loopback_and_admits_loopback_in_a_fresh_process(self) -> None:
         """QS-H70: the runtime network guard is real — checked in a subprocess so this test process stays unguarded."""
@@ -909,14 +1466,32 @@ class RealMatcherApiTests(unittest.TestCase):
             self.assertEqual(item["dimension"], 512)
             self.assertGreater(item["rows"], 0)
             self.assertEqual(item["registered_sha256"], item["observed_sha256"])
-            self.assertIn("/api/exports/embeddings", item["links"]["export_parquet"])
+            self.assertEqual(
+                item["links"],
+                {"run": f"/api/projects/{self.project_id}/runs/{item['run_id']}"},
+            )
         first = items[0]
         run = self.client.get(first["links"]["run"]).json()["run"]
-        embedding_path = Path(next(artifact["uri"] for artifact in run["artifacts"] if artifact["uri"].endswith("embeddings.npy")))
-        real_sample = self.client.get(f"/api/datasets/{self.dataset_id}/samples", params={"limit": 1}).json()[0]
+        self.assertTrue(all("uri" not in artifact for artifact in run["artifacts"]))
+        embedding_path = Path(
+            next(
+                artifact.uri
+                for artifact in self._private_run(first["run_id"]).artifacts
+                if artifact.uri.endswith("embeddings.npy")
+            )
+        )
+        real_sample = self.client.get(
+            f"/api/projects/{self.project_id}/datasets/{self.dataset_id}/samples",
+            params={"limit": 1},
+        ).json()[0]
+        real_image = self.client.get(real_sample["links"]["image"])
+        self.assertEqual(real_image.status_code, 200, real_image.text)
+        self.assertEqual(
+            hashlib.sha256(real_image.content).hexdigest(), real_sample["sha256"]
+        )
         original = embedding_path.read_bytes()
         try:
-            embedding_path.write_bytes(Path(real_sample["source_path"]).read_bytes())
+            embedding_path.write_bytes(real_image.content)
             drifted = self.client.get(f"/api/projects/{self.project_id}/embeddings")
             self.assertEqual(drifted.status_code, 200, drifted.text)
             changed = next(item for item in drifted.json() if item["run_id"] == first["run_id"])
@@ -953,21 +1528,31 @@ class RealMatcherApiTests(unittest.TestCase):
             audit_snapshot.unlink(missing_ok=True)
         self.assertEqual(audit.returncode, 0, audit.stdout[-800:] + audit.stderr[-400:])
         # Purge: scope is listed, confirmation is required, managed files and scientific metadata are removed and re-verified, and the audit tombstone remains.
+        private_scope = purge_targets(self._run_store(), self.data_dir, self.project_id)
         scope = self.client.get(f"/api/projects/{self.project_id}/purge-scope").json()
-        self.assertGreater(len(scope["targets"]["files"]) + len(scope["targets"]["directories"]), 5)
+        self.assertEqual(
+            scope["target_counts"],
+            {
+                "files": len(private_scope["files"]),
+                "directories": len(private_scope["directories"]),
+            },
+        )
+        self.assertGreater(sum(scope["target_counts"].values()), 5)
+        self.assertNotIn("targets", scope)
         self.assertIn("not scrubbed", scope["scope"])
         self.assertEqual(self.client.post(f"/api/projects/{self.project_id}/purge", json={"confirm": "wrong"}).status_code, 409)
-        before = [path for path in scope["targets"]["files"] + scope["targets"]["directories"] if Path(path).exists()]
+        before = [path for path in private_scope["files"] + private_scope["directories"] if Path(path).exists()]
         self.assertTrue(before)
         purged = self.client.post(f"/api/projects/{self.project_id}/purge", json={"confirm": self.project_id})
         self.assertEqual(purged.status_code, 201, purged.text)
         record = purged.json()
         self.assertTrue(record["verified"], record)
-        self.assertEqual(record["remaining_after_purge"], [])
+        self.assertEqual(record["outcome_counts"]["remaining_after_purge"], 0)
+        self.assertEqual(record["outcome_counts"]["failed"], 0)
         self.assertTrue(record["metadata"]["verified"], record["metadata"])
         self.assertFalse(any(record["metadata"]["remaining"].values()), record["metadata"])
         self.assertFalse(any(Path(path).exists() for path in before))
-        self.assertEqual(self.client.get(f"/api/runs/{self.status['leaves'][0]['run_id']}").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/projects/{self.project_id}/runs/{self.status['leaves'][0]['run_id']}").status_code, 404)
         self.assertEqual(self.client.get(f"/api/projects/{self.project_id}/datasets").json(), [])
         purges = self.client.get(f"/api/projects/{self.project_id}/purges").json()
         self.assertEqual(purges[-1]["purge_id"], record["purge_id"])
@@ -1000,7 +1585,13 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertEqual(run["matcher_preprocessing"]["component_id"], "EXTERNALLY_COMPUTED")
         self.assertTrue(any("EXTERNALLY COMPUTED" in limit for limit in run["provenance_limits"]))
         self.assertIsNone(run["quality_engine"])
-        self.assertTrue(any(h["path"].endswith("external_scores.csv") for h in run["model_hashes"]))
+        self.assertTrue(run["model_hashes"])
+        self.assertTrue(all("path" not in identity for identity in run["model_hashes"]))
+        private_run = self._run_store().run(leaf["run_id"])
+        self.assertIsNotNone(private_run)
+        self.assertTrue(
+            any(identity.path.endswith("external_scores.csv") for identity in private_run[0].model_hashes)
+        )
         # The imported Run behaves like any other leaf: comparisons resolve to real pairs and metrics are served.
         comparisons = self.client.get(leaf["links"]["comparisons"], params={"limit": 5}).json()
         self.assertEqual(comparisons["total"], 6000)
@@ -1037,7 +1628,7 @@ class RealMatcherApiTests(unittest.TestCase):
         search_id = started.json()["search_id"]
         deadline = time.monotonic() + 900
         while time.monotonic() < deadline:
-            status = self.client.get(f"/api/identification-searches/{search_id}").json()
+            status = self.client.get(f"/api/projects/{self.project_id}/identification-searches/{search_id}").json()
             if status["state"] in {"COMPLETED", "FAILED"}:
                 break
             time.sleep(1)
@@ -1078,10 +1669,10 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertIn("true_mate_rank_distribution", closed)
         self.assertTrue(metrics["gallery_effects"]["gallery_sizes"])
         # The Run is immutable, GPU-embedded by the frozen matcher, and lists candidates that resolve to real samples.
-        run = self.client.get(f"/api/runs/{status['run_id']}").json()["run"]
+        run = self.client.get(f"/api/projects/{self.project_id}/runs/{status['run_id']}").json()["run"]
         self.assertEqual(run["matcher"]["component_id"], "adaface-ir101-local-candidate")
         self.assertEqual(run["pair_search_protocol"]["component_id"], protocol["protocol_id"])
-        candidates = self.client.get(f"/api/identification-searches/{search_id}/candidates", params={"limit": 1000}).json()
+        candidates = self.client.get(f"/api/projects/{self.project_id}/identification-searches/{search_id}/candidates", params={"limit": 1000}).json()
         self.assertGreater(candidates["total"], 0)
         self.assertTrue(all(row["rank"] <= 20 for row in candidates["rows"]))
         self.assertEqual(self.client.get(candidates["rows"][0]["links"]["probe_sample"]).status_code, 200)
@@ -1110,22 +1701,38 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertEqual(derived["source_count"], 16)
         self.assertEqual(derived["derived_count"], 16 * 6)
         self.assertEqual(derived["levels"], 6)
-        listing = self.client.get(f"/api/derived-sets/{derived['derived_set_id']}").json()
+        listing_response = self.client.get(derived["links"]["detail"])
+        self.assertEqual(listing_response.status_code, 200, listing_response.text)
+        listing = listing_response.json()
         self.assertEqual(len(listing["samples"]), 96)
         first = listing["samples"][0]
         self.assertTrue(first["parent_sample_id"].startswith("sample:sha256:"))
         self.assertEqual(first["chain"][0]["root_resource_id"], "lfw-funneled-local-candidate")
         self.assertIn("kind", first["chain"][-1]); self.assertIn("parameters", first["chain"][-1]); self.assertIn("version", first["chain"][-1])
-        self.assertTrue(Path(first["path"]).exists())
-        self.assertEqual(self.client.get(f"/api/samples/{first['parent_sample_id']}").status_code, 200)
-        self.assertEqual(self.client.get(f"/api/samples/{first['derived_sample_id']}").status_code, 200)
+        derived_image = self.client.get(first["links"]["image"])
+        self.assertEqual(derived_image.status_code, 200, derived_image.text)
+        self.assertEqual(hashlib.sha256(derived_image.content).hexdigest(), first["sha256"])
+        self.assertEqual(
+            self.client.get(
+                f"/api/projects/{self.project_id}/samples/{first['parent_sample_id']}"
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.get(
+                f"/api/projects/{self.project_id}/samples/{first['derived_sample_id']}"
+            ).status_code,
+            200,
+        )
         # OFIQ runs over the derived dataset through the registered engine (the batch engine admits derived samples whose chain roots at a registered input).
         started = self.client.post(f"/api/projects/{self.project_id}/datasets/{derived['derived_dataset_id']}/quality-batch", json={"selection": {"kind": "all"}, "chunks": 1})
         self.assertEqual(started.status_code, 202, started.text)
         job_id = started.json()["job_id"]
         deadline = time.monotonic() + 600
         while time.monotonic() < deadline:
-            job = self.client.get(f"/api/jobs/{job_id}").json()
+            job = self.client.get(
+                f"/api/projects/{self.project_id}/jobs/{job_id}"
+            ).json()
             if job["ended_at"]:
                 break
             time.sleep(0.5)
@@ -1137,7 +1744,7 @@ class RealMatcherApiTests(unittest.TestCase):
         analysis_id = analysis.json()["analysis_id"]
         deadline = time.monotonic() + 900
         while time.monotonic() < deadline:
-            status = self.client.get(f"/api/degradation-analyses/{analysis_id}").json()
+            status = self.client.get(f"/api/projects/{self.project_id}/degradation-analyses/{analysis_id}").json()
             if status["state"] in {"COMPLETED", "FAILED"}:
                 break
             time.sleep(1)
@@ -1155,7 +1762,7 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertIn("baseline", jpeg)
         self.assertIn("area_under_response", jpeg["derived_summaries"]["fnmr"])
         self.assertIn("threshold_crossing", jpeg["derived_summaries"]["fnmr"])
-        run = self.client.get(f"/api/runs/{status['run_id']}").json()["run"]
+        run = self.client.get(f"/api/projects/{self.project_id}/runs/{status['run_id']}").json()["run"]
         self.assertEqual(run["matcher"]["component_id"], "adaface-ir101-local-candidate")
         self.assertIsNotNone(run["quality_engine"])
         self.assertTrue(any("derived" in limit.lower() or "transform" in limit.lower() for limit in run["provenance_limits"]))
@@ -1171,14 +1778,23 @@ class RealMatcherApiTests(unittest.TestCase):
         job_id = started.json()["job_id"]
         deadline = time.monotonic() + 600
         while time.monotonic() < deadline:
-            job = self.client.get(f"/api/jobs/{job_id}").json()
+            job = self.client.get(
+                f"/api/projects/{self.project_id}/jobs/{job_id}"
+            ).json()
             if job["ended_at"]:
                 break
             time.sleep(0.5)
         self.assertEqual(job["state"], "COMPLETED", job)
         self.assertEqual(job["assessed"], 16)
-        run = self.client.get(f"/api/runs/{job['run_id']}").json()["run"]
-        configuration = json.loads(run["configuration"]["text"]) if isinstance(run["configuration"], dict) and "text" in run["configuration"] else run["configuration"]
+        public_run = self.client.get(
+            f"/api/projects/{self.project_id}/runs/{job['run_id']}"
+        ).json()["run"]
+        self.assertNotIn("text", public_run["configuration"])
+        private_run = self._private_run(job["run_id"])
+        self.assertEqual(
+            public_run["configuration"]["sha256"], private_run.configuration.sha256
+        )
+        configuration = json.loads(private_run.configuration.text)
         environment = configuration.get("execution_environment") or {}
         self.assertEqual(environment.get("kind"), "CONTAINER")
         self.assertTrue(str(environment.get("image_id", "")).startswith("sha256:"))
@@ -1193,8 +1809,8 @@ class RealMatcherApiTests(unittest.TestCase):
         self.assertIn("--cpus", launcher)
         self.assertIn("--pids-limit", launcher)
         # Same measures as the host adapter over the same samples.
-        host = {r["sample_id"]: r for r in pq.read_table(host_job["parquet_path"]).to_pylist()}
-        container = {r["sample_id"]: r for r in pq.read_table(job["parquet_path"]).to_pylist()}
+        host = {r["sample_id"]: r for r in pq.read_table(self._private_job(host_job["job_id"])["parquet_path"]).to_pylist()}
+        container = {r["sample_id"]: r for r in pq.read_table(self._private_job(job["job_id"])["parquet_path"]).to_pylist()}
         self.assertEqual(set(host), set(container))
         measure_columns = [c for c in next(iter(host.values())) if c.endswith(".native") or c.endswith(".scalar") or c.endswith(".failed")]
         for sample_id, row in host.items():

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -19,6 +20,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from ..engines.ofiq.adapter import content_id
+from ..execution.prepared_output import (
+    PreparedOutputError,
+    create_staging_directory,
+    discard_staging_directory,
+    load_prepared_output,
+    prepare_and_publish,
+)
 from ..provenance import sha256_file
 
 EXPORT_VERSION = "1.0.0"
@@ -170,6 +178,91 @@ def _rows_annotations(store: Any, project_id: str) -> tuple[list[dict[str, Any]]
     return rows, {"project_id": project_id}
 
 
+def _export_request_sha256(
+    *, category: str, ref: str, fmt: str, source: dict[str, Any]
+) -> str:
+    encoded = json.dumps(
+        {
+            "version": EXPORT_VERSION,
+            "category": category,
+            "ref": ref,
+            "format": fmt,
+            "source": source,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def recover_prepared_export(
+    directory: Path,
+    *,
+    export_id: str,
+    project_id: str,
+    category: str,
+    ref: str,
+    fmt: str,
+    request_sha256: str,
+) -> dict[str, Any]:
+    """Validate and recover one fully promoted tabular export publication."""
+
+    artifact_name = f"{category}.{fmt}"
+    provenance_name = f"{artifact_name}.provenance.json"
+    try:
+        receipt = load_prepared_output(
+            directory,
+            operation_kind="TABULAR_EXPORT",
+            result_id=export_id,
+            project_id=project_id,
+            request_sha256=request_sha256,
+            artifact_names=(artifact_name, provenance_name),
+        )
+        record = receipt["record"]
+        path = directory / artifact_name
+        if (
+            set(record)
+            != {
+                "export_id",
+                "version",
+                "category",
+                "ref",
+                "format",
+                "project_id",
+                "rows",
+                "classification",
+                "source",
+                "path",
+                "sha256",
+                "size_bytes",
+                "created_at",
+                "note",
+            }
+            or record["export_id"] != export_id
+            or record["version"] != EXPORT_VERSION
+            or record["category"] != category
+            or record["ref"] != ref
+            or record["format"] != fmt
+            or record["project_id"] != project_id
+            or record["path"] != str(path)
+            or record["sha256"] != sha256_file(path)
+            or record["size_bytes"] != path.stat().st_size
+        ):
+            raise ExportError("prepared export record contract differs")
+        provenance = json.loads(
+            (directory / provenance_name).read_text(encoding="utf-8")
+        )
+        if provenance != record:
+            raise ExportError("prepared export provenance differs")
+        return record
+    except (PreparedOutputError, OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        if isinstance(error, ExportError):
+            raise
+        raise ExportError("prepared export failed integrity verification") from error
+
+
 def export_table(store: Any, *, category: str, ref: str, fmt: str, root: Path) -> dict[str, Any]:
     if category not in CATEGORIES:
         raise ExportError(f"unknown export category {category}")
@@ -202,66 +295,121 @@ def export_table(store: Any, *, category: str, ref: str, fmt: str, root: Path) -
         raise ExportError("RESTRICTED source records are not exportable")
     export_id = content_id("export", category, ref, fmt, EXPORT_VERSION)
     directory = root / export_id.replace(":", "_")
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{category}.{fmt}"
+    project_id = str(source.get("project_id") or source.get("run_id") or ref)
+    if source.get("project_id") is None and source.get("run_id"):
+        found = store.run(str(source["run_id"]))
+        if found is None:
+            raise ExportError("export source Run is not recorded")
+        project_id = found[0].project_id
+    request_sha256 = _export_request_sha256(
+        category=category,
+        ref=ref,
+        fmt=fmt,
+        source=source,
+    )
+    if directory.exists():
+        return recover_prepared_export(
+            directory,
+            export_id=export_id,
+            project_id=project_id,
+            category=category,
+            ref=ref,
+            fmt=fmt,
+            request_sha256=request_sha256,
+        )
+    stage = create_staging_directory(
+        directory,
+        operation_kind="TABULAR_EXPORT",
+        result_id=export_id,
+        project_id=project_id,
+        request_sha256=request_sha256,
+    )
+    path = stage / f"{category}.{fmt}"
     def iter_rows() -> Iterator[dict[str, Any]]:
         return row_factory() if row_factory is not None else iter(rows)
 
-    if fmt == "csv":
-        columns: list[str] = []
-        streamed_rows: Iterator[dict[str, Any]] | None = None
-        if row_factory is not None:
-            streamed_rows = iter_rows()
-            first = next(streamed_rows, None)
-            columns = list(first) if first is not None else []
+    try:
+        if fmt == "csv":
+            columns: list[str] = []
+            streamed_rows: Iterator[dict[str, Any]] | None = None
+            if row_factory is not None:
+                streamed_rows = iter_rows()
+                first = next(streamed_rows, None)
+                columns = list(first) if first is not None else []
+            else:
+                for item in rows:
+                    for key in item:
+                        if key not in columns:
+                            columns.append(key)
+            with path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=columns)
+                writer.writeheader()
+                if row_factory is not None and first is not None:
+                    writer.writerow({key: (json.dumps(value) if isinstance(value, (list, dict)) else value) for key, value in first.items()})
+                for item in streamed_rows if streamed_rows is not None else iter_rows():
+                    writer.writerow({key: (json.dumps(value) if isinstance(value, (list, dict)) else value) for key, value in item.items()})
+        elif fmt == "json":
+            with path.open("w", encoding="utf-8") as handle:
+                handle.write("{\n \"category\": ")
+                handle.write(json.dumps(category, allow_nan=False))
+                handle.write(",\n \"rows\": [")
+                for index, item in enumerate(iter_rows()):
+                    handle.write("," if index else "")
+                    handle.write("\n  ")
+                    handle.write(json.dumps(item, sort_keys=True, allow_nan=False, default=str))
+                handle.write("\n ],\n \"source\": ")
+                handle.write(json.dumps(source, sort_keys=True, allow_nan=False, default=str))
+                handle.write("\n}\n")
         else:
-            for item in rows:
-                for key in item:
-                    if key not in columns:
-                        columns.append(key)
-        with path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=columns)
-            writer.writeheader()
-            if row_factory is not None and first is not None:
-                writer.writerow({key: (json.dumps(value) if isinstance(value, (list, dict)) else value) for key, value in first.items()})
-            for item in streamed_rows if streamed_rows is not None else iter_rows():
-                writer.writerow({key: (json.dumps(value) if isinstance(value, (list, dict)) else value) for key, value in item.items()})
-    elif fmt == "json":
-        with path.open("w", encoding="utf-8") as handle:
-            handle.write("{\n \"category\": ")
-            handle.write(json.dumps(category, allow_nan=False))
-            handle.write(",\n \"rows\": [")
-            for index, item in enumerate(iter_rows()):
-                handle.write("," if index else "")
-                handle.write("\n  ")
-                handle.write(json.dumps(item, sort_keys=True, allow_nan=False, default=str))
-            handle.write("\n ],\n \"source\": ")
-            handle.write(json.dumps(source, sort_keys=True, allow_nan=False, default=str))
-            handle.write("\n}\n")
-    else:
-        writer: pq.ParquetWriter | None = None
-        batch: list[dict[str, Any]] = []
-        try:
-            for item in iter_rows():
-                batch.append(item)
-                if len(batch) == 512:
+            writer: pq.ParquetWriter | None = None
+            batch: list[dict[str, Any]] = []
+            try:
+                for item in iter_rows():
+                    batch.append(item)
+                    if len(batch) == 512:
+                        table = pa.Table.from_pylist(batch)
+                        if writer is None:
+                            writer = pq.ParquetWriter(path, table.schema, compression="zstd")
+                        writer.write_table(table)
+                        batch.clear()
+                if batch:
                     table = pa.Table.from_pylist(batch)
                     if writer is None:
                         writer = pq.ParquetWriter(path, table.schema, compression="zstd")
                     writer.write_table(table)
-                    batch.clear()
-            if batch:
-                table = pa.Table.from_pylist(batch)
-                if writer is None:
-                    writer = pq.ParquetWriter(path, table.schema, compression="zstd")
-                writer.write_table(table)
-        finally:
-            if writer is not None:
-                writer.close()
-        if writer is None:
-            pq.write_table(pa.table({"run_id": pa.array([], pa.string())}), path)
-    exported_rows = row_count if row_count is not None else len(rows)
-    record = {"export_id": export_id, "version": EXPORT_VERSION, "category": category, "ref": ref, "format": fmt, "rows": exported_rows, "classification": classification, "source": source,
-              "path": str(path), "sha256": sha256_file(path), "size_bytes": path.stat().st_size, "created_at": _now(), "note": "rows carry run_id / analysis identifiers that trace to the immutable source Run; image bytes are never exported"}
-    (directory / f"{category}.{fmt}.provenance.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return record
+            finally:
+                if writer is not None:
+                    writer.close()
+            if writer is None:
+                pq.write_table(pa.table({"run_id": pa.array([], pa.string())}), path)
+        exported_rows = row_count if row_count is not None else len(rows)
+        final_path = directory / path.name
+        record = {"export_id": export_id, "version": EXPORT_VERSION, "category": category, "ref": ref, "format": fmt, "project_id": project_id, "rows": exported_rows, "classification": classification, "source": source,
+                  "path": str(final_path), "sha256": sha256_file(path), "size_bytes": path.stat().st_size, "created_at": _now(), "note": "rows carry run_id / analysis identifiers that trace to the immutable source Run; image bytes are never exported"}
+        provenance_name = f"{category}.{fmt}.provenance.json"
+        (stage / provenance_name).write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        prepare_and_publish(
+            stage,
+            directory,
+            operation_kind="TABULAR_EXPORT",
+            result_id=export_id,
+            project_id=project_id,
+            request_sha256=request_sha256,
+            artifact_names=(path.name, provenance_name),
+            record=record,
+        )
+        return record
+    except FileExistsError:
+        return recover_prepared_export(
+            directory,
+            export_id=export_id,
+            project_id=project_id,
+            category=category,
+            ref=ref,
+            fmt=fmt,
+            request_sha256=request_sha256,
+        )
+    except PreparedOutputError as error:
+        raise ExportError(str(error)) from error
+    finally:
+        discard_staging_directory(stage)

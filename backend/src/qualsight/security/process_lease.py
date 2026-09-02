@@ -27,6 +27,8 @@ class DataDirectoryLeaseError(RuntimeError):
 class _ProcessLeaseRecord:
     file_descriptor: int
     pid: int
+    owner: str
+    acquired_at: str
     references: int = 1
 
 
@@ -137,8 +139,9 @@ class DataDirectoryLease:
                         )
                     raise DataDirectoryLeaseError(f"application data directory is already in use: {root} ({details})") from error
 
+                acquired_at = datetime.now(timezone.utc).isoformat()
                 metadata = {
-                    "acquired_at": datetime.now(timezone.utc).isoformat(),
+                    "acquired_at": acquired_at,
                     "data_dir": str(root),
                     "owner": owner,
                     "pid": os.getpid(),
@@ -149,12 +152,41 @@ class DataDirectoryLease:
                 os.lseek(file_descriptor, 0, os.SEEK_SET)
                 _write_all(file_descriptor, payload)
                 os.fsync(file_descriptor)
-                record = _ProcessLeaseRecord(file_descriptor=file_descriptor, pid=os.getpid())
+                record = _ProcessLeaseRecord(
+                    file_descriptor=file_descriptor,
+                    pid=os.getpid(),
+                    owner=owner,
+                    acquired_at=acquired_at,
+                )
                 _HELD_LEASES[lease_path] = record
                 return cls(path=lease_path, owner=owner, _record=record)
             except BaseException:
                 os.close(file_descriptor)
                 raise
+
+    def public_status(self) -> dict[str, object]:
+        """Return the live holder contract without exposing the lock path."""
+
+        with _HELD_LEASES_LOCK:
+            _discard_inherited_lease_records()
+            held = _HELD_LEASES.get(self.path)
+            if self._closed or held is not self._record:
+                return {
+                    "state": "RELEASED",
+                    "owner": self._record.owner,
+                    "pid": self._record.pid,
+                    "acquired_at": self._record.acquired_at,
+                    "expires_at": None,
+                    "release_condition": "PROCESS_SHUTDOWN",
+                }
+            return {
+                "state": "HELD",
+                "owner": held.owner,
+                "pid": held.pid,
+                "acquired_at": held.acquired_at,
+                "expires_at": None,
+                "release_condition": "PROCESS_SHUTDOWN",
+            }
 
     def close(self) -> None:
         with _HELD_LEASES_LOCK:

@@ -2,7 +2,7 @@
 
 **Graph version:** v1.6  
 **Date:** August 17, 2026  
-**State:** The beta DAG is complete — every whole capability QS-A00 through QS-H74 (41 nodes; Phase 2 under owner decision 28, QS-C21 under decision 29) is accepted; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-D31.R0, and QS-H74.RELEASE.R1 are accepted; refinement parent QS-A02.LFW is accepted; QS-H74 (beta end-to-end acceptance) executed the section-57 chain offline on 2026-08-18; only the post-beta branch remains outside the DAG
+**State:** The beta DAG is complete — every whole capability QS-A00 through QS-H74 (41 nodes; Phase 2 under owner decision 28, QS-C21 under decision 29) is accepted; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-D31.R0, and QS-H74.RELEASE.R1 are accepted; beta-3 release child QS-H74.RELEASE.R2 is ready after its implementation/runtime gates and awaits the committed-tree package gate; refinement parent QS-A02.LFW is accepted; QS-H74 (beta end-to-end acceptance) executed the section-57 chain offline on 2026-08-18; only the post-beta branch remains outside the DAG
 **Loop controller:** [ATG_LOOP.md](./ATG_LOOP.md)  
 **Canonical product requirements:** [PRD.md](./PRD.md)  
 **Evidence-only companion:** [PLAN.md](./PLAN.md)
@@ -14,7 +14,7 @@ This is the live dependency graph for developing QualSight. Coarse capability no
 1. PRD.md v0.3 controls scope.
 2. PLAN.md v0.2 contributes only validated research and integration evidence. Its live-capture, kiosk, mobile, SQLite-for-analytical-results, and synthetic-dataset content does not control implementation.
 3. /mnt/projects/ofiqgui is the QualSight implementation root.
-4. Python 3.11.2, uv 0.9.26, Node 20.20.2, and pnpm 10.28.0 are the accepted project toolchain. Exact project controls are checked in; dependency selection remains a per-slice engineering decision and must be justified before packages are added.
+4. Python 3.11.2, uv 0.9.26, Node 26.7.0, and pnpm 10.28.0 are the accepted project toolchain. Exact project controls are checked in; dependency selection remains a per-slice engineering decision and must be justified before packages are added.
 5. OFIQ 1.1.0 is historical evidence only. The forward engine is the official OFIQ v1.1.2 tag at commit `d589ca27896a472446abc9eca8b62947ee47db19`, built without sudo in the isolated sibling root `/mnt/projects/02_perception_biometrics/OFIQ-v1.1.2-build` by `scripts/ofiq_v112_build.sh` from the CMake-selected archives, installed under that root, and registered as `ofiq-v1-1-2-linux-runtime`; only that registered installed runtime executes for QualSight.
 6. General scientific work uses approved real data only. The OFIQ conformance images are restricted to conformance reproduction.
 7. The initial beta path is Phase 0, 1, 2, 3, 4, 5, then 7. Phase 6 advanced analysis is post-beta because its 1:N, demographic, PAD, and controlled-degradation scope is excluded from or deferred by the beta scope in PRD sections 5, 17, 25, 26, and 55.
@@ -62,7 +62,7 @@ Historical initialization snapshot: the root was confirmed as NOT_A_GIT_WORKTREE
 |---|---|
 | Python | 3.11.2 |
 | uv | 0.9.26 |
-| Node | 20.20.2 |
+| Node | 26.7.0 |
 | npm | 11.16.0 |
 | pnpm | 10.28.0 |
 | Docker | 29.7.2, build a7dcaa6 |
@@ -92,7 +92,7 @@ These versions are observed environment facts, not permanent minimum-version req
 
 This table and the dependency versions below are the initial acceptance snapshot, not current file identities. Current dependency authority is `uv.lock`, `pnpm-lock.yaml`, the package manifests, and `docs/DEPENDENCY_AUDIT.md`.
 
-The Python workspace uses one uv lock, requires uv 0.9.26, disables Python downloads, and keeps the uv cache at `.cache/uv`. QS-A03 introduced `pydantic==2.13.4` for strict immutable domain validation; QS-A08 added the PRD §45 control plane `fastapi==0.141.1` and `uvicorn==0.52.3` (transitively `starlette==1.6.0`, `h11==0.16.0`, `idna==3.18`) plus the dev-only `httpx==0.28.1` used by the in-process test client; QS-B12/QS-B13 added the PRD §47 Parquet/analytics dependencies `pyarrow==25.0.1` and `duckdb==1.5.5`; QS-C22 added the frozen matcher runtime closure `torch==2.10.0` (cu128 wheel with its NVIDIA runtime libraries), `timm==1.0.28` (with `torchvision==0.25.0`), `onnxruntime==1.28.0`, `opencv-python-headless==5.0.0.93`, and `numpy==2.4.6`. The initial pnpm workspace used one lock, Node 20.20.x and strict engines, with `esbuild` as the only approved build script; QS-A09 initially added `react==18.3.1`, `react-dom==18.3.1`, `vite==5.4.11`, `@vitejs/plugin-react==4.3.4`, `typescript==5.6.3`, `vite-plugin-pwa==0.21.1`, `workbox-window==7.3.0`, `@types/react==18.3.12`, and `@types/react-dom==18.3.1`. The accepted Node 20.20.2 is `/usr/bin/node`; QualSight Node commands run with `/usr/bin` first on `PATH`, and the toolchain gate proves the selected versions.
+The Python workspace uses one uv lock, requires uv 0.9.26, disables Python downloads, and keeps the uv cache at `.cache/uv`. QS-A03 introduced `pydantic==2.13.4` for strict immutable domain validation; QS-A08 added the PRD §45 control plane `fastapi==0.141.1` and `uvicorn==0.52.3` (transitively `starlette==1.6.0`, `h11==0.16.0`, `idna==3.18`) plus the dev-only `httpx==0.28.1` used by the in-process test client; QS-B12/QS-B13 added the PRD §47 Parquet/analytics dependencies `pyarrow==25.0.1` and `duckdb==1.5.5`; QS-C22 added the frozen matcher runtime closure `torch==2.10.0` (cu128 wheel with its NVIDIA runtime libraries), `timm==1.0.28` (with `torchvision==0.25.0`), `onnxruntime==1.28.0`, `opencv-python-headless==5.0.0.93`, and `numpy==2.4.6`. The initial pnpm workspace used one lock, Node 20.20.x and strict engines, with `esbuild` as the only approved build script; QS-A09 initially added `react==18.3.1`, `react-dom==18.3.1`, `vite==5.4.11`, `@vitejs/plugin-react==4.3.4`, `typescript==5.6.3`, `vite-plugin-pwa==0.21.1`, `workbox-window==7.3.0`, `@types/react==18.3.12`, and `@types/react-dom==18.3.1`. The current accepted Node is 26.7.0; QualSight Node commands use the reviewed executable selected on `PATH`, and the toolchain gate proves its exact version before dependency mutation.
 
 ### Initial real conformance resource
 
@@ -475,7 +475,7 @@ Loop F ran two cycles. Cycle 1 (C31): S95 adversarial admission tests (oversize 
 
 ## Current atomic frontier
 
-The beta DAG is complete: all 41 whole capabilities QS-A00 through QS-H74 are ACCEPTED (Phase 2 under decision 28; QS-C21 under decision 29). Current accepted evidence children are QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0. The ledger preserves superseded resource, domain, and execution events as history, but their stale registry and fixture-byte claims are not reused as current evidence. Gates marked *executing* launch the registered installed OFIQ v1.1.2 runtime on registered inputs under the owner use-permission receipt; every other gate is static. Every Node command below assumes `PATH=/usr/bin:$PATH` so that Node 20.20.2 is selected.
+The beta DAG is complete: all 41 whole capabilities QS-A00 through QS-H74 are ACCEPTED (Phase 2 under decision 28; QS-C21 under decision 29). Current accepted evidence children are QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, and QS-D31.R0. The ledger preserves superseded resource, domain, and execution events as history, but their stale registry and fixture-byte claims are not reused as current evidence. Gates marked *executing* launch the registered installed OFIQ v1.1.2 runtime on registered inputs under the owner use-permission receipt; every other gate is static. Every Node command below assumes the reviewed Node 26.7.0 executable is selected on `PATH`.
 
 ### QS-A00 — Authority and requirement registry
 
@@ -499,8 +499,8 @@ pnpm install --offline --frozen-lockfile --ignore-scripts
 pnpm run verify:toolchain
 ~~~
 
-**Acceptance:** uv resolves the two real workspace members from the frozen lock under Python 3.11.2 and uv 0.9.26; pnpm reproduces its dependency-empty workspace lock under Node 20.20.2 and pnpm 10.28.0; caches remain project-local.  
-**State:** ACCEPTED. The Python lock now carries the justified QS-A03 Pydantic set plus the QS-A08 FastAPI/uvicorn/httpx set; the pnpm lock carries the QS-A09 console set; `pnpm run verify:toolchain` and `uv lock --check` pass under Node 20.20.2 / pnpm 10.28.0 / uv 0.9.26.
+**Acceptance:** uv resolves the two real workspace members from the frozen lock under Python 3.11.2 and uv 0.9.26; pnpm reproduces its dependency-empty workspace lock under Node 26.7.0 and pnpm 10.28.0; caches remain project-local.
+**State:** ACCEPTED. The Python lock now carries the justified QS-A03 Pydantic set plus the QS-A08 FastAPI/uvicorn/httpx set; the pnpm lock carries the QS-A09 console set; `pnpm run verify:toolchain` and `uv lock --check` pass under Node 26.7.0 / pnpm 10.28.0 / uv 0.9.26.
 
 ### QS-A05 — Versioned Metric Registry
 
@@ -760,7 +760,7 @@ env PYTHONPATH=src:.. /home/aaron/.local/bin/uv run --directory backend --frozen
 **Safe gate**
 
 ~~~sh
-PATH=/usr/bin:$PATH pnpm --filter @qualsight/frontend build
+pnpm --filter @qualsight/frontend build
 python3 scripts/observe_console.py --screenshot-dir <outside the repository> --observation atg/evidence/2026-08-17-console-observation-01.json
 ~~~
 
@@ -1146,7 +1146,7 @@ python3 scripts/observe_console.py --screenshot-dir <outside the repository> --o
 **Acceptance:** the Phase-7 "demonstration script; beta release" items (PRD §56) are shipped: `docs/BETA_ACCEPTANCE.md` maps every §57 step and §58 field to recorded evidence and states the §55 scope status; `README.md` and `CHANGELOG.md` describe the release; versions are 0.1.0b1 (backend, recorded as `application_version` in future Runs) and 0.1.0-beta.1 (workspace/console); `scripts/demo.sh` executes the user guide verbatim on the fixture and starts the console; `scripts/release.sh` builds the source and console-dist archives with SHA-256 sums (no dataset/model/runtime/derived bytes); the console carries the PRD §44 primary navigation and a System panel (engine, registry, resources, actor, guard). Observation 10 records the navigation links and resource rows on the real console. The annotated git tag `v0.1.0-beta.1` marks the release commit (local; no remote is configured).
 **State:** ACCEPTED as evidence child (cycle 2026-08-18-C26).
 
-### QS-H74.RELEASE.R1 — Beta release 0.1.0-beta.2 (current evidence child)
+### QS-H74.RELEASE.R1 — Beta release 0.1.0-beta.2
 
 **Safe gate:** validate the committed OFIQ lock and exact upstream recipe; rebuild OFIQ v1.1.2 from
 the governed source and three verified archives; require all 787 upstream conformance cases, runtime
@@ -1161,6 +1161,27 @@ byte and resolved dependency is verified before compilation. The controlled sing
 and DHS transition boundaries are unchanged.
 
 **State:** ACCEPTED after the append-only release record and committed-tree package gate pass.
+
+### QS-H74.RELEASE.R2 — Beta release 0.1.0-beta.3 (ready evidence child)
+
+**Safe gate:** bind all changed code, requirements, controller documents, registries, and real-browser
+evidence in the append-only ledger; require the complete discovered backend suite, root suite, frontend type/build, registry,
+dependency, vulnerability, documentation, accessibility, and offline gates to pass; commit a clean tree;
+then run `bash scripts/release.sh` without overwriting beta 1 or beta 2. Inspect every archive member,
+install the emitted source archive in an isolated controlled checkout, run the installed offline and
+principal browser workflows, and prove rollback to beta 2.
+
+**Acceptance boundary:** versions are 0.1.0b3 (backend) and 0.1.0-beta.3 (workspace/console). The release
+adds persistent left navigation, the project-scoped WorkingSample inspector, direct two-image comparison,
+single-image Stress Studio, multi-measure Utility overlays, structured Evidence, path-free purge receipts,
+and the professional Manage surface. It does not add a remote connection, arbitrary plug-in loader,
+identity-truth authority, redistributable biometric/model payload, portable native OFIQ runtime, multi-user
+deployment, or DHS transition authority. The durable 32-step real-browser observation is
+`atg/evidence/2026-09-01-console-beta3-scoped-final.json` (SHA-256
+`e6921165f3db43a4ba8e4a6bfffe37d20a9977a35fd38e0567faa32689062ca4`).
+
+**State:** READY. It becomes ACCEPTED only after the clean committed-tree release, package inspection,
+isolated installation, installed runtime/browser gates, beta-2 rollback, and version-tag verification pass.
 
 Historical accepted events QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, and QS-A06.R1M retain their exact recorded counts and hashes in `atg/ledger.jsonl`; current refinements supersede them for reuse without rewriting history. The active accepted evidence set is `{QS-A00, QS-A01, QS-A02, QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03, QS-A03.R1, QS-A04, QS-A04.R1, QS-A04.R2, QS-A05, QS-A06, QS-A06.R1O, QS-A06.R2, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B12.LFW.FULL, QS-B13, QS-B14, QS-C20, QS-C22, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D31.R0, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43, QS-F50, QS-F51, QS-F52, QS-F53, QS-F54, QS-H70, QS-H71, QS-H72, QS-H73, QS-C21, QS-H74, QS-H74.RELEASE.R1}`. No beta whole capability remains dependency-ready because the beta DAG is closed.
 

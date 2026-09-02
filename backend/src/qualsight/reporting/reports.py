@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 from datetime import datetime, timezone
 import html
+import hashlib
 import json
 from pathlib import Path
 import textwrap
@@ -26,6 +27,13 @@ from matplotlib.backends.backend_pdf import PdfPages  # noqa: E402
 import matplotlib.image as mpimg  # noqa: E402
 
 from ..engines.ofiq.adapter import content_id  # noqa: E402
+from ..execution.prepared_output import (  # noqa: E402
+    PreparedOutputError,
+    create_staging_directory,
+    discard_staging_directory,
+    load_prepared_output,
+    prepare_and_publish,
+)
 from ..metrics.verification import operating_point_with_support  # noqa: E402
 from ..provenance import application_version, sha256_file  # noqa: E402
 
@@ -33,6 +41,12 @@ REPORT_VERSION = "1.0.0"
 METRIC_REGISTRY_ID = "qualsight-core-metrics"
 METRIC_REGISTRY_VERSION = "1.2.0"
 IMAGE_POLICIES = ("EXCLUDE", "INCLUDE_PERMITTED")
+REPORT_ARTIFACT_NAMES = (
+    "report.html",
+    "report.json",
+    "report.pdf",
+    "report.provenance.json",
+)
 
 
 class ReportError(RuntimeError):
@@ -80,14 +94,119 @@ def quality_input_stage_summary(sources: dict[str, Any]) -> tuple[str, str]:
     return str(quality_stage_id), relationship
 
 
+def _report_request_sha256(
+    *, project_id: str, spec: dict[str, Any], provenance: dict[str, Any]
+) -> str:
+    source_binding = {
+        key: provenance[key]
+        for key in (
+            "title",
+            "project_name",
+            "generated_by",
+            "application_version",
+            "metric_registry",
+            "scientific_support",
+            "software_versions",
+            "runs",
+            "model_hashes",
+            "dataset_hashes",
+            "figures",
+            "image_policy",
+            "images_embedded",
+            "images_withheld",
+        )
+    }
+    encoded = json.dumps(
+        {
+            "version": REPORT_VERSION,
+            "project_id": project_id,
+            "spec": spec,
+            "source_binding": source_binding,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def recover_prepared_report(
+    directory: Path,
+    *,
+    report_id: str,
+    project_id: str,
+    request_sha256: str,
+) -> dict[str, Any]:
+    """Validate and recover one fully promoted report publication."""
+
+    try:
+        receipt = load_prepared_output(
+            directory,
+            operation_kind="REPORT",
+            result_id=report_id,
+            project_id=project_id,
+            request_sha256=request_sha256,
+            artifact_names=REPORT_ARTIFACT_NAMES,
+        )
+        record = receipt["record"]
+        if (
+            set(record)
+            != {
+                "report_id",
+                "version",
+                "project_id",
+                "title",
+                "spec",
+                "directory",
+                "created_by",
+                "created_at",
+                "files",
+                "provenance",
+                "image_policy",
+                "images_embedded",
+                "images_withheld",
+            }
+            or record["report_id"] != report_id
+            or record["project_id"] != project_id
+            or record["version"] != REPORT_VERSION
+            or record["directory"] != str(directory)
+            or set(record["files"]) != {"html", "pdf", "json"}
+            or _report_request_sha256(
+                project_id=project_id,
+                spec=record["spec"],
+                provenance=record["provenance"],
+            )
+            != request_sha256
+        ):
+            raise ReportError("prepared report record contract differs")
+        for name, item in record["files"].items():
+            if set(item) != {"path", "sha256"}:
+                raise ReportError("prepared report artifact record differs")
+            path = directory / f"report.{name}"
+            if item["path"] != str(path) or item["sha256"] != sha256_file(path):
+                raise ReportError("prepared report artifact identity differs")
+        provenance = json.loads(
+            (directory / "report.provenance.json").read_text(encoding="utf-8")
+        )
+        if provenance != record:
+            raise ReportError("prepared report provenance differs")
+        return record
+    except (PreparedOutputError, OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        if isinstance(error, ReportError):
+            raise
+        raise ReportError("prepared report failed integrity verification") from error
+
+
 class ReportBuilder:
     def __init__(self, *, store: Any, registry: Any, repository_root: Path, project_id: str, spec: dict[str, Any], actor: str, root: Path) -> None:
         self.store = store
         self.registry = registry
         self.repository_root = repository_root
-        self.project = store.project(project_id)
-        if self.project is None:
+        project_head = store.project_head(project_id)
+        if project_head is None:
             raise ReportError("project is not recorded")
+        self.project = project_head[0]
         self.spec = spec
         self.actor = actor
         self.root = root
@@ -121,9 +240,15 @@ class ReportBuilder:
             "basis": basis,
         }
 
+    def _project_run(self, run_id: str) -> tuple[Any, str]:
+        found = self.store.run(run_id)
+        if found is None or found[0].project_id != self.project.project_id:
+            raise ReportError(f"Run {run_id} is not recorded")
+        return found
+
     def _dataset(self, dataset_id: str) -> None:
         dataset = self.store.dataset(dataset_id)
-        if dataset is None:
+        if dataset is None or dataset.project_id != self.project.project_id:
             raise ReportError(f"dataset {dataset_id} is not recorded")
         self.dataset_hashes[dataset_id] = dataset.manifest.sha256
         statistics = self.store.dataset_statistics(dataset_id)
@@ -136,7 +261,7 @@ class ReportBuilder:
 
     def _protocol(self, protocol_id: str) -> None:
         protocol = self.store.protocol(protocol_id)
-        if protocol is None:
+        if protocol is None or protocol.project_id != self.project.project_id:
             raise ReportError(f"protocol {protocol_id} is not recorded")
         rows = [["Protocol", protocol.name], ["Protocol ID", protocol_id], ["Category", protocol.category.value], ["Pair policy", protocol.pair_policy.value], ["Folds", str(protocol.fold_count) if protocol.fold_count is not None else "Not recorded"], ["Subjects", str(protocol.unique_subject_count) if protocol.unique_subject_count is not None else "Not recorded"], ["Pairs", str(protocol.pair_count)], ["Mated", str(protocol.mated_count)], ["Non-mated", str(protocol.nonmated_count)], ["Pairs SHA-256", protocol.pairs_sha256]]
         for limitation in protocol.limitations:
@@ -145,31 +270,30 @@ class ReportBuilder:
 
     def _engine(self, job_id: str) -> None:
         job = self.store.job(job_id)
-        if job is None:
+        if job is None or job["project_id"] != self.project.project_id:
             raise ReportError(f"quality job {job_id} is not recorded")
         if job["run_id"]:
             self.run_ids.add(job["run_id"])
-            found = self.store.run(job["run_id"])
-            if found:
-                run = found[0]
-                if run.quality_engine:
-                    for artifact in run.quality_engine.artifacts:
-                        self.model_hashes[artifact.path] = artifact.sha256
+            run = self._project_run(job["run_id"])[0]
+            if run.quality_engine:
+                for artifact in run.quality_engine.artifacts:
+                    self.model_hashes[artifact.path] = artifact.sha256
         rows = [["Job", job_id], ["Run", job["run_id"] or "—"], ["Engine version", job["engine_version"] or "—"], ["State", job["state"]], ["Total samples", str(job["total"])], ["Measured", str(job["measured"])], ["Engine row failures", str(job["engine_row_failures"])], ["Integrity failures", str(job["integrity_failures"])], ["Not assessed", str(job["not_assessed"])], ["Results SHA-256", job["parquet_sha256"] or "—"]]
         self._add("Quality engine", "table", {"columns": ["Field", "Value"], "rows": rows})
 
     def _matchers(self, matrix_id: str) -> None:
-        leaves = self.store.matcher_leaves(matrix_id=matrix_id)
+        leaves = self.store.matcher_leaves(
+            project_id=self.project.project_id, matrix_id=matrix_id
+        )
         if not leaves:
             raise ReportError(f"matrix {matrix_id} is not recorded")
         rows = []
         points_rows = []
         for leaf in sorted(leaves, key=lambda item: item["leaf_id"]):
             self.run_ids.add(leaf["run_id"])
-            found = self.store.run(leaf["run_id"])
-            if found:
-                for identity in found[0].model_hashes:
-                    self.model_hashes[identity.path] = identity.sha256
+            found = self._project_run(leaf["run_id"])
+            for identity in found[0].model_hashes:
+                self.model_hashes[identity.path] = identity.sha256
             metrics = json.loads(leaf["metrics_json"])
             block = metrics["by_policy"]["EXCLUDE_FAILED_TRIALS"]
             eer_scope = block["eer"].get("evaluation_scope", "DESCRIPTIVE_IN_SAMPLE")
@@ -222,9 +346,10 @@ class ReportBuilder:
         stats_rows = []
         for analysis_id in analysis_ids:
             row = self.store.utility_analysis(analysis_id)
-            if row is None:
+            if row is None or row["project_id"] != self.project.project_id:
                 raise ReportError(f"utility analysis {analysis_id} is not recorded")
             self.run_ids.add(row["run_id"])
+            self._project_run(row["run_id"])
             summary = json.loads(row["summary_json"])
             document = json.loads((Path(row["directory"]) / "utility.json").read_text(encoding="utf-8"))
             matcher_threshold = (
@@ -251,9 +376,10 @@ class ReportBuilder:
 
     def _cross(self, analysis_id: str) -> None:
         row = self.store.cross_matcher_analysis(analysis_id)
-        if row is None:
+        if row is None or row["project_id"] != self.project.project_id:
             raise ReportError(f"cross-matcher analysis {analysis_id} is not recorded")
         self.run_ids.add(row["run_id"])
+        self._project_run(row["run_id"])
         summary = json.loads(row["summary_json"])
         document = json.loads(
             (Path(row["directory"]) / "crossmatcher.json").read_text(encoding="utf-8")
@@ -281,10 +407,11 @@ class ReportBuilder:
     def _figures(self, figure_ids: list[str]) -> None:
         for figure_id in figure_ids:
             figure = self.store.figure(figure_id)
-            if figure is None:
+            if figure is None or figure["project_id"] != self.project.project_id:
                 raise ReportError(f"figure {figure_id} is not recorded")
             provenance = json.loads(figure["provenance_json"])
             for run_id in provenance["source_run_ids"]:
+                self._project_run(run_id)
                 self.run_ids.add(run_id)
             svg = Path(provenance["files"]["svg"]["path"]).read_text(encoding="utf-8")
             png = Path(provenance["files"]["png"]["path"])
@@ -297,8 +424,9 @@ class ReportBuilder:
         rows_out = []
         if "contrast_id" in block:
             row = self.store.cross_matcher_analysis(analysis_id)
-            if row is None:
+            if row is None or row["project_id"] != self.project.project_id:
                 raise ReportError("cross-matcher analysis is not recorded")
+            self._project_run(row["run_id"])
             import duckdb
 
             parquet = str(Path(row["directory"]) / "contrast_pairs.parquet").replace("'", "''")
@@ -313,8 +441,9 @@ class ReportBuilder:
             source = {"analysis_id": analysis_id, "contrast_id": block["contrast_id"], "category": block.get("category", "BOTH")}
         else:
             row = self.store.utility_analysis(analysis_id)
-            if row is None:
+            if row is None or row["project_id"] != self.project.project_id:
                 raise ReportError("utility analysis is not recorded")
+            self._project_run(row["run_id"])
             import duckdb
 
             parquet = str(Path(row["directory"]) / "pair_quality.parquet").replace("'", "''")
@@ -332,10 +461,11 @@ class ReportBuilder:
             for side in ("left", "right"):
                 sample = self.store.sample(pair[f"{side}_sample_id"])
                 if sample is None:
-                    images.append(None)
-                    continue
+                    raise ReportError("failure-example sample is not recorded")
                 dataset = self.store.dataset(sample.dataset_id)
-                classification = dataset.classification.value if dataset else "RESTRICTED"
+                if dataset is None or dataset.project_id != self.project.project_id:
+                    raise ReportError("failure-example sample is not recorded")
+                classification = dataset.classification.value
                 if self.image_policy == "INCLUDE_PERMITTED" and classification in ("PUBLIC", "PRIVATE"):
                     path = Path(sample.source_path)
                     if path.exists() and sha256_file(path) == sample.sha256:
@@ -379,7 +509,7 @@ class ReportBuilder:
             },
         )
 
-    def build(self) -> dict[str, Any]:
+    def build(self, *, record_publication: bool = True) -> dict[str, Any]:
         spec = self.spec
         title = spec.get("title") or f"QualSight report · {self.project.name}"
         if spec.get("executive_summary"):
@@ -410,20 +540,65 @@ class ReportBuilder:
         self._scientific_support()
         provenance = self._provenance(title)
         self._add("Provenance", "provenance", provenance)
-        report_id = content_id("report", self.project.project_id, json.dumps(spec, sort_keys=True), REPORT_VERSION, _now())
+        request_sha256 = _report_request_sha256(
+            project_id=self.project.project_id,
+            spec=spec,
+            provenance=provenance,
+        )
+        report_id = content_id("report", request_sha256)
         directory = self.root / report_id.replace(":", "_")
-        directory.mkdir(parents=True, exist_ok=False)
-        html_path = directory / "report.html"
-        html_path.write_text(self._html(title, report_id), encoding="utf-8")
-        pdf_path = directory / "report.pdf"
-        self._pdf(title, report_id, pdf_path)
-        content_path = directory / "report.json"
-        content_path.write_text(json.dumps({"report_id": report_id, "title": title, "sections": [s if s["kind"] != "failures" else {**s, "content": {**s["content"], "pairs": [{**p, "images": [({k: v for k, v in i.items() if k != "data_uri"} if i else None) for i in p["images"]]} for p in s["content"]["pairs"]]}} for s in self.sections]}, indent=1, sort_keys=True, default=str) + "\n", encoding="utf-8")
-        record = {"report_id": report_id, "version": REPORT_VERSION, "project_id": self.project.project_id, "title": title, "spec": spec, "directory": str(directory), "created_by": self.actor, "created_at": _now(),
-                  "files": {"html": {"path": str(html_path), "sha256": sha256_file(html_path)}, "pdf": {"path": str(pdf_path), "sha256": sha256_file(pdf_path)}, "json": {"path": str(content_path), "sha256": sha256_file(content_path)}},
-                  "provenance": provenance, "image_policy": self.image_policy, "images_embedded": self.images_embedded, "images_withheld": self.images_withheld}
-        (directory / "report.provenance.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        self.store.record_report(record)
+        if directory.exists():
+            record = recover_prepared_report(
+                directory,
+                report_id=report_id,
+                project_id=self.project.project_id,
+                request_sha256=request_sha256,
+            )
+            if record_publication:
+                self.store.record_report(record)
+            return record
+        created_at = _now()
+        stage = create_staging_directory(
+            directory,
+            operation_kind="REPORT",
+            result_id=report_id,
+            project_id=self.project.project_id,
+            request_sha256=request_sha256,
+        )
+        try:
+            html_path = stage / "report.html"
+            html_path.write_text(self._html(title, report_id), encoding="utf-8")
+            pdf_path = stage / "report.pdf"
+            self._pdf(title, report_id, pdf_path)
+            content_path = stage / "report.json"
+            content_path.write_text(json.dumps({"report_id": report_id, "title": title, "sections": [s if s["kind"] != "failures" else {**s, "content": {**s["content"], "pairs": [{**p, "images": [({k: v for k, v in i.items() if k != "data_uri"} if i else None) for i in p["images"]]} for p in s["content"]["pairs"]]}} for s in self.sections]}, indent=1, sort_keys=True, default=str) + "\n", encoding="utf-8")
+            record = {"report_id": report_id, "version": REPORT_VERSION, "project_id": self.project.project_id, "title": title, "spec": spec, "directory": str(directory), "created_by": self.actor, "created_at": created_at,
+                      "files": {"html": {"path": str(directory / html_path.name), "sha256": sha256_file(html_path)}, "pdf": {"path": str(directory / pdf_path.name), "sha256": sha256_file(pdf_path)}, "json": {"path": str(directory / content_path.name), "sha256": sha256_file(content_path)}},
+                      "provenance": provenance, "image_policy": self.image_policy, "images_embedded": self.images_embedded, "images_withheld": self.images_withheld}
+            (stage / "report.provenance.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            prepare_and_publish(
+                stage,
+                directory,
+                operation_kind="REPORT",
+                result_id=report_id,
+                project_id=self.project.project_id,
+                request_sha256=request_sha256,
+                artifact_names=REPORT_ARTIFACT_NAMES,
+                record=record,
+            )
+        except FileExistsError:
+            record = recover_prepared_report(
+                directory,
+                report_id=report_id,
+                project_id=self.project.project_id,
+                request_sha256=request_sha256,
+            )
+        except PreparedOutputError as error:
+            raise ReportError(str(error)) from error
+        finally:
+            discard_staging_directory(stage)
+        if record_publication:
+            self.store.record_report(record)
         return record
 
     # -- provenance -----------------------------------------------------------------

@@ -63,10 +63,11 @@ class MatcherRuntimeManager:
         return identity, path
 
     def _checkpoint_status(self, matcher_id: MatcherId) -> dict[str, Any]:
-        identity, path = self._checkpoint(matcher_id)
+        identity, path, location_state = self.checkpoints.resolve(matcher_id.value)
         if path.is_symlink():
             return {
                 "state": "DRIFTED",
+                "location_state": location_state,
                 "path": str(path),
                 "registered_sha256": identity.sha256,
                 "registered_size_bytes": identity.size_bytes,
@@ -75,6 +76,7 @@ class MatcherRuntimeManager:
         if not path.is_file():
             return {
                 "state": "MISSING",
+                "location_state": location_state,
                 "path": str(path),
                 "registered_sha256": identity.sha256,
                 "registered_size_bytes": identity.size_bytes,
@@ -98,6 +100,7 @@ class MatcherRuntimeManager:
         state = "VERIFIED" if stat.st_size == identity.size_bytes and digest == identity.sha256 else "DRIFTED"
         return {
             "state": state,
+            "location_state": location_state,
             "path": str(path),
             "registered_sha256": identity.sha256,
             "registered_size_bytes": identity.size_bytes,

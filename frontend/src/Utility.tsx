@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, type AddonCatalogOut, type JobOut, type MatcherLeaf, type PairQualityPolicy, type UtilityAnalysisOut, type UtilityPairRow, type UtilitySummary } from "./api";
+import { api, type AddonCatalogOut, type JobOut, type MatcherLeaf, type PairQualityPolicy, type UtilityAnalysisOut, type UtilityOverlayIdentity, type UtilityPairRow, type UtilitySummary } from "./api";
 import { PairEvidence } from "./PairEvidence";
 import { numericParameterError } from "./parameterContract";
+import { groupRecordedQualityMeasureNames, qualityMeasureLabel } from "./qualityProfile";
+import { EvidenceOpenButton, type EvidenceRequest } from "./EvidenceDetail";
 
 const COLORS = ["#7dd3fc", "#f9a8d4", "#86efac", "#fcd34d", "#c4b5fd", "#fca5a5"];
 
@@ -27,27 +29,124 @@ interface UtilityProps {
   projectId: string | null;
   onMessage: (message: string) => void;
   onWorkflowTerminal?: () => void;
+  onContextChange?: (context: UtilityHeaderContext | null) => void;
+  onOpenEvidence: (request: EvidenceRequest) => void;
+}
+
+export interface UtilityHeaderContext {
+  projectId: string;
+  datasetId: string | null;
+  protocolId: string | null;
+  protocolLabel: string | null;
+  leafId: string | null;
+  leafLabel: string | null;
+  runId: string;
 }
 
 interface CurvePoint { rejected_fraction: number; retained: number; error_rate: number | null; quality_cutoff: number | null }
 
+type OverlayAxis = "MATCHER" | "PREPROCESSING" | "COMPOSITE";
+type OverlayClassification = {
+  eligible: boolean;
+  comparisonAxis: "MATCHER" | "PREPROCESSING" | "COMPOSITE" | "IDENTICAL_CONFIGURATION" | "UNKNOWN";
+  reasons: string[];
+};
+
+const OVERLAY_REASON_LABELS: Record<string, string> = {
+  INCOMPLETE_OVERLAY_IDENTITY: "This older analysis does not record the complete overlay identity.",
+  PROJECT_MISMATCH: "Different project.",
+  DATASET_MISMATCH: "Different dataset.",
+  PROTOCOL_MISMATCH: "Different protocol.",
+  PAIR_UNIVERSE_MISMATCH: "Different recorded pair universe.",
+  QUALITY_PARQUET_MISMATCH: "Different quality-result artifact.",
+  QUALITY_MEASURE_MISMATCH: "Different quality measure.",
+  PAIR_QUALITY_POLICY_MISMATCH: "Different pair-quality policy or policy definition.",
+  METRIC_REGISTRY_MISMATCH: "Different metric-registry definition.",
+  THRESHOLD_SCORE_SEMANTICS_MISMATCH: "Different threshold-selection or score semantics.",
+  MATCHER_AXIS_NOT_SELECTED: "Matcher differs, but matcher is not a selected comparison axis.",
+  PREPROCESSING_AXIS_NOT_SELECTED: "Preprocessing differs, but preprocessing is not a selected comparison axis.",
+  COMPARISONS_ARTIFACT_MISMATCH: "Comparison artifacts differ without a recorded matcher or preprocessing change.",
+};
+
+function sameDefinition(
+  left: { id: string; version: string; definition_sha256: string },
+  right: { id: string; version: string; definition_sha256: string },
+): boolean {
+  return left.id === right.id && left.version === right.version && left.definition_sha256 === right.definition_sha256;
+}
+
+function sameThresholdSemantics(
+  left: UtilityOverlayIdentity["threshold_score_semantics"],
+  right: UtilityOverlayIdentity["threshold_score_semantics"],
+): boolean {
+  return left.threshold_kind === right.threshold_kind
+    && left.threshold_source === right.threshold_source
+    && left.threshold_selection === right.threshold_selection
+    && left.target_fmr === right.target_fmr
+    && left.failure_policy === right.failure_policy
+    && left.evaluation_scope === right.evaluation_scope
+    && left.score_direction === right.score_direction
+    && left.equality_rule === right.equality_rule;
+}
+
+function classifyOverlay(
+  baseline: UtilitySummary,
+  candidate: UtilitySummary,
+  axis: OverlayAxis,
+): OverlayClassification {
+  const left = baseline.overlay_identity;
+  const right = candidate.overlay_identity;
+  if (!left || !right || left.schema_version !== "1.0.0" || right.schema_version !== "1.0.0") {
+    return { eligible: false, comparisonAxis: "UNKNOWN", reasons: ["INCOMPLETE_OVERLAY_IDENTITY"] };
+  }
+  const matcherChanged = left.matcher_id !== right.matcher_id;
+  const preprocessingChanged = left.preprocessing_id !== right.preprocessing_id;
+  const comparisonAxis = matcherChanged && preprocessingChanged
+    ? "COMPOSITE"
+    : matcherChanged
+      ? "MATCHER"
+      : preprocessingChanged
+        ? "PREPROCESSING"
+        : "IDENTICAL_CONFIGURATION";
+  const reasons: string[] = [];
+  if (left.project_id !== right.project_id) reasons.push("PROJECT_MISMATCH");
+  if (left.dataset_id !== right.dataset_id) reasons.push("DATASET_MISMATCH");
+  if (left.protocol_id !== right.protocol_id) reasons.push("PROTOCOL_MISMATCH");
+  if (left.pair_universe_sha256 !== right.pair_universe_sha256) reasons.push("PAIR_UNIVERSE_MISMATCH");
+  if (left.quality_parquet_sha256 !== right.quality_parquet_sha256) reasons.push("QUALITY_PARQUET_MISMATCH");
+  if (left.quality_measure !== right.quality_measure) reasons.push("QUALITY_MEASURE_MISMATCH");
+  if (!sameDefinition(left.pair_quality_policy, right.pair_quality_policy)) reasons.push("PAIR_QUALITY_POLICY_MISMATCH");
+  if (!sameDefinition(left.metric_registry, right.metric_registry)) reasons.push("METRIC_REGISTRY_MISMATCH");
+  if (!sameThresholdSemantics(left.threshold_score_semantics, right.threshold_score_semantics)) reasons.push("THRESHOLD_SCORE_SEMANTICS_MISMATCH");
+  if (matcherChanged && axis === "PREPROCESSING") reasons.push("MATCHER_AXIS_NOT_SELECTED");
+  if (preprocessingChanged && axis === "MATCHER") reasons.push("PREPROCESSING_AXIS_NOT_SELECTED");
+  if (!matcherChanged && !preprocessingChanged && left.comparisons_sha256 !== right.comparisons_sha256) reasons.push("COMPARISONS_ARTIFACT_MISMATCH");
+  return { eligible: reasons.length === 0, comparisonAxis, reasons };
+}
+
 /** Quality-utility workbench: ERC/AU-ERC/risk-coverage, uncertainty, error models, and threshold-policy analysis (QS-D30..D33). */
-export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityProps) {
+export function Utility({ projectId, onMessage, onWorkflowTerminal, onContextChange, onOpenEvidence }: UtilityProps) {
   const [policies, setPolicies] = useState<PairQualityPolicy[]>([]);
   const [leaves, setLeaves] = useState<MatcherLeaf[]>([]);
   const [jobs, setJobs] = useState<JobOut[]>([]);
+  const [jobsProjectId, setJobsProjectId] = useState<string | null>(null);
   const [analyses, setAnalyses] = useState<UtilitySummary[]>([]);
   const [selectedLeaf, setSelectedLeaf] = useState<string>("");
   const [selectedJob, setSelectedJob] = useState<string>("");
   const [policy, setPolicy] = useState<string>("");
   const [policyError, setPolicyError] = useState<string | null>(null);
-  const [measure, setMeasure] = useState<string>("UnifiedQualityScore");
+  const [measure, setMeasure] = useState<string>("");
+  const [measureOptions, setMeasureOptions] = useState<string[]>([]);
+  const [measureCatalogLoading, setMeasureCatalogLoading] = useState(false);
+  const [measureCatalogError, setMeasureCatalogError] = useState<string | null>(null);
   const [targetFmr, setTargetFmr] = useState<string>("0.001");
   const [qualityThreshold, setQualityThreshold] = useState<string>("");
   const [replicates, setReplicates] = useState<string>("1000");
   const [running, setRunning] = useState<string | null>(null);
   const [detail, setDetail] = useState<UtilityAnalysisOut | null>(null);
   const [curves, setCurves] = useState<Record<string, { fnmr: CurvePoint[]; label: string }>>({});
+  const [overlayAxis, setOverlayAxis] = useState<OverlayAxis>("MATCHER");
+  const [overlayIds, setOverlayIds] = useState<Set<string>>(new Set());
   const [pairs, setPairs] = useState<{ total: number; rows: UtilityPairRow[] } | null>(null);
   const [evidencePairId, setEvidencePairId] = useState<string | null>(null);
   const [pairFilter, setPairFilter] = useState<"rejected" | "prevented" | "removed">("rejected");
@@ -63,6 +162,10 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
   const refreshSequence = useRef(0);
   const policySequence = useRef(0);
   const catalogSequence = useRef(0);
+  const measureCatalogSequence = useRef(0);
+  const detailSequence = useRef(0);
+  const pairSequence = useRef(0);
+  const runningDetailSequence = useRef(0);
   const handledTerminalAnalyses = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
@@ -70,6 +173,7 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
     const sequence = ++refreshSequence.current;
     if (!projectId) {
       setLeaves([]); setJobs([]); setAnalyses([]);
+      setJobsProjectId(null);
       setFeedError(null);
       return;
     }
@@ -93,13 +197,17 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
       errors.push(`Matcher Run feed unavailable: ${leafResult.reason instanceof Error ? leafResult.reason.message : String(leafResult.reason)}`);
     }
     if (jobResult.status === "fulfilled") {
-      const completed = jobResult.value.filter((job) => job.state === "COMPLETED" && job.run_id);
+      const completed = jobResult.value.filter((job) => (
+        job.state === "COMPLETED" && job.run_id && job.quality_result_available
+      ));
       setJobs(completed);
+      setJobsProjectId(projectId);
       setSelectedJob((current) =>
         current && completed.some((job) => job.job_id === current) ? current : (completed[0]?.job_id ?? ""),
       );
     } else {
       setJobs([]);
+      setJobsProjectId(null);
       setSelectedJob("");
       errors.push(`Quality-job feed unavailable: ${jobResult.reason instanceof Error ? jobResult.reason.message : String(jobResult.reason)}`);
     }
@@ -143,6 +251,42 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
     }
   }, []);
 
+  const loadQualityMeasures = useCallback(async (jobId: string) => {
+    if (!projectId) return;
+    const epoch = projectEpoch.current;
+    const sequence = ++measureCatalogSequence.current;
+    setMeasureCatalogLoading(true);
+    setMeasureCatalogError(null);
+    try {
+      const catalog = await api.qualityMeasures(projectId, jobId);
+      if (
+        projectEpoch.current !== epoch
+        || measureCatalogSequence.current !== sequence
+      ) return;
+      setMeasureOptions(catalog.measures);
+      setMeasure((current) =>
+        catalog.measures.includes(current)
+          ? current
+          : (catalog.default_measure ?? catalog.measures[0] ?? ""),
+      );
+    } catch (error) {
+      if (
+        projectEpoch.current !== epoch
+        || measureCatalogSequence.current !== sequence
+      ) return;
+      setMeasureOptions([]);
+      setMeasure("");
+      setMeasureCatalogError(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      if (
+        projectEpoch.current === epoch
+        && measureCatalogSequence.current === sequence
+      ) setMeasureCatalogLoading(false);
+    }
+  }, [projectId]);
+
   useEffect(() => {
     void loadPolicies();
     void loadCatalog();
@@ -152,9 +296,16 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
     projectEpoch.current += 1;
     refreshSequence.current += 1;
     setLeaves([]); setJobs([]); setAnalyses([]);
+    setJobsProjectId(null);
     setSelectedLeaf(""); setSelectedJob("");
+    measureCatalogSequence.current += 1;
+    detailSequence.current += 1;
+    pairSequence.current += 1;
+    setMeasure(""); setMeasureOptions([]);
+    setMeasureCatalogLoading(false); setMeasureCatalogError(null);
     setRunning(null); setBusy(false);
     setDetail(null); setPairs(null); setCurves({});
+    setOverlayAxis("MATCHER"); setOverlayIds(new Set());
     setEvidencePairId(null);
     setFeedError(null); setPollError(null); setCurveError(null);
   }, [projectId]);
@@ -168,11 +319,11 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
 
   // Poll a running analysis.
   useEffect(() => {
-    if (!running) return;
+    if (!running || !projectId) return;
     const epoch = projectEpoch.current;
     const analysisId = running;
     const handle = window.setInterval(() => {
-      api.utilityAnalysis(analysisId).then((status) => {
+      api.utilityAnalysis(projectId, analysisId).then((status) => {
         if (projectEpoch.current !== epoch) return;
         setPollError(null);
         if (status.state === "COMPLETED" || status.state === "FAILED" || status.state === "INTERRUPTED") {
@@ -180,7 +331,11 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
           handledTerminalAnalyses.current.add(analysisId);
           setRunning(null);
           if (status.state === "COMPLETED") {
-            setDetail(status);
+            if (detailSequence.current === runningDetailSequence.current) {
+              setDetail(status);
+              setPairs(null);
+              setOverlayIds(new Set());
+            }
             onMessage(`Utility analysis ${shortHash(status.analysis_id)} recorded as Run ${shortHash(status.summary?.run_id ?? "")}`);
           } else {
             onMessage(`Utility analysis ${status.state === "INTERRUPTED" ? "was interrupted" : "failed"}: ${status.error ?? "unknown error"}`);
@@ -193,13 +348,48 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
       });
     }, 1500);
     return () => window.clearInterval(handle);
-  }, [running, refresh, onMessage, onWorkflowTerminal]);
+  }, [running, projectId, refresh, onMessage, onWorkflowTerminal]);
 
-  // ERC overlay curves for every recorded analysis of the project (FNMR-ERC, mated units).
+  const baselineSummary = detail?.summary ?? null;
+  const overlayClassifications = useMemo(
+    () => new Map(
+      analyses.map((item) => [
+        item.analysis_id,
+        baselineSummary
+          ? classifyOverlay(baselineSummary, item, overlayAxis)
+          : { eligible: false, comparisonAxis: "UNKNOWN", reasons: ["SELECT_BASELINE"] } as OverlayClassification,
+      ]),
+    ),
+    [analyses, baselineSummary, overlayAxis],
+  );
+
+  useEffect(() => {
+    setOverlayIds((current) => new Set(
+      [...current].filter((analysisId) => overlayClassifications.get(analysisId)?.eligible),
+    ));
+  }, [overlayClassifications]);
+
+  const curveAnalyses = useMemo(() => {
+    if (!baselineSummary) return [];
+    const selected = analyses.filter((item) =>
+      overlayIds.has(item.analysis_id)
+      && item.analysis_id !== baselineSummary.analysis_id
+      && overlayClassifications.get(item.analysis_id)?.eligible,
+    );
+    return [baselineSummary, ...selected];
+  }, [analyses, baselineSummary, overlayClassifications, overlayIds]);
+  const curveAnalysisKey = curveAnalyses.map((item) => item.analysis_id).join("\u001f");
+
+  // Fetch only the explicitly selected, identity-compatible ERC overlay curves.
   useEffect(() => {
     let cancelled = false;
+    if (curveAnalyses.length === 0) {
+      setCurves({});
+      setCurveError(null);
+      return () => { cancelled = true; };
+    }
     Promise.all(
-      analyses.map((item) => api.utilityAnalysis(item.analysis_id).then((body) => [item.analysis_id, { fnmr: (body.utility?.utility?.erc?.curves?.FNMR?.points ?? []) as CurvePoint[], label: `${item.leaf_id} · ${item.quality_measure} · ${item.pair_quality_policy.replace("pair.quality.", "")}` }] as const)),
+      curveAnalyses.map((item) => api.utilityAnalysis(projectId!, item.analysis_id).then((body) => [item.analysis_id, { fnmr: (body.utility?.utility?.erc?.curves?.FNMR?.points ?? []) as CurvePoint[], label: `${item.leaf_id} · ${item.quality_measure} · ${item.pair_quality_policy.replace("pair.quality.", "")}` }] as const)),
     ).then((entries) => {
       if (!cancelled) {
         setCurves(Object.fromEntries(entries));
@@ -212,7 +402,7 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
       }
     });
     return () => { cancelled = true; };
-  }, [analyses]);
+  }, [curveAnalysisKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the key is the immutable analysis selection
 
   const leafDataset = useMemo(
     () => leaves.find((leaf) => leaf.run_id === selectedLeaf)?.dataset_id ?? null,
@@ -222,6 +412,10 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
     () => jobs.filter((job) => !leafDataset || !job.dataset_id || job.dataset_id === leafDataset),
     [jobs, leafDataset],
   );
+  const groupedMeasureOptions = useMemo(
+    () => groupRecordedQualityMeasureNames(measureOptions),
+    [measureOptions],
+  );
   useEffect(() => {
     // A quality job is only comparable to a matcher Run over the same dataset;
     // keep the selection inside the eligible set (e.g. exclude uploaded-photo jobs).
@@ -229,6 +423,18 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
       current && eligibleJobs.some((job) => job.job_id === current) ? current : (eligibleJobs[0]?.job_id ?? ""),
     );
   }, [eligibleJobs]);
+
+  useLayoutEffect(() => {
+    if (!selectedJob || jobsProjectId !== projectId) {
+      measureCatalogSequence.current += 1;
+      setMeasure("");
+      setMeasureOptions([]);
+      setMeasureCatalogLoading(false);
+      setMeasureCatalogError(null);
+      return;
+    }
+    void loadQualityMeasures(selectedJob);
+  }, [jobsProjectId, loadQualityMeasures, projectId, selectedJob]);
 
   const targetFmrValue = finiteNumber(targetFmr);
   const qualityThresholdValue = qualityThreshold.trim() === "" ? null : finiteNumber(qualityThreshold);
@@ -244,19 +450,25 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
         ? "Select a recorded matcher Run."
         : !selectedJob
           ? "Select a completed quality job for the same dataset."
-          : !measure.trim()
-            ? "Enter the scalar quality measure recorded by the quality job."
-            : !policies.some((item) => item.id === policy)
-              ? "Select an admitted pair-quality policy."
-              : targetFmrError ?? qualityThresholdError ?? replicatesError;
+          : measureCatalogLoading
+            ? "Wait for the selected quality job's measure catalog."
+            : measureCatalogError
+              ? "Reload the selected quality job's measure catalog."
+              : !measure || !measureOptions.includes(measure)
+                ? "Select a scalar quality measure recorded by the quality job."
+                : !policies.some((item) => item.id === policy)
+                  ? "Select an admitted pair-quality policy."
+                  : targetFmrError ?? qualityThresholdError ?? replicatesError;
 
   const start = useCallback(async () => {
     if (
-      !projectId || !selectedLeaf || !selectedJob || !measure.trim() || !policies.some((item) => item.id === policy)
+      !projectId || !selectedLeaf || !selectedJob || !measureOptions.includes(measure) || !policies.some((item) => item.id === policy)
       || targetFmrError || qualityThresholdError || replicatesError
       || targetFmrValue === null || bootstrapReplicates === null
     ) return;
     const epoch = projectEpoch.current;
+    const detailRequest = ++detailSequence.current;
+    pairSequence.current += 1;
     setBusy(true);
     try {
       const started = await api.startUtilityAnalysis(projectId, {
@@ -271,10 +483,13 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
       if (projectEpoch.current !== epoch) return;
       if (started.already_recorded) {
         onMessage(`Analysis ${shortHash(started.analysis_id)} was already recorded; showing it`);
-        const nextDetail = await api.utilityAnalysis(started.analysis_id);
-        if (projectEpoch.current !== epoch) return;
+        const nextDetail = await api.utilityAnalysis(projectId, started.analysis_id);
+        if (projectEpoch.current !== epoch || detailSequence.current !== detailRequest) return;
         setDetail(nextDetail);
+        setPairs(null);
+        setOverlayIds(new Set());
       } else {
+        runningDetailSequence.current = detailRequest;
         setRunning(started.analysis_id);
         onMessage(`Utility analysis ${shortHash(started.analysis_id)} running`);
       }
@@ -283,37 +498,63 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
     } finally {
       if (projectEpoch.current === epoch) setBusy(false);
     }
-  }, [projectId, selectedLeaf, selectedJob, measure, policy, policies, targetFmrError, qualityThresholdError, replicatesError, targetFmrValue, qualityThresholdValue, bootstrapReplicates, onMessage]);
+  }, [projectId, selectedLeaf, selectedJob, measure, measureOptions, policy, policies, targetFmrError, qualityThresholdError, replicatesError, targetFmrValue, qualityThresholdValue, bootstrapReplicates, onMessage]);
 
   const open = useCallback(async (analysisId: string) => {
+    if (!projectId) return;
     const epoch = projectEpoch.current;
+    const sequence = ++detailSequence.current;
+    pairSequence.current += 1;
+    setPairs(null);
     try {
-      const nextDetail = await api.utilityAnalysis(analysisId);
-      if (projectEpoch.current !== epoch) return;
+      const nextDetail = await api.utilityAnalysis(projectId, analysisId);
+      if (projectEpoch.current !== epoch || detailSequence.current !== sequence) return;
       setDetail(nextDetail);
-      setPairs(null);
+      setOverlayIds(new Set());
     } catch (error) {
-      if (projectEpoch.current === epoch) onMessage(error instanceof Error ? error.message : String(error));
+      if (projectEpoch.current === epoch && detailSequence.current === sequence) onMessage(error instanceof Error ? error.message : String(error));
     }
-  }, [onMessage]);
+  }, [projectId, onMessage]);
 
   const loadPairs = useCallback(async (filter: "rejected" | "prevented" | "removed") => {
-    if (!detail?.summary) return;
+    if (!detail?.summary || !projectId) return;
     const epoch = projectEpoch.current;
+    const analysisId = detail.analysis_id;
+    const sequence = ++pairSequence.current;
     setPairFilter(filter);
     const query = filter === "rejected" ? "retained=false&limit=60" : filter === "prevented" ? "retained=false&decision_error=true&limit=60" : "retained=false&decision_error=false&limit=60";
     try {
-      const nextPairs = await api.utilityPairs(detail.analysis_id, query);
-      if (projectEpoch.current !== epoch) return;
+      const nextPairs = await api.utilityPairs(projectId, analysisId, query);
+      if (projectEpoch.current !== epoch || pairSequence.current !== sequence) return;
       setPairs(nextPairs);
     } catch (error) {
-      if (projectEpoch.current === epoch) onMessage(error instanceof Error ? error.message : String(error));
+      if (projectEpoch.current === epoch && pairSequence.current === sequence) onMessage(error instanceof Error ? error.message : String(error));
     }
-  }, [detail, onMessage]);
+  }, [detail, projectId, onMessage]);
 
-  const analysisIds = useMemo(() => analyses.map((item) => item.analysis_id), [analyses]);
+  const analysisIds = useMemo(() => curveAnalyses.map((item) => item.analysis_id), [curveAnalyses]);
   const utility = detail?.utility?.utility;
   const policyBlock = detail?.policy;
+
+  useLayoutEffect(() => {
+    const summary = detail?.summary;
+    if (!projectId || !summary) {
+      onContextChange?.(null);
+      return;
+    }
+    const identity = summary.overlay_identity;
+    onContextChange?.({
+      projectId,
+      datasetId: identity?.dataset_id ?? null,
+      protocolId: identity?.protocol_id ?? null,
+      protocolLabel: identity?.protocol_id ? "Recorded verification protocol" : null,
+      leafId: summary.leaf_id,
+      leafLabel: `${matcherNames[summary.matcher_id] ?? summary.matcher_id} · ${profileNames[summary.condition_id] ?? summary.condition_id}`,
+      runId: summary.run_id,
+    });
+  }, [detail?.summary, matcherNames, onContextChange, profileNames, projectId]);
+
+  useLayoutEffect(() => () => onContextChange?.(null), [onContextChange]);
 
   if (!projectId) {
     return (
@@ -338,6 +579,7 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
       <h2 id="utility-heading">Quality → utility · ERC, risk-coverage, policy analysis</h2>
       {catalogError && <p className="error" role="alert">Add-on catalog unavailable; recorded Run identifiers are shown unchanged. {catalogError} <button type="button" className="secondary" onClick={() => void loadCatalog()}>Retry add-on catalog</button></p>}
       {policyError && <p className="error" role="alert">{policyError} <button type="button" className="secondary" onClick={() => void loadPolicies()}>Retry pair-policy catalog</button></p>}
+      {measureCatalogError && <p className="error" role="alert">Quality-measure catalog unavailable for the selected recorded job. {measureCatalogError} <button type="button" className="secondary" onClick={() => selectedJob && void loadQualityMeasures(selectedJob)}>Retry quality-measure catalog</button></p>}
       {feedError && <p className="error" role="alert">{feedError} <button type="button" className="secondary" onClick={() => void refresh()}>Retry project feeds</button></p>}
       {pollError && <p className="error" role="alert">{pollError}</p>}
       {curveError && <p className="error" role="alert">{curveError}</p>}
@@ -360,7 +602,15 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
         </label>
         <label>
           Measure
-          <input value={measure} onChange={(event) => setMeasure(event.target.value)} data-testid="utility-measure" />
+          <select value={measure} onChange={(event) => setMeasure(event.target.value)} disabled={measureCatalogLoading || measureOptions.length === 0} aria-describedby="utility-measure-help" data-testid="utility-measure">
+            {measureOptions.length === 0 && <option value="">{measureCatalogLoading ? "Loading recorded measures…" : "No recorded scalar measures"}</option>}
+            {groupedMeasureOptions.map((group) => (
+              <optgroup key={group.id} label={group.label} data-quality-group={group.id}>
+                {group.measures.map((name) => <option key={name} value={name}>{qualityMeasureLabel(name)}</option>)}
+              </optgroup>
+            ))}
+          </select>
+          <span id="utility-measure-help" className="hint">Measures recorded in the selected completed quality job.</span>
         </label>
         <label>
           Pair policy
@@ -394,8 +644,73 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
         <span id="utility-run-help" className={runDisabledReason ? "error" : "hint"}>{runDisabledReason ?? "Ready to run with the selected matcher Run and quality job."}</span>
       </div>
 
+      <div className="controls-row utility-controls" data-testid="utility-overlay-controls">
+        <label>
+          ERC comparison axis
+          <select
+            value={overlayAxis}
+            onChange={(event) => {
+              setOverlayAxis(event.target.value as OverlayAxis);
+              setOverlayIds(new Set());
+            }}
+            data-testid="utility-overlay-axis"
+          >
+            <option value="MATCHER">Matcher only</option>
+            <option value="PREPROCESSING">Preprocessing only</option>
+            <option value="COMPOSITE">Matcher + preprocessing (composite)</option>
+          </select>
+        </label>
+        <p className="hint" data-testid="utility-overlay-guidance">
+          {baselineSummary
+            ? baselineSummary.overlay_identity
+              ? `Baseline ${shortHash(baselineSummary.analysis_id, 10)}. Select compatible rows below; every non-axis evidence identity must match exactly.`
+              : "The opened legacy analysis lacks a complete overlay identity and cannot authorize comparative overlays."
+            : "Open one recorded analysis to set the baseline, then select compatible rows explicitly."}
+        </p>
+      </div>
+
+      <div className="controls-row utility-controls" data-testid="utility-overlay-candidates">
+        {analyses.map((item, index) => {
+          const isBaseline = baselineSummary?.analysis_id === item.analysis_id;
+          const classification = overlayClassifications.get(item.analysis_id);
+          const eligible = classification?.eligible === true && !isBaseline;
+          const explanationId = `utility-overlay-reason-${item.analysis_id}`;
+          const explanation = !baselineSummary
+            ? "Open this analysis to use it as the baseline."
+            : isBaseline
+              ? "Current baseline."
+              : classification?.reasons.map((reason) => OVERLAY_REASON_LABELS[reason] ?? reason).join(" ") || `${classification?.comparisonAxis.toLowerCase().replaceAll("_", " ")} axis is compatible.`;
+          return (
+            <label key={item.analysis_id} title={explanation}>
+              <span><span className="swatch" style={{ background: COLORS[index % COLORS.length] }} /> <span className="mono">{shortHash(item.analysis_id, 10)}</span> · {item.leaf_id}</span>
+              <span>
+                <input
+                  type="checkbox"
+                  checked={isBaseline || overlayIds.has(item.analysis_id)}
+                  disabled={!eligible}
+                  aria-describedby={explanationId}
+                  title={explanation}
+                  onChange={(event) => setOverlayIds((current) => {
+                    const next = new Set(current);
+                    if (event.target.checked) next.add(item.analysis_id); else next.delete(item.analysis_id);
+                    return next;
+                  })}
+                  data-testid="utility-overlay-candidate"
+                  data-analysis-id={item.analysis_id}
+                  data-eligible={eligible ? "true" : "false"}
+                  data-comparison-axis={classification?.comparisonAxis ?? "UNKNOWN"}
+                  data-reasons={classification?.reasons.join(",") ?? "SELECT_BASELINE"}
+                />
+                {isBaseline ? " Baseline" : eligible ? " Include in overlay" : " Ineligible"}
+              </span>
+              <span id={explanationId} className="hint" data-testid="utility-overlay-reason">{explanation}</span>
+            </label>
+          );
+        })}
+      </div>
+
       <div className="utility-grid">
-        <div>
+        <div style={{ minWidth: 0, overflowX: "auto" }}>
           <table className="compact utility-table" data-testid="utility-table">
             <caption>Recorded utility analyses</caption>
             <thead>
@@ -407,20 +722,23 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
               {analyses.length === 0 && (
                 <tr><td colSpan={10} className="hint">No utility analyses recorded yet.</td></tr>
               )}
-              {analyses.map((item, index) => (
-                <tr key={item.analysis_id} className={detail?.analysis_id === item.analysis_id ? "selected" : undefined}>
-                  <th scope="row"><button type="button" className="cell" onClick={() => void open(item.analysis_id)} data-testid={`analysis-${item.leaf_id}`}><span className="swatch" style={{ background: COLORS[index % COLORS.length] }} /><span className="mono">{shortHash(item.analysis_id, 10)}</span></button></th>
-                  <td>{item.leaf_id} · {profileNames[item.condition_id] ?? item.condition_id}</td>
-                  <td>{item.quality_measure} · {item.pair_quality_policy.replace("pair.quality.", "")}</td>
-                  <td className="mono">{num(item.matcher_threshold)}</td>
-                  <td className="mono">{item.quality_threshold}</td>
-                  <td className="mono">{num(item.au_erc_fnmr, 5)}</td>
-                  <td className="mono">{num(item.partial_au_erc_fnmr, 5)}</td>
-                  <td className="mono">{pct(item.fnmr_before)} → {pct(item.fnmr_after)}</td>
-                  <td className="mono">{pct(item.retention_rate, 1)}</td>
-                  <td className="mono">{item.errors_prevented} (−{item.successful_comparisons_removed} good)</td>
-                </tr>
-              ))}
+              {analyses.map((item, index) => {
+                const isBaseline = baselineSummary?.analysis_id === item.analysis_id;
+                return (
+                  <tr key={item.analysis_id} className={isBaseline ? "selected" : undefined}>
+                    <th scope="row"><button type="button" className="cell" onClick={() => void open(item.analysis_id)} data-testid={`analysis-${item.leaf_id}`}><span className="swatch" style={{ background: COLORS[index % COLORS.length] }} /><span className="mono">{shortHash(item.analysis_id, 10)}</span></button></th>
+                    <td>{item.leaf_id} · {profileNames[item.condition_id] ?? item.condition_id}</td>
+                    <td>{item.quality_measure} · {item.pair_quality_policy.replace("pair.quality.", "")}</td>
+                    <td className="mono">{num(item.matcher_threshold)}</td>
+                    <td className="mono">{item.quality_threshold}</td>
+                    <td className="mono">{num(item.au_erc_fnmr, 5)}</td>
+                    <td className="mono">{num(item.partial_au_erc_fnmr, 5)}</td>
+                    <td className="mono">{pct(item.fnmr_before)} → {pct(item.fnmr_after)}</td>
+                    <td className="mono">{pct(item.retention_rate, 1)}</td>
+                    <td className="mono">{item.errors_prevented} (−{item.successful_comparisons_removed} good)</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -454,14 +772,14 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
             <text x="175" y="238" textAnchor="middle" className="axis">rejected fraction (worst pair quality first)</text>
             <text x="12" y="110" textAnchor="middle" transform="rotate(-90 12 110)" className="axis">FNMR of retained mated units</text>
           </svg>
-          <p className="hint">FNMR-ERC per recorded analysis; matcher threshold fixed per analysis (never re-estimated along the curve). FMR-ERC is reported separately in the detail below.</p>
+          <p className="hint" data-testid="utility-overlay-claim">FNMR-ERC for the opened baseline and explicitly selected compatible analyses only. Matcher thresholds stay fixed per analysis and are never re-estimated along a curve. A composite axis is descriptive and does not isolate matcher from preprocessing effects. FMR-ERC is reported separately in the detail below.</p>
         </div>
       </div>
 
       {detail?.summary && utility && policyBlock && (
         <div className="errors utility-detail" data-testid="utility-detail">
           <h3>
-            Analysis <span className="mono">{shortHash(detail.analysis_id, 14)}</span> · Run <a href={detail.summary.links.run} className="mono">{shortHash(detail.summary.run_id, 14)}</a> · {detail.summary.leaf_id} · {detail.summary.quality_measure} · {detail.summary.pair_quality_policy}
+            Analysis <span className="mono">{shortHash(detail.analysis_id, 14)}</span> · Run {projectId ? <EvidenceOpenButton testId="utility-detail-run-evidence" request={{ kind: "run", href: detail.summary.links.run, evidenceId: detail.summary.run_id, projectId, label: `Utility Run ${shortHash(detail.summary.run_id, 14)}` }} onOpen={onOpenEvidence} className="mono">{shortHash(detail.summary.run_id, 14)}</EvidenceOpenButton> : shortHash(detail.summary.run_id, 14)} · {detail.summary.leaf_id} · {detail.summary.quality_measure} · {detail.summary.pair_quality_policy}
           </h3>
           <div className="utility-facts">
             <div>
@@ -474,7 +792,7 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
               </dl>
             </div>
             <div>
-              <h4>Areas under the ERC (registry v1.1.0)</h4>
+              <h4>Areas under the ERC (registry v1.2.0)</h4>
               <table className="compact">
                 <caption>Areas under the error-versus-reject curves</caption>
                 <thead><tr><th scope="col">Curve</th><th scope="col">Metric</th><th scope="col">Domain</th><th scope="col">Value</th><th scope="col">95 % CI (cluster bootstrap)</th><th scope="col">Units</th></tr></thead>
@@ -589,13 +907,13 @@ export function Utility({ projectId, onMessage, onWorkflowTerminal }: UtilityPro
                         {evidencePairId === row.pair_id ? "hide evidence" : "match evidence"}
                       </button>
                       {evidencePairId === row.pair_id && detail?.summary?.matcher_run_id && (
-                        <PairEvidence runId={detail.summary.matcher_run_id} pairId={row.pair_id} onClose={() => setEvidencePairId(null)} />
+                        <PairEvidence projectId={projectId} runId={detail.summary.matcher_run_id} pairId={row.pair_id} onClose={() => setEvidencePairId(null)} />
                       )}
                       <span className="mono">q {row.quality_left ?? "—"} / {row.quality_right ?? "—"} → pair {row.pair_quality ?? "—"} · {row.score === null ? row.failure : `score ${row.score.toFixed(4)}`}{row.decision_error ? " · matcher error" : ""}</span>
                       <span className="links">
-                        <a href={row.links.left_quality}>left quality</a>
-                        <a href={row.links.right_quality}>right quality</a>
-                        <a href={row.links.run}>run</a>
+                        {projectId && <EvidenceOpenButton testId="utility-left-quality-evidence" request={{ kind: "sample-quality", href: row.links.left_quality, evidenceId: row.left_sample_id, projectId, label: `Left sample quality ${shortHash(row.left_sample_id, 14)}` }} onOpen={onOpenEvidence}>left quality</EvidenceOpenButton>}
+                        {projectId && <EvidenceOpenButton testId="utility-right-quality-evidence" request={{ kind: "sample-quality", href: row.links.right_quality, evidenceId: row.right_sample_id, projectId, label: `Right sample quality ${shortHash(row.right_sample_id, 14)}` }} onOpen={onOpenEvidence}>right quality</EvidenceOpenButton>}
+                        {detail?.summary?.run_id && <EvidenceOpenButton testId="utility-pair-run-evidence" request={{ kind: "run", href: row.links.run, evidenceId: detail.summary.run_id, projectId, label: `Utility pair Run ${shortHash(detail.summary.run_id, 14)}` }} onOpen={onOpenEvidence}>run</EvidenceOpenButton>}
                       </span>
                     </div>
                   </li>

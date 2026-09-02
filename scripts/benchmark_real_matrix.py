@@ -155,7 +155,7 @@ def main() -> int:
                 matrix_id = launched.json()["matrix_id"]
                 deadline = time.monotonic() + 7200
                 while time.monotonic() < deadline:
-                    status = client.get(f"/api/matrices/{matrix_id}")
+                    status = client.get(f"/api/projects/{project_id}/matrices/{matrix_id}")
                     status.raise_for_status()
                     body = status.json()
                     if body["progress"]["phase"] in {"completed", "failed"}:

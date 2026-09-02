@@ -98,9 +98,18 @@ class BackupRecoveryRealTests(unittest.TestCase):
                 headers={"content-type": "application/octet-stream"},
             )
             self.assertEqual(assessed.status_code, 201, assessed.text)
-            stored_path = Path(assessed.json()["stored_path"])
-            run_id = assessed.json()["run_id"]
+            assessed_body = assessed.json()
+            sample_id = assessed_body["sample_id"]
+            run_id = assessed_body["run_id"]
+            self.assertNotIn("stored_path", assessed_body)
+        recorded = RunStore(self.data_dir / "qualsight.sqlite3")
+        try:
+            sample = recorded.sample(sample_id)
+            self.assertIsNotNone(sample)
+            stored_path = Path(sample.source_path)
             self.assertEqual(hashlib.sha256(stored_path.read_bytes()).hexdigest(), source_sha256)
+        finally:
+            recorded.close()
         return project_id, run_id, stored_path, source_sha256
 
     def _add_real_lfw_copy_material(self) -> None:

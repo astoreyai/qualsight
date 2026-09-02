@@ -31,6 +31,14 @@ import pyarrow.parquet as pq
 from ..domain.run import CompletedRun, ReproductionState
 from ..engines.ofiq.adapter import content_id
 from ..execution.cli_runtime import USABLE_RESOURCE_STATES
+from ..execution.prepared_output import (
+    PreparedOutputError,
+    create_staging_directory,
+    discard_staging_directory,
+    load_prepared_output,
+    prepare_and_publish,
+)
+from ..matchers.bounded import validate_execution_timeout
 from ..provenance import sha256_file
 
 BUNDLE_VERSION = "1.0.0"
@@ -38,6 +46,7 @@ NUMERIC_TOLERANCE = 1e-9
 VOLATILE_KEYS = {"analysis_id", "created_at", "run_id", "start_time", "end_time", "runtime_seconds", "assessment_ms", "timing", "evidence_sha256", "directory", "generated_at", "note"}
 SCORE_TOLERANCE = 1e-5  # same device: float32 embeddings; cosine scores are compared at this absolute tolerance
 CROSS_DEVICE_SCORE_TOLERANCE = 1e-3  # original and reproduction ran on different devices (cuda vs cpu kernels); recorded with the result
+BUNDLE_ARTIFACT_NAMES = ("bundle.qsexp",)
 
 
 class BundleError(RuntimeError):
@@ -57,30 +66,129 @@ def _json_yaml(value: Any) -> str:
 # -- export ---------------------------------------------------------------------
 
 
-def export_bundle(store: Any, *, run_id: str, root: Path, repository_root: Path) -> dict[str, Any]:
+def _bundle_request_sha256(
+    *, run_id: str, run_evidence_sha256: str, project_id: str
+) -> str:
+    encoded = json.dumps(
+        {
+            "version": BUNDLE_VERSION,
+            "run_id": run_id,
+            "run_evidence_sha256": run_evidence_sha256,
+            "project_id": project_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def recover_prepared_bundle(
+    directory: Path,
+    *,
+    bundle_id: str,
+    project_id: str,
+    request_sha256: str,
+) -> dict[str, Any]:
+    """Validate and recover one fully promoted bundle publication."""
+
+    try:
+        receipt = load_prepared_output(
+            directory,
+            operation_kind="EXPERIMENT_BUNDLE",
+            result_id=bundle_id,
+            project_id=project_id,
+            request_sha256=request_sha256,
+            artifact_names=BUNDLE_ARTIFACT_NAMES,
+        )
+        record = receipt["record"]
+        bundle_path = directory / "bundle.qsexp"
+        if (
+            set(record)
+            != {
+                "bundle_id",
+                "project_id",
+                "run_id",
+                "path",
+                "sha256",
+                "size_bytes",
+                "manifest",
+                "created_at",
+            }
+            or record["bundle_id"] != bundle_id
+            or record["project_id"] != project_id
+            or record["path"] != str(bundle_path)
+            or record["sha256"] != sha256_file(bundle_path)
+            or record["size_bytes"] != bundle_path.stat().st_size
+            or not isinstance(record["manifest"], dict)
+            or record["manifest"].get("bundle_version") != BUNDLE_VERSION
+            or record["manifest"].get("project_id") != project_id
+            or record["manifest"].get("run_id") != record["run_id"]
+        ):
+            raise BundleError("prepared bundle record contract differs")
+        return record
+    except (PreparedOutputError, OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        if isinstance(error, BundleError):
+            raise
+        raise BundleError("prepared bundle failed integrity verification") from error
+
+
+def export_bundle(
+    store: Any,
+    *,
+    run_id: str,
+    root: Path,
+    repository_root: Path,
+    record_publication: bool = True,
+) -> dict[str, Any]:
     found = store.run(run_id)
     if found is None:
         raise BundleError("run is not recorded")
     run, evidence_sha256 = found
     experiment = store.experiment(run.experiment_id)
     project = store.project(run.project_id)
-    root.mkdir(parents=True, exist_ok=True)
-    stage = Path(tempfile.mkdtemp(prefix="qsexp-", dir=str(root)))
+    bundle_id = content_id("bundle", run_id, evidence_sha256, BUNDLE_VERSION)
+    directory = root / bundle_id.replace(":", "_")
+    request_sha256 = _bundle_request_sha256(
+        run_id=run_id,
+        run_evidence_sha256=evidence_sha256,
+        project_id=run.project_id,
+    )
+    if directory.exists():
+        record = recover_prepared_bundle(
+            directory,
+            bundle_id=bundle_id,
+            project_id=run.project_id,
+            request_sha256=request_sha256,
+        )
+        if record_publication:
+            store.record_experiment_bundle(record)
+        return record
+    stage = create_staging_directory(
+        directory,
+        operation_kind="EXPERIMENT_BUNDLE",
+        result_id=bundle_id,
+        project_id=run.project_id,
+        request_sha256=request_sha256,
+    )
+    assembly = stage / ".assembly"
+    assembly.mkdir()
     try:
-        (stage / "figures").mkdir()
-        (stage / "tables").mkdir()
+        (assembly / "figures").mkdir()
+        (assembly / "tables").mkdir()
         run_json = json.loads(run.model_dump_json())
-        (stage / "experiment.yaml").write_text(_json_yaml({"experiment": json.loads(experiment.model_dump_json()) if experiment else None, "run": run_json, "project": {"project_id": project.project_id, "name": project.name} if project else None}), encoding="utf-8")
+        (assembly / "experiment.yaml").write_text(_json_yaml({"experiment": json.loads(experiment.model_dump_json()) if experiment else None, "run": run_json, "project": {"project_id": project.project_id, "name": project.name} if project else None}), encoding="utf-8")
         protocol_doc: dict[str, Any] = {"pair_search_protocol": run_json["pair_search_protocol"], "subject_protocol": run_json["subject_protocol"]}
         protocol_id = run.pair_search_protocol.component_id if run.pair_search_protocol.state.value == "CONFIGURED" else None
         if protocol_id:
             protocol = store.protocol(protocol_id)
             if protocol is not None:
                 protocol_doc["protocol"] = json.loads(protocol.model_dump_json())
-        (stage / "protocol.yaml").write_text(_json_yaml(protocol_doc), encoding="utf-8")
+        (assembly / "protocol.yaml").write_text(_json_yaml(protocol_doc), encoding="utf-8")
         dataset_manifest = json.loads(run.dataset_manifest.text)
-        (stage / "dataset-manifest.json").write_text(json.dumps({"dataset_hash": run.dataset_hash, "manifest": dataset_manifest, "note": "sample paths and hashes only; image bytes are never bundled"}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        (stage / "environment.json").write_text(json.dumps({"application_version": run.application_version, "repository": run_json["repository"], "environment": run_json["environment"], "hardware": run_json["hardware"], "model_hashes": run_json["model_hashes"], "quality_engine": run_json["quality_engine"], "matcher": run_json["matcher"], "matcher_preprocessing": run_json["matcher_preprocessing"]}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        (assembly / "dataset-manifest.json").write_text(json.dumps({"dataset_hash": run.dataset_hash, "manifest": dataset_manifest, "note": "sample paths and hashes only; image bytes are never bundled"}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        (assembly / "environment.json").write_text(json.dumps({"application_version": run.application_version, "repository": run_json["repository"], "environment": run_json["environment"], "hardware": run_json["hardware"], "model_hashes": run_json["model_hashes"], "quality_engine": run_json["quality_engine"], "matcher": run_json["matcher"], "matcher_preprocessing": run_json["matcher_preprocessing"]}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         metrics_doc: dict[str, Any] = {"observations": run_json["metrics"], "configuration": json.loads(run.configuration.text)}
         results_copied = None
         for artifact in run.artifacts:
@@ -90,24 +198,24 @@ def export_bundle(store: Any, *, run_id: str, root: Path, repository_root: Path)
             if sha256_file(source) != artifact.sha256:
                 raise BundleError(f"artifact {artifact.uri} drifted from its recorded hash")
             if source.suffix == ".parquet" and results_copied is None:
-                shutil.copyfile(source, stage / "results.parquet")
+                shutil.copyfile(source, assembly / "results.parquet")
                 results_copied = artifact.uri
             elif source.suffix == ".json":
                 metrics_doc[source.name] = json.loads(source.read_text(encoding="utf-8"))
             elif source.suffix == ".parquet":
-                shutil.copyfile(source, stage / "tables" / source.name)
+                shutil.copyfile(source, assembly / "tables" / source.name)
             elif source.suffix == ".npy":
-                shutil.copyfile(source, stage / "tables" / source.name)
-        (stage / "metrics.json").write_text(json.dumps(metrics_doc, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+                shutil.copyfile(source, assembly / "tables" / source.name)
+        (assembly / "metrics.json").write_text(json.dumps(metrics_doc, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
         for figure in store.figures(project_id=run.project_id):
             if run_id in json.loads(figure["source_run_ids_json"]):
                 provenance = json.loads(figure["provenance_json"])
-                target = stage / "figures" / figure["figure_id"].replace(":", "_")
+                target = assembly / "figures" / figure["figure_id"].replace(":", "_")
                 target.mkdir()
                 for name, item in provenance["files"].items():
                     shutil.copyfile(item["path"], target / Path(item["path"]).name)
                 (target / "figure.provenance.json").write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        (stage / "README.md").write_text(
+        (assembly / "README.md").write_text(
             f"# QualSight reproducibility bundle\n\nRun `{run_id}` (evidence sha256 `{evidence_sha256}`), exported {_now()} by QualSight {run.application_version}.\n\n"
             "Contents: manifest.json, experiment.yaml, protocol.yaml, dataset-manifest.json (paths and hashes only — no image bytes), environment.json, metrics.json, results.parquet, figures/, tables/, checksums.sha256.\n\n"
             "Reproduce with `qualsight reproduce-bundle <this file>`: it validates checksums, dependencies, input hashes, and model versions, re-executes the recorded analysis, and reports EXACT, WITHIN_TOLERANCE, DIFFERENT, MISSING_DEPENDENCY, MISSING_DATA, or BLOCKED. Target results are never modified.\n",
@@ -115,20 +223,41 @@ def export_bundle(store: Any, *, run_id: str, root: Path, repository_root: Path)
         )
         manifest = {"bundle_version": BUNDLE_VERSION, "kind": "QUALSIGHT_EXPERIMENT_BUNDLE", "run_id": run_id, "run_evidence_sha256": evidence_sha256, "project_id": run.project_id, "experiment_id": run.experiment_id, "results_source": results_copied,
                     "run_kind": _run_kind(run), "exported_at": _now(), "restricted_images_included": False}
-        (stage / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        (assembly / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         checksum_lines = []
-        for path in sorted(p for p in stage.rglob("*") if p.is_file()):
-            checksum_lines.append(f"{sha256_file(path)}  {path.relative_to(stage).as_posix()}")
-        (stage / "checksums.sha256").write_text("\n".join(checksum_lines) + "\n", encoding="utf-8")
-        bundle_id = content_id("bundle", run_id, evidence_sha256, BUNDLE_VERSION)
-        bundle_path = root / f"{bundle_id.replace(':', '_')}.qsexp"
-        with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for path in sorted(p for p in stage.rglob("*") if p.is_file()):
-                archive.write(path, path.relative_to(stage).as_posix())
+        for path in sorted(p for p in assembly.rglob("*") if p.is_file()):
+            checksum_lines.append(f"{sha256_file(path)}  {path.relative_to(assembly).as_posix()}")
+        (assembly / "checksums.sha256").write_text("\n".join(checksum_lines) + "\n", encoding="utf-8")
+        stage_bundle = stage / "bundle.qsexp"
+        with zipfile.ZipFile(stage_bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(p for p in assembly.rglob("*") if p.is_file()):
+                archive.write(path, path.relative_to(assembly).as_posix())
+        shutil.rmtree(assembly)
+        bundle_path = directory / "bundle.qsexp"
+        record = {"bundle_id": bundle_id, "project_id": run.project_id, "run_id": run_id, "path": str(bundle_path), "sha256": sha256_file(stage_bundle), "size_bytes": stage_bundle.stat().st_size, "manifest": manifest, "created_at": _now()}
+        prepare_and_publish(
+            stage,
+            directory,
+            operation_kind="EXPERIMENT_BUNDLE",
+            result_id=bundle_id,
+            project_id=run.project_id,
+            request_sha256=request_sha256,
+            artifact_names=BUNDLE_ARTIFACT_NAMES,
+            record=record,
+        )
+    except FileExistsError:
+        record = recover_prepared_bundle(
+            directory,
+            bundle_id=bundle_id,
+            project_id=run.project_id,
+            request_sha256=request_sha256,
+        )
+    except PreparedOutputError as error:
+        raise BundleError(str(error)) from error
     finally:
-        shutil.rmtree(stage, ignore_errors=True)
-    record = {"bundle_id": bundle_id, "project_id": run.project_id, "run_id": run_id, "path": str(bundle_path), "sha256": sha256_file(bundle_path), "size_bytes": bundle_path.stat().st_size, "manifest": manifest, "created_at": _now()}
-    store.record_experiment_bundle(record)
+        discard_staging_directory(stage)
+    if record_publication:
+        store.record_experiment_bundle(record)
     return record
 
 
@@ -206,7 +335,13 @@ def _worse(a: str, b: str) -> str:
     return a if order[a] >= order[b] else b
 
 
-def reproduce_bundle(bundle_path: Path, *, store: Any, registry: Any, repository_root: Path, work_root: Path, project_service: Any, engine: Any = None) -> ReproductionResult:
+def reproduce_bundle(bundle_path: Path, *, store: Any, registry: Any, repository_root: Path, work_root: Path, project_service: Any, execution_timeout_seconds: float, engine: Any = None) -> ReproductionResult:
+    try:
+        execution_timeout_seconds = validate_execution_timeout(
+            execution_timeout_seconds
+        )
+    except ValueError as error:
+        raise BundleError(str(error)) from error
     steps: list[dict[str, Any]] = []
     bundle_sha = sha256_file(bundle_path)
     created_at = _now()
@@ -324,7 +459,7 @@ def reproduce_bundle(bundle_path: Path, *, store: Any, registry: Any, repository
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
     if kind == "MATCHER":
-        return _reproduce_matcher(run_json, configuration, metrics_doc, bundle_path, store, registry, repository_root, work_root, project_service, steps, finish, original_run_id, project_id)
+        return _reproduce_matcher(run_json, configuration, metrics_doc, bundle_path, store, registry, repository_root, work_root, project_service, steps, finish, original_run_id, project_id, execution_timeout_seconds)
     if kind == "QUALITY":
         return _reproduce_batch(run_json, configuration, metrics_doc, bundle_path, store, registry, repository_root, work_root, project_service, steps, finish, original_run_id, project_id, engine)
     steps.append({"step": "execute", "ok": False, "kind": kind, "reason": "unknown Run kind"})
@@ -337,7 +472,7 @@ def _bundle_results(bundle_path: Path) -> list[dict[str, Any]]:
         return pq.read_table(Path(scratch) / "results.parquet").to_pylist()
 
 
-def _reproduce_matcher(run_json, configuration, metrics_doc, bundle_path, store, registry, repository_root, work_root, project_service, steps, finish, original_run_id, project_id):
+def _reproduce_matcher(run_json, configuration, metrics_doc, bundle_path, store, registry, repository_root, work_root, project_service, steps, finish, original_run_id, project_id, execution_timeout_seconds):
     from ..domain.entities import Dataset  # noqa: F401 - typing aid
     from ..matchers.conditions import ConditionId
     from ..matchers.matrix import MatcherMatrixJob, MatrixError
@@ -374,7 +509,7 @@ def _reproduce_matcher(run_json, configuration, metrics_doc, bundle_path, store,
     try:
         try:
             job = MatcherMatrixJob(registry=registry, registry_path=repository_root / "resources" / "resource-registry.json", repository_root=repository_root, upstream=upstream, store=_NonRecordingStore(store), project=project, dataset=dataset, protocol=protocol, pairs=pairs,
-                                   job_root=scratch, matchers=(matcher_id,), conditions=(condition,), selection_rule="reproduction of a bundled Run: the bundled pair set", purpose_scope=configuration.get("purpose_scope", "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"))
+                                   job_root=scratch, matchers=(matcher_id,), conditions=(condition,), selection_rule="reproduction of a bundled Run: the bundled pair set", purpose_scope=configuration.get("purpose_scope", "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"), execution_timeout_seconds=execution_timeout_seconds)
         except MatrixError as error:
             steps.append({"step": "execute", "ok": False, "reason": str(error)})
             return finish(ReproductionState.BLOCKED.value, original_run_id, project_id=project_id)

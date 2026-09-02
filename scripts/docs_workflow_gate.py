@@ -48,7 +48,7 @@ def main() -> int:
     script = "set -euo pipefail\n" + "\n".join(f"# --- USER_GUIDE.md block {index + 1}\n{block}" for index, block in enumerate(blocks)) + "\n"
     script_path = work / "user_guide_gate.sh"
     script_path.write_text(script, encoding="utf-8")
-    env = {**os.environ, "QUALSIGHT_ROOT": str(ROOT), "UV": UV, "WORK": str(work), "OFIQ_R01_IMAGE": r01, "QUALSIGHT_DATA_DIR": str(data_dir), "QUALSIGHT_REPOSITORY_ROOT": str(ROOT), "PATH": f"/usr/bin:{os.environ.get('PATH', '')}"}
+    env = {**os.environ, "QUALSIGHT_ROOT": str(ROOT), "UV": UV, "WORK": str(work), "OFIQ_R01_IMAGE": r01, "QUALSIGHT_DATA_DIR": str(data_dir), "QUALSIGHT_REPOSITORY_ROOT": str(ROOT)}
     started = time.time()
     result = subprocess.run(["bash", str(script_path)], cwd=str(ROOT), env=env, capture_output=True, text=True, check=False)
     observation = {

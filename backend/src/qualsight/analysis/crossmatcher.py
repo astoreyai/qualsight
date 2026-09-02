@@ -10,7 +10,7 @@ workbench shows; nothing is re-scored.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import hashlib
 from itertools import combinations
@@ -28,6 +28,13 @@ from ..domain.primitives import ArtifactIdentity as DomainArtifactIdentity, Cano
 from ..domain.run import CompletedRun, LogRecord, MetricObservation, RunStatus, ScientificSupportState
 from ..engines.ofiq.adapter import content_id
 from ..execution.cli_runtime import USABLE_RESOURCE_STATES
+from ..execution.prepared_output import (
+    PreparedOutputError,
+    create_staging_directory,
+    discard_staging_directory,
+    load_prepared_output,
+    prepare_and_publish,
+)
 from ..metrics.statistics import CONFIDENCE_LEVEL, clopper_pearson, logistic_regression_multi, pair_subject_multi_membership_bootstrap, roc_auc, spearman
 from ..metrics.utility import ErcInputs, PAIR_QUALITY_POLICY_VERSION, POLICY_DEFINITIONS, PairQualityPolicy, _area_from_units, compute_erc, pair_quality
 from ..metrics.verification import operating_point_with_support
@@ -70,6 +77,71 @@ class CrossMatcherResult:
     document_path: Path
     pairs_path: Path
     summary: dict[str, Any]
+
+
+CROSS_MATCHER_ARTIFACT_NAMES = ("contrast_pairs.parquet", "crossmatcher.json")
+
+
+def recover_prepared_cross_matcher_analysis(
+    directory: Path,
+    *,
+    analysis_id: str,
+    project_id: str,
+    request_sha256: str,
+) -> CrossMatcherResult:
+    """Reconstruct a typed cross-matcher result from its final receipt."""
+
+    try:
+        receipt = load_prepared_output(
+            directory,
+            operation_kind="CROSS_MATCHER_ANALYSIS",
+            result_id=analysis_id,
+            project_id=project_id,
+            request_sha256=request_sha256,
+            artifact_names=CROSS_MATCHER_ARTIFACT_NAMES,
+        )
+        record = receipt["record"]
+        if set(record) != {"experiment", "run", "summary"}:
+            raise CrossMatcherError("prepared cross-matcher result contract differs")
+        run = CompletedRun.model_validate_json(
+            json.dumps(record["run"], separators=(",", ":"), ensure_ascii=False)
+        )
+        experiment = Experiment.model_validate_json(
+            json.dumps(record["experiment"], separators=(",", ":"), ensure_ascii=False)
+        )
+        summary = record["summary"]
+        document_path = directory / "crossmatcher.json"
+        pairs_path = directory / "contrast_pairs.parquet"
+        document = json.loads(document_path.read_text(encoding="utf-8"))
+        expected_paths = {str(document_path), str(pairs_path)}
+        if (
+            run.project_id != project_id
+            or experiment.project_id != project_id
+            or summary.get("analysis_id") != analysis_id
+            or summary.get("run_id") != run.run_id
+            or {artifact.uri for artifact in run.artifacts} != expected_paths
+            or any(
+                sha256_file(Path(artifact.uri)) != artifact.sha256
+                for artifact in run.artifacts
+            )
+        ):
+            raise CrossMatcherError("prepared cross-matcher result identity differs")
+        return CrossMatcherResult(
+            analysis_id,
+            run,
+            experiment,
+            document,
+            directory,
+            document_path,
+            pairs_path,
+            summary,
+        )
+    except (PreparedOutputError, OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        if isinstance(error, CrossMatcherError):
+            raise
+        raise CrossMatcherError(
+            "prepared cross-matcher result failed integrity verification"
+        ) from error
 
 
 @dataclass
@@ -335,7 +407,7 @@ class CrossMatcherJob:
 
     # -- run --------------------------------------------------------------------
 
-    def run(self) -> CrossMatcherResult:
+    def run(self, *, request_sha256: str | None = None) -> CrossMatcherResult:
         started = _now()
         clock = time.monotonic()
         request = self.request
@@ -357,8 +429,17 @@ class CrossMatcherJob:
         for matcher, items in sorted(self.sets["fixed_matcher"].items()):
             for x, y in combinations(items, 2):
                 contrasts.append(self._contrast(CONTRAST_KINDS["preprocessing"], by_id[x["run_id"]], by_id[y["run_id"]], quality, quality_left, quality_right, pair_rows))
-        self.directory.mkdir(parents=True, exist_ok=False)
-        pairs_path = self.directory / "contrast_pairs.parquet"
+        effective_request_sha256 = request_sha256 or CanonicalJson.from_value(
+            asdict(self.request)
+        ).sha256
+        stage = create_staging_directory(
+            self.directory,
+            operation_kind="CROSS_MATCHER_ANALYSIS",
+            result_id=self.analysis_id,
+            project_id=self.project.project_id,
+            request_sha256=effective_request_sha256,
+        )
+        pairs_path = stage / "contrast_pairs.parquet"
         pq.write_table(pa.Table.from_pylist(pair_rows), pairs_path, compression="zstd")
         document = {
             "analysis_id": self.analysis_id, "kind": ANALYSIS_KIND, "version": ANALYSIS_VERSION,
@@ -375,10 +456,10 @@ class CrossMatcherJob:
             "contrasts": contrasts,
             "rules": ["matcher contrasts hold the preprocessing condition fixed", "preprocessing contrasts hold the matcher and the protocol fixed", "no pooled cross-condition number is reported", "no single matcher-independence score is defined"],
         }
-        document_path = self.directory / "crossmatcher.json"
+        document_path = stage / "crossmatcher.json"
         document_path.write_text(json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
         seconds = time.monotonic() - clock
-        run, experiment = self._run(started, seconds, document, document_path, pairs_path, leaves)
+        run, experiment = self._run(started, seconds, document, document_path, pairs_path, leaves, artifact_directory=self.directory)
         summary = {
             "analysis_id": self.analysis_id, "run_id": run.run_id, "matrix_id": request.matrix_id, "quality_job_id": request.quality_job_id, "quality_measure": request.quality_measure,
             "pair_quality_policy": self.policy.value, "target_fmr": request.target_fmr, "matcher_contrasts": sum(1 for c in contrasts if c["kind"] == CONTRAST_KINDS["matcher"]),
@@ -389,11 +470,38 @@ class CrossMatcherJob:
                            "au_erc_diff_fnmr_ci": [c["au_erc_differences"]["FNMR"]["au_erc"]["uncertainty"].get("ci_lower"), c["au_erc_differences"]["FNMR"]["au_erc"]["uncertainty"].get("ci_upper")] if c["au_erc_differences"]["FNMR"]["au_erc"]["uncertainty"] else None,
                            "interaction_status": c["quality_matcher_interaction"].get("status")} for c in contrasts],
         }
-        result = CrossMatcherResult(self.analysis_id, run, experiment, document, self.directory, document_path, pairs_path, summary)
+        result = CrossMatcherResult(
+            self.analysis_id,
+            run,
+            experiment,
+            document,
+            self.directory,
+            self.directory / document_path.name,
+            self.directory / pairs_path.name,
+            summary,
+        )
+        try:
+            prepare_and_publish(
+                stage,
+                self.directory,
+                operation_kind="CROSS_MATCHER_ANALYSIS",
+                result_id=self.analysis_id,
+                project_id=self.project.project_id,
+                request_sha256=effective_request_sha256,
+                artifact_names=CROSS_MATCHER_ARTIFACT_NAMES,
+                record={
+                    "run": json.loads(run.model_dump_json()),
+                    "experiment": json.loads(experiment.model_dump_json()),
+                    "summary": summary,
+                },
+            )
+        except BaseException:
+            discard_staging_directory(stage)
+            raise
         self.store.record_cross_matcher_analysis(result)
         return result
 
-    def _run(self, started: datetime, seconds: float, document: dict[str, Any], document_path: Path, pairs_path: Path, leaves: list[LeafData]) -> tuple[CompletedRun, Experiment]:
+    def _run(self, started: datetime, seconds: float, document: dict[str, Any], document_path: Path, pairs_path: Path, leaves: list[LeafData], *, artifact_directory: Path | None = None) -> tuple[CompletedRun, Experiment]:
         request = self.request
         source = leaves[0].run
         uncertainty_estimated = document["uncertainty"].get("status") == "ESTIMATED"
@@ -421,7 +529,8 @@ class CrossMatcherJob:
         artifacts = []
         for path, kind, media, backend in ((document_path, ArtifactKind.METRICS, "application/json", StorageBackend.FILESYSTEM), (pairs_path, ArtifactKind.TABLE, "application/vnd.apache.parquet", StorageBackend.PARQUET)):
             digest = sha256_file(path)
-            artifacts.append(Artifact(artifact_id=content_id("artifact", run_id, digest, path.name), run_id=run_id, kind=kind, storage_backend=backend, uri=str(path), sha256=digest, size_bytes=path.stat().st_size, media_type=media, classification=DataClassification.SENSITIVE_BIOMETRIC_DERIVED, created_at=_now()))
+            artifact_path = (artifact_directory / path.name) if artifact_directory is not None else path
+            artifacts.append(Artifact(artifact_id=content_id("artifact", run_id, digest, path.name), run_id=run_id, kind=kind, storage_backend=backend, uri=str(artifact_path), sha256=digest, size_bytes=path.stat().st_size, media_type=media, classification=DataClassification.SENSITIVE_BIOMETRIC_DERIVED, created_at=_now()))
         run = CompletedRun(
             run_id=run_id, project_id=self.project.project_id, experiment_id=experiment_id, user_id=self.actor,
             dataset_manifest=source.dataset_manifest, dataset_hash=source.dataset_hash, subject_protocol=source.subject_protocol, pair_search_protocol=source.pair_search_protocol,

@@ -63,7 +63,9 @@ class PairEvidenceRealTests(unittest.TestCase):
         cls.quality_job_id = started.json()["job_id"]
         deadline = time.monotonic() + 300
         while time.monotonic() < deadline:
-            body = cls.client.get(f"/api/jobs/{cls.quality_job_id}").json()
+            body = cls.client.get(
+                f"/api/projects/{cls.project_id}/jobs/{cls.quality_job_id}"
+            ).json()
             if body["state"] in {"COMPLETED", "FAILED"} and body["ended_at"]:
                 break
             time.sleep(0.5)
@@ -83,7 +85,7 @@ class PairEvidenceRealTests(unittest.TestCase):
         deadline = time.monotonic() + 600
         status: dict = {}
         while time.monotonic() < deadline:
-            status = cls.client.get(f"/api/matrices/{matrix_id}").json()
+            status = cls.client.get(f"/api/projects/{cls.project_id}/matrices/{matrix_id}").json()
             if status["leaves"] or status["progress"]["phase"] == "failed":
                 break
             time.sleep(1.0)
@@ -101,8 +103,9 @@ class PairEvidenceRealTests(unittest.TestCase):
 
     def test_y85_detection_geometry_is_labelled_and_hash_verified(self) -> None:
         response = self.client.get(
-            "/api/detection",
-            params={"sample_id": self.scored_pair["left_sample_id"], "condition_id": self.leaf["condition_id"]},
+            f"/api/projects/{self.project_id}/samples/"
+            f"{self.scored_pair['left_sample_id']}/detection",
+            params={"condition_id": self.leaf["condition_id"]},
         )
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
@@ -115,7 +118,8 @@ class PairEvidenceRealTests(unittest.TestCase):
 
     def test_z90_ofiq_internal_landmarks_are_emitted_and_labelled(self) -> None:
         response = self.client.get(
-            "/api/ofiq-landmarks", params={"sample_id": self.scored_pair["left_sample_id"]}
+            f"/api/projects/{self.project_id}/samples/"
+            f"{self.scored_pair['left_sample_id']}/ofiq-landmarks"
         )
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
@@ -138,12 +142,16 @@ class PairEvidenceRealTests(unittest.TestCase):
         self.assertGreaterEqual(inside, 95, f"landmarks not in original-image space: {inside}/98 inside the face box")
         # Independent geometry: OFIQ's landmarks and SCRFD's five points are separate sources.
         scrfd = self.client.get(
-            "/api/detection", params={"sample_id": self.scored_pair["left_sample_id"]}
+            f"/api/projects/{self.project_id}/samples/"
+            f"{self.scored_pair['left_sample_id']}/detection"
         ).json()
         self.assertNotEqual(len(body["landmarks"]), len(scrfd["detections"][0]["landmarks"]))
 
     def test_y85_unrecorded_sample_is_refused(self) -> None:
-        response = self.client.get("/api/detection", params={"path": "/etc/hostname"})
+        response = self.client.get(
+            "/api/detection",
+            params={"registered_sample_id": "registered-sample:sha256:" + "0" * 64},
+        )
         self.assertEqual(response.status_code, 404)
 
     # -- QS-Y86 ----------------------------------------------------------------
@@ -154,19 +162,47 @@ class PairEvidenceRealTests(unittest.TestCase):
         pair_id = self.scored_pair["pair_id"]
         run_id = self.leaf["run_id"]
         for side in ("left", "right"):
-            response = self.client.get(f"/api/matcher-runs/{run_id}/pairs/{pair_id}/crops/{side}")
+            response = self.client.get(f"/api/projects/{self.project_id}/matcher-runs/{run_id}/pairs/{pair_id}/crops/{side}")
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.headers["content-type"], "image/png")
             self.assertTrue(response.headers["x-crop-sha256"])
             image = cv2.imdecode(np.frombuffer(response.content, dtype=np.uint8), cv2.IMREAD_COLOR)
             self.assertEqual(image.shape, (112, 112, 3))
 
+    def test_pair_evidence_and_crop_deny_a_foreign_project_before_emitting_bytes(self) -> None:
+        foreign = self.client.post(
+            "/api/projects",
+            json={
+                "name": "pair evidence foreign project",
+                "description": "Real project used to prove pair evidence isolation.",
+                "purpose_scope": RESEARCH_SCOPE,
+            },
+        )
+        self.assertEqual(foreign.status_code, 201, foreign.text)
+        foreign_project_id = foreign.json()["project_id"]
+        pair_id = self.scored_pair["pair_id"]
+        run_id = self.leaf["run_id"]
+        responses = (
+            self.client.get(
+                f"/api/projects/{foreign_project_id}/matcher-runs/{run_id}/pairs/{pair_id}/evidence"
+            ),
+            self.client.get(
+                f"/api/projects/{foreign_project_id}/matcher-runs/{run_id}/pairs/{pair_id}/crops/left"
+            ),
+        )
+        for response in responses:
+            self.assertEqual(response.status_code, 404, response.text)
+            lowered_headers = {name.lower() for name in response.headers}
+            self.assertNotIn("content-disposition", lowered_headers)
+            self.assertNotIn("x-crop-sha256", lowered_headers)
+            self.assertFalse(any("sha256" in name for name in lowered_headers))
+
     # -- QS-Y87 ----------------------------------------------------------------
 
     def test_y87_pair_evidence_places_score_on_recorded_distributions(self) -> None:
         pair_id = self.scored_pair["pair_id"]
         run_id = self.leaf["run_id"]
-        response = self.client.get(f"/api/matcher-runs/{run_id}/pairs/{pair_id}/evidence")
+        response = self.client.get(f"/api/projects/{self.project_id}/matcher-runs/{run_id}/pairs/{pair_id}/evidence")
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertEqual(body["pair"]["pair_id"], pair_id)
@@ -197,7 +233,7 @@ class PairEvidenceRealTests(unittest.TestCase):
         self.assertNotIn("because", body["statement"].lower())
 
     def test_y87_unknown_pair_is_refused(self) -> None:
-        response = self.client.get(f"/api/matcher-runs/{self.leaf['run_id']}/pairs/not-a-pair/evidence")
+        response = self.client.get(f"/api/projects/{self.project_id}/matcher-runs/{self.leaf['run_id']}/pairs/not-a-pair/evidence")
         self.assertEqual(response.status_code, 404)
 
 

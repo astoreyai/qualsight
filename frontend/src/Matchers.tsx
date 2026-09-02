@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type AddonCatalogOut, type ComparisonRow, type DatasetOut, type MatcherAddonOut, type MatcherErrors, type MatcherLeaf, type MatrixStatus, type PreprocessingAddonOut } from "./api";
 import { PairEvidence } from "./PairEvidence";
+import { EvidenceOpenButton, type EvidenceRequest } from "./EvidenceDetail";
 import { numericParameterError } from "./parameterContract";
 
 const POLICY = "EXCLUDE_FAILED_TRIALS";
@@ -18,16 +19,30 @@ function fileName(path: string): string {
 }
 
 interface MatchersProps {
+  active: boolean;
   projectId: string | null;
   datasetId: string | null;
   onMessage: (message: string) => void;
   onWorkflowTerminal?: () => void;
+  onContextChange?: (context: MatcherHeaderContext | null) => void;
+  onOpenEvidence: (request: EvidenceRequest) => void;
+}
+
+export interface MatcherHeaderContext {
+  projectId: string;
+  datasetId: string;
+  protocolId: string | null;
+  protocolLabel: string | null;
+  leafId: string | null;
+  leafLabel: string | null;
+  runId: string | null;
 }
 
 interface DetPoint { fmr: number; fnmr: number; threshold: number }
 
 /** Verification workbench: matrix execution, six-leaf metrics table, DET overlay, error drilldown (QS-C22..C24). */
-export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }: MatchersProps) {
+export function Matchers({ active, projectId, datasetId, onMessage, onWorkflowTerminal, onContextChange, onOpenEvidence }: MatchersProps) {
+  const contextKey = `${projectId ?? ""}\u001f${datasetId ?? ""}`;
   const [protocolId, setProtocolId] = useState<string | null>(null);
   const [protocolSummary, setProtocolSummary] = useState<string>("");
   const [leaves, setLeaves] = useState<MatcherLeaf[]>([]);
@@ -50,6 +65,7 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
   const [analysisContracts, setAnalysisContracts] = useState<AddonCatalogOut["analysis_parameters"] | null>(null);
   const [feedLoading, setFeedLoading] = useState(true);
   const [feedError, setFeedError] = useState<string | null>(null);
+  const [resolvedContextKey, setResolvedContextKey] = useState("");
   const [datasetLoading, setDatasetLoading] = useState(false);
   const [datasetError, setDatasetError] = useState<string | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
@@ -93,8 +109,8 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
   }, []);
 
   useEffect(() => {
-    void loadCatalog();
-  }, [loadCatalog]);
+    if (active) void loadCatalog();
+  }, [active, loadCatalog]);
 
   const refresh = useCallback(async () => {
     const epoch = scopeEpoch.current;
@@ -103,6 +119,7 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
       setLeaves([]);
       setProtocolId(null);
       setProtocolSummary("");
+      setResolvedContextKey("");
       setFeedLoading(false);
       setFeedError(null);
       return;
@@ -126,9 +143,10 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
     } else {
       failures.push(`Matcher Run feed unavailable: ${leafResult.reason instanceof Error ? leafResult.reason.message : String(leafResult.reason)}`);
     }
+    setResolvedContextKey(contextKey);
     setFeedError(failures.length ? failures.join(" · ") : null);
     setFeedLoading(false);
-  }, [projectId, datasetId]);
+  }, [projectId, datasetId, contextKey]);
 
   useLayoutEffect(() => {
     scopeEpoch.current += 1;
@@ -139,6 +157,7 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
     activeMatrixId.current = null;
     terminalNotifiedMatrix.current = null;
     setProtocolId(null); setProtocolSummary("");
+    setResolvedContextKey("");
     setLeaves([]); setMatrix(null); setDataset(null);
     setSelectedLeaf(null); setErrors(null); setErrorsLoading(false); setErrorsError(null); setThresholdInput("");
     setDetCurves({}); setOwnerPairSeed("");
@@ -148,13 +167,13 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
   }, [projectId, datasetId]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (active) void refresh();
+  }, [active, refresh]);
 
   const loadDataset = useCallback(async () => {
     const epoch = scopeEpoch.current;
     const sequence = ++datasetSequence.current;
-    if (!datasetId) {
+    if (!projectId || !datasetId) {
       setDataset(null);
       setDatasetLoading(false);
       setDatasetError(null);
@@ -163,7 +182,7 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
     setDatasetLoading(true);
     setDatasetError(null);
     try {
-      const nextDataset = await api.dataset(datasetId);
+      const nextDataset = await api.dataset(projectId, datasetId);
       if (scopeEpoch.current !== epoch || datasetSequence.current !== sequence || nextDataset.dataset_id !== datasetId) return;
       setDataset(nextDataset);
     } catch (error) {
@@ -172,11 +191,11 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
     } finally {
       if (scopeEpoch.current === epoch && datasetSequence.current === sequence) setDatasetLoading(false);
     }
-  }, [datasetId]);
+  }, [datasetId, projectId]);
 
   useEffect(() => {
-    void loadDataset();
-  }, [loadDataset]);
+    if (active) void loadDataset();
+  }, [active, loadDataset]);
 
   const managedPairDataset = dataset?.manifest["source_kind"] === "MANAGED_PREALIGNED_PAIR_DATASET";
   const desiredRepresentation = managedPairDataset
@@ -198,12 +217,12 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
   }, [datasetId, compatibleProfileOptions]);
 
   useEffect(() => {
-    if (!matrix || ["completed", "failed"].includes(matrix.progress.phase)) return;
+    if (!matrix || !projectId || ["completed", "failed"].includes(matrix.progress.phase)) return;
     const epoch = scopeEpoch.current;
     const matrixId = matrix.matrix_id;
     const handle = window.setInterval(() => {
       const sequence = ++matrixPollSequence.current;
-      api.matrix(matrixId).then((status) => {
+      api.matrix(projectId, matrixId).then((status) => {
         if (scopeEpoch.current !== epoch || matrixPollSequence.current !== sequence || activeMatrixId.current !== matrixId) return;
         setPollError(null);
         setMatrix(status);
@@ -224,7 +243,7 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
       });
     }, 2000);
     return () => window.clearInterval(handle);
-  }, [matrix, refresh, onMessage, onWorkflowTerminal]);
+  }, [matrix, projectId, refresh, onMessage, onWorkflowTerminal]);
 
   // Load DET curves for the currently listed leaves (latest matrix only).
   const executedLeaves = useMemo(() => leaves.filter((leaf) => leaf.condition_id !== "EXTERNALLY_COMPUTED"), [leaves]);
@@ -251,11 +270,12 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
   }, []);
 
   useEffect(() => {
+    if (!active) return;
     void loadExternalResources();
     return () => {
       externalResourceSequence.current += 1;
     };
-  }, [loadExternalResources]);
+  }, [active, loadExternalResources]);
   const importExternal = useCallback(async () => {
     if (!projectId || !protocolId || !externalResource) return;
     const epoch = scopeEpoch.current;
@@ -274,7 +294,7 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
   useEffect(() => {
     let cancelled = false;
     Promise.all(
-      shownLeaves.map((leaf) => api.matcherMetrics(leaf.run_id).then((body) => [leaf.leaf_id, body.metrics.by_policy[POLICY].det.points as DetPoint[]] as const)),
+      shownLeaves.map((leaf) => api.matcherMetrics(projectId!, leaf.run_id).then((body) => [leaf.leaf_id, body.metrics.by_policy[POLICY].det.points as DetPoint[]] as const)),
     )
       .then((entries) => {
         if (!cancelled) {
@@ -290,7 +310,7 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
     return () => {
       cancelled = true;
     };
-  }, [shownLeaves]);
+  }, [shownLeaves, projectId]);
 
   const freeze = useCallback(async () => {
     if (!projectId || !datasetId || !dataset) return;
@@ -354,7 +374,8 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
       setErrorsLoading(true);
       setThresholdInput("");
       try {
-        const nextErrors = await api.matcherErrors(leaf.run_id, threshold);
+        if (!projectId) throw new Error("no active project");
+        const nextErrors = await api.matcherErrors(projectId, leaf.run_id, threshold);
         if (scopeEpoch.current !== epoch || errorsSequence.current !== sequence) return;
         if (nextErrors.run_id !== leaf.run_id) {
           setErrorsError(`Matcher-error response attribution mismatch: requested ${shortHash(leaf.run_id)} but received ${shortHash(nextErrors.run_id)}.`);
@@ -372,7 +393,7 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
         if (scopeEpoch.current === epoch && errorsSequence.current === sequence) setErrorsLoading(false);
       }
     },
-    [onMessage],
+    [projectId, onMessage],
   );
 
   const grouped = useMemo(() => {
@@ -386,6 +407,27 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
   const conditions = compatibleProfileOptions.map((profile) => profile.addon_id);
   const matcherLabel = (matcherId: string) => matcherOptions.find((item) => item.matcher_id === matcherId)?.name ?? matcherId;
   const conditionLabel = (conditionId: string) => profileOptions.find((item) => item.addon_id === conditionId)?.display_name ?? conditionId;
+  useLayoutEffect(() => {
+    if (!projectId || !datasetId || resolvedContextKey !== contextKey) {
+      onContextChange?.(null);
+      return;
+    }
+    const matcher = selectedLeaf ? matcherOptions.find((item) => item.matcher_id === selectedLeaf.matcher_id) : null;
+    const profile = selectedLeaf ? profileOptions.find((item) => item.addon_id === selectedLeaf.condition_id) : null;
+    onContextChange?.({
+      projectId,
+      datasetId,
+      protocolId,
+      protocolLabel: protocolId ? (protocolSummary || "Protocol details unavailable") : null,
+      leafId: selectedLeaf?.leaf_id ?? null,
+      leafLabel: selectedLeaf
+        ? (matcher && profile ? `${matcher.name} · ${profile.display_name}` : "Matcher leaf details unavailable")
+        : null,
+      runId: selectedLeaf?.run_id ?? null,
+    });
+  }, [contextKey, datasetId, matcherOptions, onContextChange, profileOptions, projectId, protocolId, protocolSummary, resolvedContextKey, selectedLeaf]);
+
+  useLayoutEffect(() => () => onContextChange?.(null), [onContextChange]);
   const colors = ["#38bdf8", "#0ea5e9", "#34d399", "#10b981", "#f59e0b", "#d97706"];
   const ownerSupplied = dataset?.manifest["source_kind"] === "OWNER_SUPPLIED_LOCAL_INPUT";
   const ownerPairSeedError = ownerSupplied ? numericParameterError(ownerPairSeed, analysisContracts?.owner_pair_seed ?? null, "Pair selection seed") : null;
@@ -603,7 +645,7 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
         <div className="errors" data-testid="matcher-errors">
           <h3>
             {selectedLeaf.leaf_id} errors at threshold {errors.threshold.toFixed(4)} ({errors.policy}; {errors.threshold_equality_rule}) · condition {errors.condition_id} · transform {errors.transform_id} · run{" "}
-            <a href={`/api/runs/${errors.run_id}`} className="mono">{shortHash(errors.run_id, 14)}</a>
+            {projectId ? <EvidenceOpenButton testId="matcher-error-run-evidence" request={{ kind: "run", href: `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(errors.run_id)}`, evidenceId: errors.run_id, projectId, label: `Matcher-error Run ${shortHash(errors.run_id, 14)}` }} onOpen={onOpenEvidence} className="mono">{shortHash(errors.run_id, 14)}</EvidenceOpenButton> : shortHash(errors.run_id, 14)}
           </h3>
           <div className="controls-row">
             <label className="field-stack">
@@ -641,9 +683,9 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
               {errors.counts.false_matches} false matches · {errors.counts.false_non_matches} false non-matches · {errors.counts.processing_failures} processing failures
             </span>
           </div>
-          <ErrorList title="False matches (non-mated accepted)" rows={errors.false_matches} runId={selectedLeaf?.run_id ?? ""} />
-          <ErrorList title="False non-matches (mated rejected)" rows={errors.false_non_matches} runId={selectedLeaf?.run_id ?? ""} />
-          <ErrorList title="Processing failures (no score)" rows={errors.processing_failures} runId={selectedLeaf?.run_id ?? ""} />
+          <ErrorList title="False matches (non-mated accepted)" rows={errors.false_matches} runId={selectedLeaf?.run_id ?? ""} projectId={projectId} onOpenEvidence={onOpenEvidence} />
+          <ErrorList title="False non-matches (mated rejected)" rows={errors.false_non_matches} runId={selectedLeaf?.run_id ?? ""} projectId={projectId} onOpenEvidence={onOpenEvidence} />
+          <ErrorList title="Processing failures (no score)" rows={errors.processing_failures} runId={selectedLeaf?.run_id ?? ""} projectId={projectId} onOpenEvidence={onOpenEvidence} />
         </div>
       )}
       <div className="errors" data-testid="external-scores">
@@ -680,7 +722,7 @@ export function Matchers({ projectId, datasetId, onMessage, onWorkflowTerminal }
   );
 }
 
-function ErrorList({ title, rows, runId }: { title: string; rows: ComparisonRow[]; runId: string }) {
+function ErrorList({ title, rows, runId, projectId, onOpenEvidence }: { title: string; rows: ComparisonRow[]; runId: string; projectId: string | null; onOpenEvidence: (request: EvidenceRequest) => void }) {
   const [evidencePair, setEvidencePair] = useState<string | null>(null);
   if (rows.length === 0) return <p className="hint">{title}: none</p>;
   return (
@@ -696,14 +738,14 @@ function ErrorList({ title, rows, runId }: { title: string; rows: ComparisonRow[
               <span>{row.left_subject_id ?? "subject identity unavailable"} vs {row.right_subject_id ?? "subject identity unavailable"}</span>
               <span className="mono">{row.score === null ? `${row.failure} (${row.failure_side})` : `score ${row.score.toFixed(4)}`}</span>
               <span className="links">
-                <a href={row.links.left_sample}>{fileName(row.links.left_image ?? row.left_sample_id)}</a>
-                <a href={row.links.right_sample}>{fileName(row.links.right_image ?? row.right_sample_id)}</a>
+                {projectId ? <EvidenceOpenButton testId="matcher-left-sample-evidence" request={{ kind: "sample", href: row.links.left_sample, evidenceId: row.left_sample_id, projectId, label: `Left sample ${shortHash(row.left_sample_id, 14)}` }} onOpen={onOpenEvidence}>{fileName(row.links.left_image ?? row.left_sample_id)}</EvidenceOpenButton> : fileName(row.links.left_image ?? row.left_sample_id)}
+                {projectId ? <EvidenceOpenButton testId="matcher-right-sample-evidence" request={{ kind: "sample", href: row.links.right_sample, evidenceId: row.right_sample_id, projectId, label: `Right sample ${shortHash(row.right_sample_id, 14)}` }} onOpen={onOpenEvidence}>{fileName(row.links.right_image ?? row.right_sample_id)}</EvidenceOpenButton> : fileName(row.links.right_image ?? row.right_sample_id)}
                 <button type="button" className="secondary" data-testid="evidence-open" onClick={() => setEvidencePair(evidencePair === row.pair_id ? null : row.pair_id)}>
                   {evidencePair === row.pair_id ? "hide evidence" : "match evidence"}
                 </button>
               </span>
-              {evidencePair === row.pair_id && (
-                <PairEvidence runId={runId} pairId={row.pair_id} onClose={() => setEvidencePair(null)} />
+              {evidencePair === row.pair_id && projectId && (
+                <PairEvidence projectId={projectId} runId={runId} pairId={row.pair_id} onClose={() => setEvidencePair(null)} />
               )}
             </div>
           </li>

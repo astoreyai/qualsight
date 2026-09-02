@@ -7,16 +7,12 @@ import {
   type JobOut,
   type SampleQualityOut,
 } from "./api";
+import { EvidenceOpenButton, type EvidenceRequest } from "./EvidenceDetail";
 
 function shortHash(value: string, keep = 12): string {
   const marker = value.indexOf("sha256:");
   const digest = marker >= 0 ? value.slice(marker + 7) : value;
   return `${digest.slice(0, keep)}…`;
-}
-
-function fileName(path: string): string {
-  const parts = path.split("/");
-  return parts[parts.length - 1] ?? path;
 }
 
 function isTerminalJob(job: JobOut): boolean {
@@ -28,10 +24,11 @@ interface WorkbenchProps {
   onMessage: (message: string) => void;
   onDataset?: (dataset: DatasetOut | null) => void;
   onWorkflowTerminal?: () => void;
+  onOpenEvidence: (request: EvidenceRequest) => void;
 }
 
 /** Dataset import + batch execution + quality explorer for the active project (QS-B11..B13). */
-export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal }: WorkbenchProps) {
+export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal, onOpenEvidence }: WorkbenchProps) {
   const [datasets, setDatasets] = useState<DatasetOut[]>([]);
   const [datasetsProjectId, setDatasetsProjectId] = useState<string | null>(null);
   const [statistics, setStatistics] = useState<Record<string, any> | null>(null);
@@ -200,9 +197,9 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
     const datasetRequestEpoch = datasetEpoch.current;
     const sequence = ++statisticsSequence.current;
     setStatistics(null);
-    if (!dataset) return;
+    if (!projectId || !dataset) return;
     if (dataset.manifest["source_kind"] === "OWNER_SUPPLIED_LOCAL_INPUT") setSelection("all");
-    void api.datasetStatistics(dataset.dataset_id)
+    void api.datasetStatistics(projectId, dataset.dataset_id)
       .then((body) => {
         if (
           projectEpoch.current !== projectRequestEpoch
@@ -225,11 +222,12 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
     return () => {
       statisticsSequence.current += 1;
     };
-  }, [dataset, onMessage]);
+  }, [dataset, onMessage, projectId]);
 
   // Poll the active job until it ends.
   useEffect(() => {
-    if (!activeJob || isTerminalJob(activeJob) || currentDatasetId.current !== activeJob.dataset_id) return;
+    if (!projectId || !activeJob || isTerminalJob(activeJob) || currentDatasetId.current !== activeJob.dataset_id) return;
+    const requestedProjectId = projectId;
     const projectRequestEpoch = projectEpoch.current;
     const datasetRequestEpoch = datasetEpoch.current;
     const requestedDatasetId = activeJob.dataset_id;
@@ -240,10 +238,11 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
       handle = window.setTimeout(() => {
         const sequence = ++jobPollSequence.current;
         void api
-          .job(jobId)
+          .job(requestedProjectId, jobId)
           .then((job) => {
             if (
               cancelled
+              || currentProjectId.current !== requestedProjectId
               || projectEpoch.current !== projectRequestEpoch
               || datasetEpoch.current !== datasetRequestEpoch
               || currentDatasetId.current !== requestedDatasetId
@@ -263,6 +262,7 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
           .catch((error) => {
             if (
               cancelled
+              || currentProjectId.current !== requestedProjectId
               || projectEpoch.current !== projectRequestEpoch
               || datasetEpoch.current !== datasetRequestEpoch
               || currentDatasetId.current !== requestedDatasetId
@@ -279,7 +279,7 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
       if (handle !== null) window.clearTimeout(handle);
       jobPollSequence.current += 1;
     };
-  }, [activeJob, notifyTerminal, refresh]);
+  }, [activeJob, notifyTerminal, projectId, refresh]);
 
   const importLfw = useCallback(async () => {
     if (!projectId) return;
@@ -392,7 +392,7 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
   }, [projectId, dataset, selection, onMessage, notifyTerminal]);
 
   const cancelBatch = useCallback(async () => {
-    if (!activeJob) return;
+    if (!projectId || !activeJob) return;
     const requestedProjectId = projectId;
     const requestedDatasetId = activeJob.dataset_id;
     const requestedJobId = activeJob.job_id;
@@ -400,7 +400,7 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
     const datasetRequestEpoch = datasetEpoch.current;
     const actionRequestSequence = ++actionSequence.current;
     try {
-      const job = await api.cancelJob(requestedJobId);
+      const job = await api.cancelJob(requestedProjectId, requestedJobId);
       if (
         currentProjectId.current !== requestedProjectId
         || projectEpoch.current !== projectRequestEpoch
@@ -429,19 +429,21 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
   const openExplorer = useCallback(
     async (jobId: string) => {
       const requestedDatasetId = currentDatasetId.current;
-      if (!requestedDatasetId || !datasetJobs.some((job) => job.job_id === jobId && job.state === "COMPLETED")) return;
+      const selectedJob = datasetJobs.find((job) => job.job_id === jobId && job.state === "COMPLETED");
+      if (!projectId || !requestedDatasetId || !selectedJob) return;
       const projectRequestEpoch = projectEpoch.current;
       const datasetRequestEpoch = datasetEpoch.current;
       const sequence = ++explorerSequence.current;
       drillSequence.current += 1;
       sampleSequence.current += 1;
       setExplorerJobId(jobId);
+      setActiveJob(selectedJob);
       setDistribution(null);
       setSelectedBin(null);
       setDrill(null);
       setSampleQuality(null);
       try {
-        const nextDistribution = await api.distribution(jobId, "UnifiedQualityScore", "scalar", 20);
+        const nextDistribution = await api.distribution(projectId, jobId, "UnifiedQualityScore", "scalar", 20);
         if (
           projectEpoch.current !== projectRequestEpoch
           || datasetEpoch.current !== datasetRequestEpoch
@@ -458,14 +460,14 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
         ) onMessage(error instanceof Error ? error.message : String(error));
       }
     },
-    [datasetJobs, onMessage],
+    [datasetJobs, onMessage, projectId],
   );
 
   const selectBin = useCallback(
     async (index: number) => {
       if (!distribution || !explorerJobId) return;
       const requestedDatasetId = currentDatasetId.current;
-      if (!requestedDatasetId || !datasetJobs.some((job) => job.job_id === explorerJobId)) return;
+      if (!projectId || !requestedDatasetId || !datasetJobs.some((job) => job.job_id === explorerJobId)) return;
       const bin = distribution.bins[index];
       if (!bin) return;
       setSelectedBin(index);
@@ -477,7 +479,7 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
       const low = Math.ceil(bin.low);
       const high = index === distribution.bins.length - 1 ? Math.floor(bin.high) : Math.ceil(bin.high) - 1;
       try {
-        const nextDrill = await api.drilldown(explorerJobId, low, high);
+        const nextDrill = await api.drilldown(projectId, explorerJobId, low, high);
         if (
           projectEpoch.current !== projectRequestEpoch
           || datasetEpoch.current !== datasetRequestEpoch
@@ -494,13 +496,13 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
         ) onMessage(error instanceof Error ? error.message : String(error));
       }
     },
-    [datasetJobs, distribution, explorerJobId, onMessage],
+    [datasetJobs, distribution, explorerJobId, onMessage, projectId],
   );
 
   const showFailures = useCallback(async () => {
     if (!explorerJobId) return;
     const requestedDatasetId = currentDatasetId.current;
-    if (!requestedDatasetId || !datasetJobs.some((job) => job.job_id === explorerJobId)) return;
+    if (!projectId || !requestedDatasetId || !datasetJobs.some((job) => job.job_id === explorerJobId)) return;
     const projectRequestEpoch = projectEpoch.current;
     const datasetRequestEpoch = datasetEpoch.current;
     const sequence = ++drillSequence.current;
@@ -508,7 +510,7 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
     setSelectedBin(null);
     setSampleQuality(null);
     try {
-      const nextDrill = await api.drilldownFailures(explorerJobId);
+      const nextDrill = await api.drilldownFailures(projectId, explorerJobId);
       if (
         projectEpoch.current !== projectRequestEpoch
         || datasetEpoch.current !== datasetRequestEpoch
@@ -524,20 +526,22 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
         && drillSequence.current === sequence
       ) onMessage(error instanceof Error ? error.message : String(error));
     }
-  }, [datasetJobs, explorerJobId, onMessage]);
+  }, [datasetJobs, explorerJobId, onMessage, projectId]);
 
   const inspectSample = useCallback(
     async (sampleId: string) => {
+      const requestedProjectId = currentProjectId.current;
       const requestedDatasetId = currentDatasetId.current;
-      if (!requestedDatasetId) return;
+      if (!requestedProjectId || !requestedDatasetId) return;
       const projectRequestEpoch = projectEpoch.current;
       const datasetRequestEpoch = datasetEpoch.current;
       const sequence = ++sampleSequence.current;
       try {
-        const nextSample = await api.sampleQuality(sampleId);
+        const nextSample = await api.sampleQuality(requestedProjectId, sampleId);
         if (
           projectEpoch.current !== projectRequestEpoch
           || datasetEpoch.current !== datasetRequestEpoch
+          || currentProjectId.current !== requestedProjectId
           || currentDatasetId.current !== requestedDatasetId
           || sampleSequence.current !== sequence
         ) return;
@@ -546,6 +550,7 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
         if (
           projectEpoch.current === projectRequestEpoch
           && datasetEpoch.current === datasetRequestEpoch
+          && currentProjectId.current === requestedProjectId
           && currentDatasetId.current === requestedDatasetId
           && sampleSequence.current === sequence
         ) onMessage(error instanceof Error ? error.message : String(error));
@@ -676,9 +681,9 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
                       Cancel
                     </button>
                   )}
-                  {activeJob.run_id && (
+                  {activeJob.run_id && projectId && (
                     <p className="mono">
-                      run <a href={`/api/runs/${activeJob.run_id}`}>{shortHash(activeJob.run_id, 16)}</a>
+                      run <EvidenceOpenButton testId="workbench-active-run-evidence" request={{ kind: "run", href: `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(activeJob.run_id)}`, evidenceId: activeJob.run_id, projectId, label: `Recorded Run ${shortHash(activeJob.run_id, 16)}` }} onOpen={onOpenEvidence}>{shortHash(activeJob.run_id, 16)}</EvidenceOpenButton>
                     </p>
                   )}
                 </div>
@@ -710,7 +715,7 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
               <p className="hint">
                 UnifiedQualityScore (0–100) · {distribution.measured_rows_with_value} measured rows · outcomes{" "}
                 {Object.entries(distribution.outcomes).map(([k, v]) => `${k}=${v}`).join(", ")} · run{" "}
-                {distribution.run_id ? <a href={`/api/runs/${distribution.run_id}`}>{shortHash(distribution.run_id, 12)}</a> : "—"}
+                {distribution.run_id && projectId ? <EvidenceOpenButton testId="workbench-distribution-run-evidence" request={{ kind: "run", href: `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(distribution.run_id)}`, evidenceId: distribution.run_id, projectId, label: `Distribution Run ${shortHash(distribution.run_id, 12)}` }} onOpen={onOpenEvidence}>{shortHash(distribution.run_id, 12)}</EvidenceOpenButton> : "—"}
               </p>
               <svg className="histogram" viewBox="0 0 400 140" role="img" aria-label="UnifiedQualityScore distribution" data-testid="histogram">
                 {distribution.bins.map((bin, index) => {
@@ -756,9 +761,9 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
                 {drill.rows.map((row) => (
                   <li key={row.sample_id}>
                     <button type="button" className="thumb" onClick={() => void inspectSample(row.sample_id)} data-testid="drill-sample">
-                      <img src={row.links.image} alt={`Sample ${fileName(row.source_path)}`} />
+                      <img src={row.links.image} alt={`Recorded sample ${shortHash(row.sample_id, 14)}`} />
                       <span className="mono">{row.uqs_scalar ?? "—"}</span>
-                      <span className="sample-meta">{fileName(row.source_path)}</span>
+                      <span className="sample-meta">sample {shortHash(row.sample_id, 14)}</span>
                     </button>
                   </li>
                 ))}
@@ -767,18 +772,20 @@ export function Workbench({ projectId, onMessage, onDataset, onWorkflowTerminal 
           )}
           {sampleQuality && currentResult && (
             <div className="sample-quality" data-testid="sample-quality">
-              <h4>{fileName(sampleQuality.sample.source_path)}</h4>
+              <h4>{sampleQuality.sample.subject_id ?? `Sample ${shortHash(sampleQuality.sample.sample_id, 14)}`}</h4>
               <dl className="facts">
                 <dt>Subject</dt>
-                <dd>{sampleQuality.sample.subject_id.value ?? "—"}</dd>
+                <dd>{sampleQuality.sample.subject_id ?? "Not recorded"}</dd>
+                <dt>Media</dt>
+                <dd>{sampleQuality.sample.media_type} · {sampleQuality.sample.size_bytes.toLocaleString()} bytes</dd>
                 <dt>SHA-256</dt>
                 <dd className="mono">{shortHash(sampleQuality.sample.sha256, 20)}</dd>
                 <dt>Outcome</dt>
                 <dd>{currentResult.outcome}{currentResult.failure_reason ? ` — ${currentResult.failure_reason}` : ""}</dd>
                 <dt>Run</dt>
-                <dd>{currentResult.links.run ? <a href={currentResult.links.run} className="mono">{shortHash(currentResult.run_id ?? "", 16)}</a> : "—"}</dd>
+                <dd>{currentResult.links.run && currentResult.run_id && projectId ? <EvidenceOpenButton testId="workbench-sample-run-evidence" request={{ kind: "run", href: currentResult.links.run, evidenceId: currentResult.run_id, projectId, label: `Sample-quality Run ${shortHash(currentResult.run_id, 16)}` }} onOpen={onOpenEvidence} className="mono">{shortHash(currentResult.run_id, 16)}</EvidenceOpenButton> : "—"}</dd>
                 <dt>Audit</dt>
-                <dd>{currentResult.links.audit ? <a href={currentResult.links.audit}>audit trail</a> : "—"}</dd>
+                <dd>{currentResult.links.audit && currentResult.run_id && projectId ? <EvidenceOpenButton testId="workbench-run-audit-evidence" request={{ kind: "audit", href: currentResult.links.audit, evidenceId: currentResult.run_id, projectId, label: `Run audit ${shortHash(currentResult.run_id, 16)}` }} onOpen={onOpenEvidence}>audit trail</EvidenceOpenButton> : "—"}</dd>
               </dl>
               <table className="measures compact" data-testid="sample-measure-table">
                 <caption>Recorded quality measures for the selected sample</caption>

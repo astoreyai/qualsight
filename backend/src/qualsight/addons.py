@@ -415,6 +415,7 @@ def dataset_addons(registry: ResourceRegistry, data_dir: Path | None = None) -> 
                     "acquisition": {
                         "available": True,
                         "source_kind": "AUTHOR_PUBLISHED_HTTPS_ARCHIVE",
+                        "source_uri": store.archive["published_url"],
                         "archive_sha256": store.archive["sha256"],
                         "archive_size_bytes": store.archive["size_bytes"],
                         "shared_archive_addon_ids": list(store.protocols),

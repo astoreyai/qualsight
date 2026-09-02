@@ -61,6 +61,8 @@ def _secure_open_directory(descriptor: int, path: Path) -> tuple[int, int]:
         child_path = path / name
         try:
             child_mode = os.stat(name, dir_fd=descriptor, follow_symlinks=False).st_mode
+        except FileNotFoundError:
+            continue
         except OSError as error:
             raise LocalStorageSecurityError(f"cannot inspect application data entry: {child_path}") from error
         if stat.S_ISLNK(child_mode):
@@ -68,6 +70,8 @@ def _secure_open_directory(descriptor: int, path: Path) -> tuple[int, int]:
         if stat.S_ISDIR(child_mode):
             try:
                 child_descriptor = os.open(name, _DIRECTORY_OPEN_FLAGS, dir_fd=descriptor)
+            except FileNotFoundError:
+                continue
             except OSError as error:
                 raise LocalStorageSecurityError(
                     f"refusing replaced or linked application directory: {child_path}"
@@ -83,6 +87,8 @@ def _secure_open_directory(descriptor: int, path: Path) -> tuple[int, int]:
             raise LocalStorageSecurityError(f"unexpected non-regular application data file: {child_path}")
         try:
             file_descriptor = os.open(name, _FILE_OPEN_FLAGS, dir_fd=descriptor)
+        except FileNotFoundError:
+            continue
         except OSError as error:
             raise LocalStorageSecurityError(
                 f"refusing replaced or linked application data file: {child_path}"

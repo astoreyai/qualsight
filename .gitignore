@@ -10,6 +10,7 @@ __pycache__/
 coverage/
 frontend/dist/
 node_modules/
+.playwright-mcp/
 
 
 var/

@@ -21,9 +21,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
+import os
 from pathlib import Path
 import random
+import stat
 import struct
+import tempfile
 
 import cv2
 import numpy as np
@@ -63,6 +67,13 @@ SOURCE_KIND = "OWNER_SUPPLIED_LOCAL_INPUT"
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 MAX_DECODED_PIXELS = 96_000_000  # decode-bomb guard: refuse > 96 MP images
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".ppm"}
+OWNER_PAIR_MAX_SOURCE_SAMPLES = 20_000
+OWNER_PAIR_MAX_OUTPUT_PAIRS = 20_000
+_PARTIAL_PREFIX = ".owner-supplied-"
+_PARTIAL_SUFFIX = ".partial"
+_OWNER_INPUT_INTENT_DIRECTORY = ".admission-intents"
+_OWNER_INPUT_INTENT_SCHEMA_VERSION = "1.0.0"
+_OWNER_PROTOCOL_RECEIPT_SCHEMA_VERSION = "1.0.0"
 
 
 class OwnerSuppliedError(RuntimeError):
@@ -190,6 +201,427 @@ class AdmittedInput:
     storage: str  # COPIED | IN_PLACE
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedOwnerInputAdmission:
+    receipt_path: Path
+    stage_path: Path
+    target_path: Path
+    project_id: str
+    request_sha256: str
+    admitted: AdmittedInput
+    record: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedOwnerProtocol:
+    receipt_path: Path
+    stage_path: Path
+    manifest_path: Path
+    request_sha256: str
+    record: VerificationProtocolRecord
+    pairs: tuple[ProtocolPair, ...]
+    audit_event: AuditEvent
+
+
+def _sync_directory(directory: Path) -> None:
+    descriptor = os.open(
+        directory,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+    )
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _write_canonical_receipt(path: Path, document: dict[str, object]) -> None:
+    """Write one canonical receipt before any governed output is published."""
+
+    encoded = (CanonicalJson.from_value(document).text + "\n").encode("utf-8")
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+        0o600,
+    )
+    complete = False
+    try:
+        written = 0
+        while written < len(encoded):
+            count = os.write(descriptor, encoded[written:])
+            if count <= 0:
+                raise OSError("owner publication receipt write made no progress")
+            written += count
+        os.fsync(descriptor)
+        complete = True
+    finally:
+        os.close(descriptor)
+        if not complete:
+            path.unlink(missing_ok=True)
+    _sync_directory(path.parent)
+
+
+def _read_canonical_receipt(path: Path) -> dict[str, object]:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        with os.fdopen(descriptor, "rb") as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise OwnerSuppliedError("owner publication receipt is not a regular file")
+            payload = source.read()
+        text = payload.decode("utf-8")
+        document = json.loads(text)
+        if (
+            not isinstance(document, dict)
+            or text != CanonicalJson.from_value(document).text + "\n"
+        ):
+            raise OwnerSuppliedError("owner publication receipt is not canonical")
+        return document
+    except (OSError, UnicodeDecodeError, ValueError, TypeError) as error:
+        if isinstance(error, OwnerSuppliedError):
+            raise
+        raise OwnerSuppliedError(
+            "owner publication receipt failed integrity verification"
+        ) from error
+
+
+def _validate_sha256(value: object, *, field: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise OwnerSuppliedError(f"owner publication {field} is invalid")
+    return value
+
+
+def _read_validated_regular_bytes(
+    path: Path, *, sha256: str, size_bytes: int
+) -> tuple[bytes, os.stat_result] | None:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise OwnerSuppliedError("owner publication artifact cannot be opened safely") from error
+    with os.fdopen(descriptor, "rb") as source:
+        before = os.fstat(source.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_size != size_bytes:
+            raise OwnerSuppliedError("owner publication artifact size differs")
+        payload = source.read(size_bytes + 1)
+        after = os.fstat(source.fileno())
+    if (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+    ) != (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+    ):
+        raise OwnerSuppliedError("owner publication artifact changed during validation")
+    if len(payload) != size_bytes or hashlib.sha256(payload).hexdigest() != sha256:
+        raise OwnerSuppliedError("owner publication artifact hash differs")
+    return payload, after
+
+
+def _validate_regular_bytes(path: Path, *, sha256: str, size_bytes: int) -> bool:
+    return (
+        _read_validated_regular_bytes(
+            path, sha256=sha256, size_bytes=size_bytes
+        )
+        is not None
+    )
+
+
+def _publish_regular_file_no_clobber(stage: Path, target: Path) -> None:
+    try:
+        os.link(stage, target, follow_symlinks=False)
+    except FileExistsError:
+        return
+    except OSError as error:
+        raise OwnerSuppliedError("owner artifact could not be published safely") from error
+    _sync_directory(target.parent)
+
+
+def prepared_owner_input_admissions(data_dir: Path) -> tuple[Path, ...]:
+    root = data_dir / "owner_supplied" / _OWNER_INPUT_INTENT_DIRECTORY
+    if not root.exists():
+        return ()
+    if root.is_symlink() or not root.is_dir():
+        raise OwnerSuppliedError("owner admission intent directory is invalid")
+    return tuple(sorted(root.glob("*.json")))
+
+
+def _load_owner_input_intent(
+    receipt_path: Path, *, data_dir: Path
+) -> PreparedOwnerInputAdmission:
+    storage_root = data_dir / "owner_supplied"
+    intent_root = storage_root / _OWNER_INPUT_INTENT_DIRECTORY
+    if receipt_path.parent != intent_root or receipt_path.suffix != ".json":
+        raise OwnerSuppliedError("owner admission receipt path is invalid")
+    document = _read_canonical_receipt(receipt_path)
+    if set(document) != {
+        "record",
+        "request",
+        "request_sha256",
+        "schema_version",
+        "stage_name",
+        "target_name",
+    } or document.get("schema_version") != _OWNER_INPUT_INTENT_SCHEMA_VERSION:
+        raise OwnerSuppliedError("owner admission receipt contract differs")
+    request = document["request"]
+    record = document["record"]
+    if not isinstance(request, dict) or not isinstance(record, dict):
+        raise OwnerSuppliedError("owner admission receipt payload differs")
+    request_sha256 = _validate_sha256(
+        document["request_sha256"], field="request SHA-256"
+    )
+    if CanonicalJson.from_value(request).sha256 != request_sha256:
+        raise OwnerSuppliedError("owner admission request identity differs")
+    expected_request_keys = {
+        "actor_id",
+        "height",
+        "original_name",
+        "project_id",
+        "sha256",
+        "size_bytes",
+        "source_kind",
+        "storage",
+        "target_name",
+        "width",
+    }
+    if set(request) != expected_request_keys:
+        raise OwnerSuppliedError("owner admission request contract differs")
+    digest = _validate_sha256(request["sha256"], field="content SHA-256")
+    target_name = document["target_name"]
+    stage_name = document["stage_name"]
+    project_id = request["project_id"]
+    if (
+        not isinstance(target_name, str)
+        or Path(target_name).name != target_name
+        or not target_name.startswith(digest + ".")
+        or Path(target_name).suffix.lower() not in IMAGE_SUFFIXES
+        or request["target_name"] != target_name
+        or not isinstance(stage_name, str)
+        or stage_name != f".{target_name}.{request_sha256}.partial"
+        or not isinstance(project_id, str)
+        or not project_id
+        or request["source_kind"] != SOURCE_KIND
+        or request["storage"] != "COPIED"
+        or not isinstance(request["actor_id"], str)
+        or not request["actor_id"]
+        or not isinstance(request["original_name"], str)
+        or not request["original_name"]
+        or not isinstance(request["size_bytes"], int)
+        or isinstance(request["size_bytes"], bool)
+        or request["size_bytes"] <= 0
+        or not isinstance(request["width"], int)
+        or isinstance(request["width"], bool)
+        or request["width"] <= 0
+        or not isinstance(request["height"], int)
+        or isinstance(request["height"], bool)
+        or request["height"] <= 0
+    ):
+        raise OwnerSuppliedError("owner admission request values differ")
+    expected_record = {
+        key: request[key]
+        for key in (
+            "actor_id",
+            "height",
+            "original_name",
+            "project_id",
+            "sha256",
+            "size_bytes",
+            "source_kind",
+            "storage",
+            "width",
+        )
+    }
+    target_path = storage_root / target_name
+    expected_record["path"] = str(target_path)
+    if (
+        set(record) != {*expected_record, "admitted_at"}
+        or any(record.get(key) != value for key, value in expected_record.items())
+        or not isinstance(record.get("admitted_at"), str)
+    ):
+        raise OwnerSuppliedError("owner admission record differs")
+    try:
+        admitted_at = datetime.fromisoformat(str(record["admitted_at"]))
+    except ValueError as error:
+        raise OwnerSuppliedError("owner admission timestamp is invalid") from error
+    if admitted_at.tzinfo is None:
+        raise OwnerSuppliedError("owner admission timestamp is not timezone-aware")
+    if receipt_path.name != f"{request_sha256}.json":
+        raise OwnerSuppliedError("owner admission receipt identity differs")
+    admitted = AdmittedInput(
+        sha256=digest,
+        path=str(target_path),
+        size_bytes=int(request["size_bytes"]),
+        width=int(request["width"]),
+        height=int(request["height"]),
+        original_name=str(request["original_name"]),
+        storage="COPIED",
+    )
+    return PreparedOwnerInputAdmission(
+        receipt_path=receipt_path,
+        stage_path=storage_root / stage_name,
+        target_path=target_path,
+        project_id=project_id,
+        request_sha256=request_sha256,
+        admitted=admitted,
+        record=record,
+    )
+
+
+def recover_prepared_owner_input_admission(
+    receipt_path: Path, *, data_dir: Path
+) -> PreparedOwnerInputAdmission:
+    """Verify and finish one project-bound copied-input publication."""
+
+    prepared = _load_owner_input_intent(receipt_path, data_dir=data_dir)
+    if not _validate_regular_bytes(
+        prepared.target_path,
+        sha256=prepared.admitted.sha256,
+        size_bytes=prepared.admitted.size_bytes,
+    ):
+        if not _validate_regular_bytes(
+            prepared.stage_path,
+            sha256=prepared.admitted.sha256,
+            size_bytes=prepared.admitted.size_bytes,
+        ):
+            raise OwnerSuppliedError("prepared owner input bytes are unavailable")
+        _publish_regular_file_no_clobber(prepared.stage_path, prepared.target_path)
+        if not _validate_regular_bytes(
+            prepared.target_path,
+            sha256=prepared.admitted.sha256,
+            size_bytes=prepared.admitted.size_bytes,
+        ):
+            raise OwnerSuppliedError("published owner input bytes are unavailable")
+    validated = _read_validated_regular_bytes(
+        prepared.target_path,
+        sha256=prepared.admitted.sha256,
+        size_bytes=prepared.admitted.size_bytes,
+    )
+    if validated is None:
+        raise OwnerSuppliedError("published owner input bytes are unavailable")
+    payload, _ = validated
+    width, height = _decode_check(payload, prepared.admitted.original_name)
+    if (width, height) != (prepared.admitted.width, prepared.admitted.height):
+        raise OwnerSuppliedError("prepared owner input dimensions differ")
+    return prepared
+
+
+def inspect_prepared_owner_input_admission(
+    receipt_path: Path, *, data_dir: Path
+) -> PreparedOwnerInputAdmission:
+    """Validate receipt identity without publishing or deleting any bytes."""
+
+    return _load_owner_input_intent(receipt_path, data_dir=data_dir)
+
+
+def finalize_prepared_owner_input_admission(
+    prepared: PreparedOwnerInputAdmission,
+) -> None:
+    """Remove only intent/staging evidence after the project reference commits."""
+
+    for path in (prepared.stage_path, prepared.receipt_path):
+        try:
+            observed = path.lstat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISREG(observed.st_mode):
+            raise OwnerSuppliedError("owner admission cleanup target is invalid")
+        path.unlink()
+        _sync_directory(path.parent)
+
+
+def _write_owner_input_stage(path: Path, data: bytes) -> None:
+    if _validate_regular_bytes(
+        path, sha256=hashlib.sha256(data).hexdigest(), size_bytes=len(data)
+    ):
+        return
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+        0o600,
+    )
+    complete = False
+    try:
+        written = 0
+        while written < len(data):
+            count = os.write(descriptor, data[written:])
+            if count <= 0:
+                raise OSError("owner input staging write made no progress")
+            written += count
+        os.fsync(descriptor)
+        complete = True
+    finally:
+        os.close(descriptor)
+        if not complete:
+            path.unlink(missing_ok=True)
+    _sync_directory(path.parent)
+
+
+def _prepare_owner_input_admission(
+    *,
+    data_dir: Path,
+    actor_id: str,
+    project_id: str,
+    admitted: AdmittedInput,
+    data: bytes,
+) -> PreparedOwnerInputAdmission:
+    storage_root = data_dir / "owner_supplied"
+    intent_root = storage_root / _OWNER_INPUT_INTENT_DIRECTORY
+    intent_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _sync_directory(storage_root)
+    target_path = Path(admitted.path)
+    request = {
+        "actor_id": actor_id,
+        "height": admitted.height,
+        "original_name": admitted.original_name,
+        "project_id": project_id,
+        "sha256": admitted.sha256,
+        "size_bytes": admitted.size_bytes,
+        "source_kind": SOURCE_KIND,
+        "storage": admitted.storage,
+        "target_name": target_path.name,
+        "width": admitted.width,
+    }
+    request_sha256 = CanonicalJson.from_value(request).sha256
+    receipt_path = intent_root / f"{request_sha256}.json"
+    stage_name = f".{target_path.name}.{request_sha256}.partial"
+    if not receipt_path.exists() and not receipt_path.is_symlink():
+        record: dict[str, object] = {
+            **{key: value for key, value in request.items() if key != "target_name"},
+            "path": str(target_path),
+            "admitted_at": _now().isoformat(),
+        }
+        _write_canonical_receipt(
+            receipt_path,
+            {
+                "record": record,
+                "request": request,
+                "request_sha256": request_sha256,
+                "schema_version": _OWNER_INPUT_INTENT_SCHEMA_VERSION,
+                "stage_name": stage_name,
+                "target_name": target_path.name,
+            },
+        )
+    prepared = _load_owner_input_intent(receipt_path, data_dir=data_dir)
+    if prepared.request_sha256 != request_sha256:
+        raise OwnerSuppliedError("owner admission intent differs from its request")
+    if not _validate_regular_bytes(
+        prepared.target_path,
+        sha256=admitted.sha256,
+        size_bytes=admitted.size_bytes,
+    ):
+        _write_owner_input_stage(prepared.stage_path, data)
+    return recover_prepared_owner_input_admission(
+        receipt_path, data_dir=data_dir
+    )
+
+
 class OwnerSuppliedAdmission:
     """Decision-30 admission of operator-picked local inputs."""
 
@@ -217,6 +649,114 @@ class OwnerSuppliedAdmission:
         )
         return admitted
 
+    @staticmethod
+    def _sync_directory(directory: Path) -> None:
+        descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def _cleanup_stale_partials(self) -> None:
+        changed = False
+        for partial in self.storage_root.glob(f"{_PARTIAL_PREFIX}*{_PARTIAL_SUFFIX}"):
+            observed = partial.lstat()
+            if not stat.S_ISREG(observed.st_mode):
+                raise OwnerSuppliedError(
+                    "owner-supplied staging contains a non-regular partial file"
+                )
+            partial.unlink()
+            changed = True
+        if changed:
+            self._sync_directory(self.storage_root)
+
+    @staticmethod
+    def _validate_existing_target(target: Path, data: bytes) -> bool:
+        try:
+            observed = target.lstat()
+        except FileNotFoundError:
+            return False
+        if not stat.S_ISREG(observed.st_mode):
+            raise OwnerSuppliedError(
+                "the content-addressed owner-supplied target is not a regular file"
+            )
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(target, flags)
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            raise OwnerSuppliedError(
+                "the content-addressed owner-supplied target cannot be opened safely"
+            ) from error
+        with os.fdopen(descriptor, "rb") as source:
+            before = os.fstat(source.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                raise OwnerSuppliedError(
+                    "the content-addressed owner-supplied target is not a regular file"
+                )
+            existing = source.read(len(data) + 1)
+            after = os.fstat(source.fileno())
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            raise OwnerSuppliedError(
+                "the content-addressed owner-supplied target changed during validation"
+            )
+        if existing != data:
+            raise OwnerSuppliedError(
+                "the content-addressed owner-supplied target differs from its requested bytes"
+            )
+        return True
+
+    def _publish_bytes(self, target: Path, data: bytes) -> None:
+        if self._validate_existing_target(target, data):
+            return
+        descriptor, partial_name = tempfile.mkstemp(
+            prefix=_PARTIAL_PREFIX,
+            suffix=_PARTIAL_SUFFIX,
+            dir=self.storage_root,
+        )
+        partial = Path(partial_name)
+        try:
+            with os.fdopen(descriptor, "wb") as destination:
+                written = destination.write(data)
+                if written != len(data):
+                    raise OSError("owner-supplied staging write was incomplete")
+                destination.flush()
+                os.fsync(destination.fileno())
+            try:
+                os.link(partial, target, follow_symlinks=False)
+            except FileExistsError:
+                if not self._validate_existing_target(target, data):
+                    raise OwnerSuppliedError(
+                        "the content-addressed owner-supplied target disappeared during publication"
+                    )
+            else:
+                self._sync_directory(self.storage_root)
+                if not self._validate_existing_target(target, data):
+                    raise OwnerSuppliedError(
+                        "the published owner-supplied target could not be verified"
+                    )
+        except OwnerSuppliedError:
+            raise
+        except OSError as error:
+            raise OwnerSuppliedError(
+                "owner-supplied bytes could not be published safely"
+            ) from error
+        finally:
+            if partial.exists():
+                partial.unlink()
+                self._sync_directory(self.storage_root)
+
     def admit_bytes(self, data: bytes, original_name: str, project_id: str) -> AdmittedInput:
         width, height = _decode_check(data, original_name)
         digest = hashlib.sha256(data).hexdigest()
@@ -224,10 +764,10 @@ class OwnerSuppliedAdmission:
         if suffix not in IMAGE_SUFFIXES:
             suffix = ".jpg"
         with serialized_owner_file_mutation():
-            self.storage_root.mkdir(parents=True, exist_ok=True)
+            self.storage_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self._sync_directory(self.storage_root.parent)
+            self._cleanup_stale_partials()
             target = self.storage_root / f"{digest}{suffix}"
-            if not target.exists():
-                target.write_bytes(data)
             admitted = AdmittedInput(
                 sha256=digest,
                 path=str(target),
@@ -237,7 +777,16 @@ class OwnerSuppliedAdmission:
                 original_name=original_name,
                 storage="COPIED",
             )
-            return self._record(admitted, project_id)
+            prepared = _prepare_owner_input_admission(
+                data_dir=self.data_dir,
+                actor_id=self.actor,
+                project_id=project_id,
+                admitted=admitted,
+                data=data,
+            )
+            self.store.record_owner_supplied(prepared.record)
+            finalize_prepared_owner_input_admission(prepared)
+            return prepared.admitted
 
     def admit_path(self, path: Path, root: Path, project_id: str) -> AdmittedInput:
         with serialized_owner_file_mutation():
@@ -610,6 +1159,390 @@ class OwnerSuppliedImporter:
 # -- QS-Y83: deterministic pair protocol over an owner-supplied dataset ---------
 
 
+def _owner_pair_preflight(
+    subject_counts: dict[str, int],
+    *,
+    max_mated_pairs_per_subject: int,
+    nonmated_multiple: float,
+    max_pairs: int,
+) -> tuple[int, int]:
+    if (
+        not isinstance(max_mated_pairs_per_subject, int)
+        or isinstance(max_mated_pairs_per_subject, bool)
+        or max_mated_pairs_per_subject < 1
+    ):
+        raise OwnerSuppliedError(
+            "owner pair max_mated_pairs_per_subject must be a positive integer"
+        )
+    if (
+        not isinstance(nonmated_multiple, (int, float))
+        or isinstance(nonmated_multiple, bool)
+        or not math.isfinite(nonmated_multiple)
+        or nonmated_multiple <= 0
+    ):
+        raise OwnerSuppliedError(
+            "owner pair nonmated_multiple must be finite and positive"
+        )
+    source_samples = sum(subject_counts.values())
+    if source_samples > OWNER_PAIR_MAX_SOURCE_SAMPLES:
+        raise OwnerSuppliedError(
+            "owner pair protocol exceeds the beta source limit of "
+            f"{OWNER_PAIR_MAX_SOURCE_SAMPLES:,} samples"
+        )
+    if (
+        not isinstance(max_pairs, int)
+        or isinstance(max_pairs, bool)
+        or max_pairs < 1
+        or max_pairs > OWNER_PAIR_MAX_OUTPUT_PAIRS
+    ):
+        raise OwnerSuppliedError(
+            "owner pair max_pairs must be between 1 and "
+            f"{OWNER_PAIR_MAX_OUTPUT_PAIRS:,}"
+        )
+    mated_count = sum(
+        min((count * (count - 1)) // 2, max_mated_pairs_per_subject)
+        for count in subject_counts.values()
+    )
+    if mated_count == 0:
+        raise OwnerSuppliedError(
+            "no subject has two or more samples; no mated pair exists"
+        )
+    nonmated_count = max(1, int(round(mated_count * nonmated_multiple)))
+    planned_pairs = mated_count + nonmated_count
+    if planned_pairs > max_pairs:
+        raise OwnerSuppliedError(
+            f"owner pair protocol plans {planned_pairs:,} pairs, exceeding "
+            f"its {max_pairs:,}-pair beta limit"
+        )
+    nonmated_capacity = source_samples * source_samples - sum(
+        count * count for count in subject_counts.values()
+    )
+    if nonmated_count > nonmated_capacity:
+        raise OwnerSuppliedError(
+            f"owner pair protocol requests {nonmated_count:,} distinct "
+            "non-mated pairs, but the source supports at most "
+            f"{nonmated_capacity:,} distinct non-mated pairs"
+        )
+    return mated_count, nonmated_count
+
+
+def _combination_at_rank(
+    items: list[Sample], rank: int
+) -> tuple[Sample, Sample]:
+    """Return one lexicographically ordered two-item combination without expansion."""
+
+    item_count = len(items)
+    low = 0
+    high = item_count - 2
+    while low < high:
+        middle = (low + high + 1) // 2
+        first_at_middle = middle * (2 * item_count - middle - 1) // 2
+        if first_at_middle <= rank:
+            low = middle
+        else:
+            high = middle - 1
+    left_index = low
+    first_at_left = left_index * (2 * item_count - left_index - 1) // 2
+    right_index = left_index + 1 + rank - first_at_left
+    return items[left_index], items[right_index]
+
+
+def _mated_pairs_for_subject(
+    items: list[Sample], *, maximum: int, rng: random.Random
+) -> list[tuple[Sample, Sample]]:
+    combination_count = len(items) * (len(items) - 1) // 2
+    if combination_count <= maximum:
+        return [
+            (items[left], items[right])
+            for left in range(len(items))
+            for right in range(left + 1, len(items))
+        ]
+    sampled = [
+        _combination_at_rank(items, rank)
+        for rank in rng.sample(range(combination_count), maximum)
+    ]
+    sampled.sort(key=lambda pair: (pair[0].source_path, pair[1].source_path))
+    return sampled
+
+
+def prepared_owner_protocols(data_dir: Path) -> tuple[Path, ...]:
+    root = data_dir / "protocols"
+    if not root.exists():
+        return ()
+    if root.is_symlink() or not root.is_dir():
+        raise OwnerSuppliedError("owner protocol directory is invalid")
+    return tuple(sorted(root.glob(".*.jsonl.prepared.json")))
+
+
+def _owner_protocol_manifest_payload(
+    record: VerificationProtocolRecord,
+    pairs: tuple[ProtocolPair, ...] | list[ProtocolPair],
+) -> bytes:
+    metadata = json.loads(record.metadata.text)
+    header = {
+        "record_type": "PROTOCOL",
+        "generator": metadata["generator"],
+        "seed": metadata["seed"],
+        "max_mated_pairs_per_subject": metadata[
+            "max_mated_pairs_per_subject"
+        ],
+        "nonmated_multiple": metadata["nonmated_multiple"],
+        "pair_count": record.pair_count,
+        "mated_pairs": record.mated_count,
+        "pairs_sha256": record.pairs_sha256,
+    }
+    lines = [json.dumps(header, sort_keys=True)]
+    for pair in pairs:
+        lines.append(
+            json.dumps(
+                {"record_type": "PAIR", **json.loads(pair.model_dump_json())},
+                sort_keys=True,
+            )
+        )
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _load_owner_protocol_receipt(
+    receipt_path: Path, *, data_dir: Path
+) -> PreparedOwnerProtocol:
+    protocol_root = data_dir / "protocols"
+    if receipt_path.parent != protocol_root:
+        raise OwnerSuppliedError("owner protocol receipt path is invalid")
+    document = _read_canonical_receipt(receipt_path)
+    if set(document) != {
+        "audit_event",
+        "pairs",
+        "record",
+        "request",
+        "request_sha256",
+        "schema_version",
+        "stage_name",
+        "target_name",
+    } or document.get("schema_version") != _OWNER_PROTOCOL_RECEIPT_SCHEMA_VERSION:
+        raise OwnerSuppliedError("owner protocol receipt contract differs")
+    request = document["request"]
+    if not isinstance(request, dict):
+        raise OwnerSuppliedError("owner protocol request contract differs")
+    request_sha256 = _validate_sha256(
+        document["request_sha256"], field="protocol request SHA-256"
+    )
+    if CanonicalJson.from_value(request).sha256 != request_sha256:
+        raise OwnerSuppliedError("owner protocol request identity differs")
+    try:
+        record = VerificationProtocolRecord.model_validate_json(
+            json.dumps(document["record"], separators=(",", ":"), ensure_ascii=False)
+        )
+        pairs = tuple(
+            ProtocolPair.model_validate_json(
+                json.dumps(item, separators=(",", ":"), ensure_ascii=False)
+            )
+            for item in document["pairs"]
+        )
+        audit_event = AuditEvent.model_validate_json(
+            json.dumps(
+                document["audit_event"], separators=(",", ":"), ensure_ascii=False
+            )
+        )
+    except (TypeError, ValueError) as error:
+        raise OwnerSuppliedError("owner protocol receipt payload differs") from error
+    try:
+        metadata = json.loads(record.metadata.text)
+    except (TypeError, ValueError) as error:
+        raise OwnerSuppliedError("owner protocol metadata differs") from error
+    if set(metadata) != {
+        "generator",
+        "max_mated_pairs_per_subject",
+        "nonmated_multiple",
+        "seed",
+        "source_kind",
+    } or metadata.get("source_kind") != SOURCE_KIND:
+        raise OwnerSuppliedError("owner protocol metadata differs")
+    expected_request = {
+        "actor_id": audit_event.actor_id,
+        "dataset_id": record.dataset_id,
+        "manifest_sha256": record.pair_manifest.sha256,
+        "max_mated_pairs_per_subject": metadata["max_mated_pairs_per_subject"],
+        "nonmated_multiple": metadata["nonmated_multiple"],
+        "pairs_sha256": record.pairs_sha256,
+        "project_id": record.project_id,
+        "protocol_id": record.protocol_id,
+        "seed": metadata["seed"],
+    }
+    target_name = document["target_name"]
+    stage_name = document["stage_name"]
+    manifest_path = protocol_root / str(target_name)
+    if (
+        request != expected_request
+        or not isinstance(target_name, str)
+        or Path(target_name).name != target_name
+        or target_name != f"{record.protocol_id.replace(':', '_')}.jsonl"
+        or receipt_path.name != f".{target_name}.prepared.json"
+        or not isinstance(stage_name, str)
+        or stage_name != f".{target_name}.{request_sha256}.partial"
+        or record.pair_manifest.path != str(manifest_path)
+        or not pairs
+        or len(pairs) != record.pair_count
+        or {pair.protocol_id for pair in pairs} != {record.protocol_id}
+        or audit_event.project_id != record.project_id
+        or audit_event.subject_type != "VerificationProtocol"
+        or audit_event.subject_id != record.protocol_id
+        or audit_event.event_type is not AuditEventType.CONFIGURATION_CHANGED
+        or audit_event.current_evidence_sha256
+        != sha256_bytes(record.model_dump_json().encode("utf-8"))
+    ):
+        raise OwnerSuppliedError("owner protocol receipt identity differs")
+    digest = hashlib.sha256()
+    for pair in pairs:
+        digest.update(pair.model_dump_json().encode("utf-8"))
+        digest.update(b"\n")
+    if digest.hexdigest() != record.pairs_sha256:
+        raise OwnerSuppliedError("owner protocol pair digest differs")
+    expected_manifest = _owner_protocol_manifest_payload(record, pairs)
+    if (
+        sha256_bytes(expected_manifest) != record.pair_manifest.sha256
+        or len(expected_manifest) != record.pair_manifest.size_bytes
+    ):
+        raise OwnerSuppliedError("owner protocol manifest payload differs")
+    return PreparedOwnerProtocol(
+        receipt_path=receipt_path,
+        stage_path=protocol_root / stage_name,
+        manifest_path=manifest_path,
+        request_sha256=request_sha256,
+        record=record,
+        pairs=pairs,
+        audit_event=audit_event,
+    )
+
+
+def _validate_protocol_manifest(
+    path: Path, *, identity: ArtifactIdentity
+) -> bool:
+    validated = _read_validated_regular_bytes(
+        path, sha256=identity.sha256, size_bytes=identity.size_bytes
+    )
+    if validated is None:
+        return False
+    _, observed = validated
+    if observed.st_mtime_ns != identity.mtime_ns:
+        raise OwnerSuppliedError("owner protocol manifest timestamp differs")
+    return True
+
+
+def recover_prepared_owner_protocol(
+    receipt_path: Path, *, data_dir: Path
+) -> PreparedOwnerProtocol:
+    """Verify and finish one project-bound owner protocol publication."""
+
+    prepared = _load_owner_protocol_receipt(receipt_path, data_dir=data_dir)
+    identity = prepared.record.pair_manifest
+    if not _validate_protocol_manifest(prepared.manifest_path, identity=identity):
+        if not _validate_protocol_manifest(prepared.stage_path, identity=identity):
+            raise OwnerSuppliedError("prepared owner protocol manifest is unavailable")
+        _publish_regular_file_no_clobber(
+            prepared.stage_path, prepared.manifest_path
+        )
+        if not _validate_protocol_manifest(prepared.manifest_path, identity=identity):
+            raise OwnerSuppliedError("published owner protocol manifest is unavailable")
+    return prepared
+
+
+def inspect_prepared_owner_protocol(
+    receipt_path: Path, *, data_dir: Path
+) -> PreparedOwnerProtocol:
+    """Validate protocol receipt identity without filesystem mutation."""
+
+    return _load_owner_protocol_receipt(receipt_path, data_dir=data_dir)
+
+
+def finalize_prepared_owner_protocol(prepared: PreparedOwnerProtocol) -> None:
+    """Remove only preparation evidence after protocol/audit commit atomically."""
+
+    for path in (prepared.stage_path, prepared.receipt_path):
+        try:
+            observed = path.lstat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISREG(observed.st_mode):
+            raise OwnerSuppliedError("owner protocol cleanup target is invalid")
+        path.unlink()
+        _sync_directory(path.parent)
+
+
+def _write_protocol_stage(
+    path: Path, payload: bytes, *, identity: ArtifactIdentity
+) -> None:
+    if _validate_protocol_manifest(path, identity=identity):
+        return
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+        0o600,
+    )
+    complete = False
+    try:
+        written = 0
+        while written < len(payload):
+            count = os.write(descriptor, payload[written:])
+            if count <= 0:
+                raise OSError("owner protocol staging write made no progress")
+            written += count
+        os.fsync(descriptor)
+        os.utime(descriptor, ns=(identity.mtime_ns, identity.mtime_ns))
+        os.fsync(descriptor)
+        complete = True
+    finally:
+        os.close(descriptor)
+        if not complete:
+            path.unlink(missing_ok=True)
+    _sync_directory(path.parent)
+    if not _validate_protocol_manifest(path, identity=identity):
+        raise OwnerSuppliedError("owner protocol staging verification failed")
+
+
+def _prepare_owner_protocol(
+    *,
+    data_dir: Path,
+    request: dict[str, object],
+    record: VerificationProtocolRecord,
+    pairs: list[ProtocolPair],
+    audit_event: AuditEvent,
+    manifest_payload: bytes,
+) -> PreparedOwnerProtocol:
+    protocol_root = data_dir / "protocols"
+    protocol_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _sync_directory(protocol_root.parent)
+    target_name = Path(record.pair_manifest.path).name
+    request_sha256 = CanonicalJson.from_value(request).sha256
+    stage_name = f".{target_name}.{request_sha256}.partial"
+    receipt_path = protocol_root / f".{target_name}.prepared.json"
+    if not receipt_path.exists() and not receipt_path.is_symlink():
+        _write_canonical_receipt(
+            receipt_path,
+            {
+                "audit_event": audit_event.model_dump(mode="json"),
+                "pairs": [pair.model_dump(mode="json") for pair in pairs],
+                "record": record.model_dump(mode="json"),
+                "request": request,
+                "request_sha256": request_sha256,
+                "schema_version": _OWNER_PROTOCOL_RECEIPT_SCHEMA_VERSION,
+                "stage_name": stage_name,
+                "target_name": target_name,
+            },
+        )
+    prepared = _load_owner_protocol_receipt(receipt_path, data_dir=data_dir)
+    if prepared.request_sha256 != request_sha256:
+        raise OwnerSuppliedError("owner protocol receipt differs from its request")
+    if not _validate_protocol_manifest(
+        prepared.manifest_path, identity=prepared.record.pair_manifest
+    ):
+        _write_protocol_stage(
+            prepared.stage_path,
+            manifest_payload,
+            identity=prepared.record.pair_manifest,
+        )
+    return recover_prepared_owner_protocol(receipt_path, data_dir=data_dir)
+
+
 def freeze_owner_pairs(
     store: RunStore,
     project: Project,
@@ -618,13 +1551,21 @@ def freeze_owner_pairs(
     data_dir: Path,
     actor_id: str,
     seed: int,
+    max_pairs: int,
     max_mated_pairs_per_subject: int = 6,
     nonmated_multiple: float = 1.0,
 ) -> VerificationProtocolRecord:
     descriptor = json.loads(dataset.manifest.text)
     if descriptor.get("source_kind") != SOURCE_KIND:
         raise OwnerSuppliedError("owner pair protocols are defined only over owner-supplied datasets")
-    samples = store.samples_for_dataset(dataset.dataset_id, limit=1_000_000)
+    samples = store.samples_for_dataset(
+        dataset.dataset_id, limit=OWNER_PAIR_MAX_SOURCE_SAMPLES + 1
+    )
+    if len(samples) > OWNER_PAIR_MAX_SOURCE_SAMPLES:
+        raise OwnerSuppliedError(
+            "owner pair protocol exceeds the beta source limit of "
+            f"{OWNER_PAIR_MAX_SOURCE_SAMPLES:,} samples"
+        )
     by_subject: dict[str, list[Sample]] = {}
     for sample in sorted(samples, key=lambda item: item.source_path):
         subject = sample.subject_id.value or ""
@@ -632,18 +1573,23 @@ def freeze_owner_pairs(
             raise OwnerSuppliedError(f"sample {sample.sample_id} has no subject label")
         by_subject.setdefault(subject, []).append(sample)
     subjects = sorted(by_subject)
+    expected_mated, target_nonmated = _owner_pair_preflight(
+        {subject: len(items) for subject, items in by_subject.items()},
+        max_mated_pairs_per_subject=max_mated_pairs_per_subject,
+        nonmated_multiple=nonmated_multiple,
+        max_pairs=max_pairs,
+    )
     rng = random.Random(seed)
     mated: list[tuple[Sample, Sample]] = []
     for subject in subjects:
         items = by_subject[subject]
-        pairs = [(items[i], items[j]) for i in range(len(items)) for j in range(i + 1, len(items))]
-        if len(pairs) > max_mated_pairs_per_subject:
-            pairs = rng.sample(pairs, max_mated_pairs_per_subject)
-            pairs.sort(key=lambda pair: (pair[0].source_path, pair[1].source_path))
-        mated.extend(pairs)
-    if not mated:
-        raise OwnerSuppliedError("no subject has two or more samples; no mated pair exists")
-    target_nonmated = max(1, int(round(len(mated) * nonmated_multiple)))
+        mated.extend(
+            _mated_pairs_for_subject(
+                items, maximum=max_mated_pairs_per_subject, rng=rng
+            )
+        )
+    if len(mated) != expected_mated:
+        raise OwnerSuppliedError("owner pair preflight count changed during generation")
     nonmated: list[tuple[Sample, Sample]] = []
     seen: set[tuple[str, str]] = set()
     attempts = 0
@@ -690,28 +1636,26 @@ def freeze_owner_pairs(
     if existing is not None:
         return existing
     manifest_dir = data_dir / "protocols"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = manifest_dir / f"{protocol_id.replace(':', '_')}.jsonl"
-    header = {
-        "record_type": "PROTOCOL",
-        "generator": "qualsight.importers.owner_supplied.freeze_owner_pairs@1.0.0",
-        "seed": seed,
-        "max_mated_pairs_per_subject": max_mated_pairs_per_subject,
-        "nonmated_multiple": nonmated_multiple,
-        "pair_count": len(pairs),
-        "mated_pairs": len(mated),
-        "pairs_sha256": digest.hexdigest(),
-    }
-    lines = [json.dumps(header, sort_keys=True)]
-    for pair in pairs:
-        lines.append(json.dumps({"record_type": "PAIR", **json.loads(pair.model_dump_json())}, sort_keys=True))
-    manifest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    stat = manifest_path.stat()
-    manifest_identity = ArtifactIdentity(
+    created_at = _now()
+    created_mtime_ns = (
+        int(created_at.timestamp()) * 1_000_000_000
+        + created_at.microsecond * 1_000
+    )
+    metadata = CanonicalJson.from_value(
+        {
+            "seed": seed,
+            "max_mated_pairs_per_subject": max_mated_pairs_per_subject,
+            "nonmated_multiple": nonmated_multiple,
+            "source_kind": SOURCE_KIND,
+            "generator": "qualsight.importers.owner_supplied.freeze_owner_pairs@1.0.0",
+        }
+    )
+    provisional_identity = ArtifactIdentity(
         path=str(manifest_path),
-        sha256=sha256_file(manifest_path),
-        size_bytes=stat.st_size,
-        mtime_ns=stat.st_mtime_ns,
+        sha256="0" * 64,
+        size_bytes=1,
+        mtime_ns=created_mtime_ns,
     )
     record = VerificationProtocolRecord(
         protocol_id=protocol_id,
@@ -720,7 +1664,7 @@ def freeze_owner_pairs(
         name=f"Owner-supplied pairs (seed {seed}) — {dataset.name}",
         pair_policy=PairPolicy.ALL_CROSS_SUBJECT_PAIRS,
         category=ProtocolCategory.NOT_APPLICABLE,
-        pair_manifest=manifest_identity,
+        pair_manifest=provisional_identity,
         protocol_authority=(),
         pair_count=len(pairs),
         mated_count=len(mated),
@@ -735,17 +1679,27 @@ def freeze_owner_pairs(
             "Identity labels are the operator's claim; QualSight has not verified them against any authority.",
             "No comparison, score, or threshold exists until a matcher Run executes over this protocol.",
         ),
-        created_at=_now(),
-        metadata=CanonicalJson.from_value(
-            {
-                "seed": seed,
-                "max_mated_pairs_per_subject": max_mated_pairs_per_subject,
-                "nonmated_multiple": nonmated_multiple,
-                "source_kind": SOURCE_KIND,
-                "generator": "qualsight.importers.owner_supplied.freeze_owner_pairs@1.0.0",
-            }
-        ),
+        created_at=created_at,
+        metadata=metadata,
     )
+    manifest_payload = _owner_protocol_manifest_payload(record, pairs)
+    manifest_sha256 = sha256_bytes(manifest_payload)
+    manifest_mtime_ns = created_mtime_ns
+    existing_manifest = _read_validated_regular_bytes(
+        manifest_path,
+        sha256=manifest_sha256,
+        size_bytes=len(manifest_payload),
+    )
+    if existing_manifest is not None:
+        _, existing_stat = existing_manifest
+        manifest_mtime_ns = existing_stat.st_mtime_ns
+    manifest_identity = ArtifactIdentity(
+        path=str(manifest_path),
+        sha256=manifest_sha256,
+        size_bytes=len(manifest_payload),
+        mtime_ns=manifest_mtime_ns,
+    )
+    record = record.model_copy(update={"pair_manifest": manifest_identity})
     evidence = sha256_bytes(record.model_dump_json().encode("utf-8"))
     audit_event = AuditEvent(
         audit_event_id=content_id("audit-event", protocol_id, "PROTOCOL_FROZEN", evidence, record.created_at.isoformat()),
@@ -761,5 +1715,27 @@ def freeze_owner_pairs(
         current_evidence_sha256=evidence,
         local_only=True,
     )
-    store.record_protocol(record, pairs, audit_event)
-    return record
+    request = {
+        "actor_id": actor_id,
+        "dataset_id": dataset.dataset_id,
+        "manifest_sha256": manifest_identity.sha256,
+        "max_mated_pairs_per_subject": max_mated_pairs_per_subject,
+        "nonmated_multiple": nonmated_multiple,
+        "pairs_sha256": record.pairs_sha256,
+        "project_id": project.project_id,
+        "protocol_id": protocol_id,
+        "seed": seed,
+    }
+    prepared = _prepare_owner_protocol(
+        data_dir=data_dir,
+        request=request,
+        record=record,
+        pairs=pairs,
+        audit_event=audit_event,
+        manifest_payload=manifest_payload,
+    )
+    store.record_protocol(
+        prepared.record, list(prepared.pairs), prepared.audit_event
+    )
+    finalize_prepared_owner_protocol(prepared)
+    return prepared.record

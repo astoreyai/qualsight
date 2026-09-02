@@ -11,6 +11,9 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 import shutil
+import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -25,6 +28,12 @@ from qualsight.importers.owner_supplied import (
 
 LFW_TREE = Path("/mnt/projects/datasets/lfw/lfw_funneled")
 REAL_PHOTO = LFW_TREE / "Colin_Powell" / "Colin_Powell_0001.jpg"
+SAME_SIZE_PHOTO = LFW_TREE / "Ahmed_Ghazi" / "Ahmed_Ghazi_0001.jpg"
+SAME_SIZE_DRIFT = (
+    LFW_TREE
+    / "Gloria_Macapagal_Arroyo"
+    / "Gloria_Macapagal_Arroyo_0033.jpg"
+)
 
 
 class OwnerAdmissionHardeningTests(unittest.TestCase):
@@ -63,6 +72,134 @@ class OwnerAdmissionHardeningTests(unittest.TestCase):
         stored = Path(admitted.path).resolve()
         self.assertTrue(stored.is_relative_to((self.data_dir / "owner_supplied").resolve()))
         self.assertEqual(stored.stem, hashlib.sha256(real).hexdigest())
+
+    def test_same_size_drifted_content_addressed_target_is_not_referenced(self) -> None:
+        admitted_bytes = SAME_SIZE_PHOTO.read_bytes()
+        drifted_bytes = SAME_SIZE_DRIFT.read_bytes()
+        self.assertEqual(len(admitted_bytes), len(drifted_bytes))
+        self.assertNotEqual(hashlib.sha256(admitted_bytes).digest(), hashlib.sha256(drifted_bytes).digest())
+        admitted = self.admission.admit_bytes(admitted_bytes, SAME_SIZE_PHOTO.name, "project-a")
+        Path(admitted.path).write_bytes(drifted_bytes)
+
+        with self.assertRaises(OwnerSuppliedError):
+            self.admission.admit_bytes(admitted_bytes, SAME_SIZE_PHOTO.name, "project-b")
+
+        self.assertEqual(Path(admitted.path).read_bytes(), drifted_bytes)
+        self.assertEqual(self.store.owner_supplied_for_project("project-b"), [])
+
+    def test_existing_symlink_at_content_address_is_refused(self) -> None:
+        admitted_bytes = REAL_PHOTO.read_bytes()
+        target = (
+            self.data_dir
+            / "owner_supplied"
+            / f"{hashlib.sha256(admitted_bytes).hexdigest()}.jpg"
+        )
+        target.parent.mkdir(parents=True)
+        target.symlink_to(REAL_PHOTO)
+
+        with self.assertRaises(OwnerSuppliedError):
+            self.admission.admit_bytes(admitted_bytes, REAL_PHOTO.name, "project-x")
+
+        self.assertTrue(target.is_symlink())
+        self.assertIsNone(self.store.owner_supplied_by_path(str(target)))
+
+    def test_failed_real_write_never_publishes_a_partial_target_and_retry_succeeds(self) -> None:
+        admitted_bytes = REAL_PHOTO.read_bytes()
+        digest = hashlib.sha256(admitted_bytes).hexdigest()
+        target = self.data_dir / "owner_supplied" / f"{digest}.jpg"
+        child_database = self.data_dir / "write-failure.sqlite3"
+        limit = len(admitted_bytes) // 2
+        script = """
+import resource
+import signal
+import sys
+from pathlib import Path
+from qualsight.api.store import RunStore
+from qualsight.importers.owner_supplied import OwnerSuppliedAdmission
+
+source = Path(sys.argv[1])
+data_dir = Path(sys.argv[2])
+store = RunStore(Path(sys.argv[3]))
+try:
+    signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+    limit = int(sys.argv[4])
+    resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+    OwnerSuppliedAdmission(store, data_dir, "local-user:write-failure").admit_bytes(
+        source.read_bytes(), source.name, "project-write-failure"
+    )
+finally:
+    store.close()
+"""
+        failed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                script,
+                str(REAL_PHOTO),
+                str(self.data_dir),
+                str(child_database),
+                str(limit),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(failed.returncode, 0, failed.stdout)
+        self.assertFalse(target.exists(), failed.stderr)
+        self.assertEqual(list((self.data_dir / "owner_supplied").glob("*.partial")), [])
+
+        admitted = self.admission.admit_bytes(admitted_bytes, REAL_PHOTO.name, "project-retry")
+        self.assertEqual(Path(admitted.path), target)
+        self.assertEqual(target.read_bytes(), admitted_bytes)
+
+    def test_database_reference_failure_leaves_verified_bytes_retryable(self) -> None:
+        admitted_bytes = REAL_PHOTO.read_bytes()
+        digest = hashlib.sha256(admitted_bytes).hexdigest()
+        target = self.data_dir / "owner_supplied" / f"{digest}.jpg"
+        shared = self.admission.admit_bytes(
+            admitted_bytes, REAL_PHOTO.name, "project-existing-reference"
+        )
+        self.assertEqual(Path(shared.path), target)
+        with sqlite3.connect(self.store.database_path) as connection:
+            connection.execute(
+                "CREATE TRIGGER reject_owner_reference BEFORE INSERT ON owner_supplied_project_refs "
+                "BEGIN SELECT RAISE(ABORT, 'owner reference persistence rejected'); END"
+            )
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                self.admission.admit_bytes(admitted_bytes, REAL_PHOTO.name, "project-db-failure")
+        finally:
+            with sqlite3.connect(self.store.database_path) as connection:
+                connection.execute("DROP TRIGGER reject_owner_reference")
+
+        self.assertEqual(target.read_bytes(), admitted_bytes)
+        self.assertEqual(self.store.owner_supplied_for_project("project-db-failure"), [])
+        receipts = owner_supplied.prepared_owner_input_admissions(self.data_dir)
+        self.assertEqual(len(receipts), 1)
+        prepared = owner_supplied.inspect_prepared_owner_input_admission(
+            receipts[0], data_dir=self.data_dir
+        )
+        self.assertEqual(prepared.project_id, "project-db-failure")
+        self.assertTrue(
+            self.store.owner_supplied_has_other_project_reference(
+                str(target), "project-db-failure"
+            )
+        )
+        retried = self.admission.admit_bytes(
+            admitted_bytes, REAL_PHOTO.name, "project-db-failure"
+        )
+        self.assertEqual(Path(retried.path), target)
+        self.assertEqual(len(self.store.owner_supplied_for_project("project-db-failure")), 1)
+        self.assertEqual(
+            len(
+                self.store.owner_supplied_for_project(
+                    "project-existing-reference"
+                )
+            ),
+            1,
+        )
+        self.assertFalse(receipts[0].exists())
+        self.assertEqual(target.read_bytes(), admitted_bytes)
 
     def test_same_path_different_bytes_is_an_immutability_conflict(self) -> None:
         from qualsight.api.store import ImmutableRecordConflict

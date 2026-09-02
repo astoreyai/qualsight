@@ -24,9 +24,11 @@ import tempfile
 import time
 import urllib.request
 
+from controlled_inputs import lfw_tree_root
+
 ROOT = Path(__file__).resolve().parents[1]
 PORT = 8480
-UPLOAD_SOURCE = Path("/mnt/projects/datasets/lfw/lfw_funneled/Vladimir_Putin/Vladimir_Putin_0001.jpg")
+UPLOAD_SOURCE = lfw_tree_root(ROOT) / "Vladimir_Putin/Vladimir_Putin_0001.jpg"
 
 
 def _wait_http(url: str, timeout: float) -> None:

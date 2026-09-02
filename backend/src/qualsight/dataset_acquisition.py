@@ -65,6 +65,14 @@ def _private_directory(path: Path) -> None:
     os.chmod(path, 0o700)
 
 
+def _sync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 class VerificationDatasetStore:
     """Download, verify, and safely extract the three published pair protocols."""
 
@@ -193,6 +201,7 @@ class VerificationDatasetStore:
         except FileExistsError:
             if path.read_bytes() != payload:
                 raise DatasetAcquisitionError("existing extracted-file manifest differs")
+        _sync_directory(path.parent)
         return {
             "path": str(path),
             "sha256": hashlib.sha256(payload).hexdigest(),
@@ -340,7 +349,7 @@ class VerificationDatasetStore:
             "root": str(root),
         }
 
-    def status(self, addon_id: str, *, verify_images: bool = False) -> dict[str, Any]:
+    def _raw_status(self, addon_id: str, *, verify_images: bool = False) -> dict[str, Any]:
         protocol = self._protocol(addon_id)
         archive_state = self._archive_state()
         extracted = self._validate_protocol(protocol, verify_images=verify_images)
@@ -359,6 +368,81 @@ class VerificationDatasetStore:
             "extraction": extracted,
             "runtime_state": runtime_state,
         }
+
+    @property
+    def _receipt_directory(self) -> Path:
+        return self.data_dir / "acquisition-receipts" / "datasets"
+
+    def _valid_receipt(self) -> dict[str, Any] | None:
+        receipt_dir = self._receipt_directory
+        if not receipt_dir.is_dir() or receipt_dir.is_symlink():
+            return None
+        extraction_manifest = self._verify_extraction_manifest(
+            self.extraction_root, verify_bytes=False
+        )
+        if extraction_manifest["state"] != "VERIFIED":
+            return None
+        for receipt_path in sorted(receipt_dir.glob("*.json"), reverse=True):
+            try:
+                observed = receipt_path.lstat()
+                if stat.S_ISLNK(observed.st_mode) or not stat.S_ISREG(observed.st_mode):
+                    continue
+                receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if not isinstance(receipt, dict):
+                continue
+            evidence_sha256 = receipt.get("evidence_sha256")
+            receipt_id = receipt.get("receipt_id")
+            core = {
+                key: value
+                for key, value in receipt.items()
+                if key not in {"receipt_id", "evidence_sha256"}
+            }
+            canonical = json.dumps(
+                core, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+            expected_evidence = hashlib.sha256(canonical).hexdigest()
+            archive = receipt.get("archive")
+            manifest = receipt.get("extraction_manifest")
+            if (
+                set(core)
+                != {
+                    "schema_version",
+                    "receipt_type",
+                    "recorded_at",
+                    "action",
+                    "extraction_action",
+                    "archive",
+                    "extraction_manifest",
+                    "protocols",
+                    "transport",
+                }
+                or receipt.get("schema_version") != "1.0.0"
+                or receipt.get("receipt_type") != "VERIFICATION_DATASET_ACQUISITION"
+                or evidence_sha256 != expected_evidence
+                or receipt_id != f"dataset-receipt:sha256:{expected_evidence}"
+                or receipt_path.name != f"{expected_evidence}.json"
+                or not isinstance(archive, dict)
+                or archive.get("path") != str(self.archive_path)
+                or archive.get("sha256") != self.archive["sha256"]
+                or archive.get("size_bytes") != self.archive["size_bytes"]
+                or not isinstance(manifest, dict)
+                or manifest.get("path") != extraction_manifest["path"]
+                or manifest.get("sha256") != extraction_manifest["sha256"]
+                or manifest.get("file_count") != extraction_manifest["file_count"]
+            ):
+                continue
+            return {**receipt, "path": str(receipt_path)}
+        return None
+
+    def status(self, addon_id: str, *, verify_images: bool = False) -> dict[str, Any]:
+        result = self._raw_status(addon_id, verify_images=verify_images)
+        receipt = self._valid_receipt() if result["runtime_state"] == "READY" else None
+        if result["runtime_state"] == "READY" and receipt is None:
+            result["runtime_state"] = "MISSING"
+        result["receipt_state"] = "VERIFIED" if receipt is not None else "MISSING"
+        return result
 
     @staticmethod
     def _iter_response(response: Any) -> Iterable[bytes]:
@@ -420,6 +504,7 @@ class VerificationDatasetStore:
                     if self._archive_state() != "VERIFIED":
                         raise DatasetAcquisitionError("managed verification archive is drifted; refusing to overwrite")
                     action = "REUSED_VERIFIED_ARCHIVE"
+                _sync_directory(target.parent)
                 partial.unlink()
                 partial = None
                 return action, size, {
@@ -500,6 +585,8 @@ class VerificationDatasetStore:
                     with target.open("xb") as output:
                         os.chmod(target, 0o600)
                         shutil.copyfileobj(source, output, CHUNK_BYTES)
+                        output.flush()
+                        os.fsync(output.fileno())
             for protocol in self.protocols.values():
                 result = self._validate_protocol(
                     protocol,
@@ -515,7 +602,15 @@ class VerificationDatasetStore:
             manifest = self._verify_extraction_manifest(temporary, verify_bytes=True)
             if manifest["state"] != "VERIFIED":
                 raise DatasetAcquisitionError(f"extracted-file manifest verification failed: {manifest['reason']}")
+            for directory in sorted(
+                (path for path in temporary.rglob("*") if path.is_dir()),
+                key=lambda path: len(path.parts),
+                reverse=True,
+            ):
+                _sync_directory(directory)
+            _sync_directory(temporary)
             os.rename(temporary, self.extraction_root)
+            _sync_directory(parent)
             return "EXTRACTED_VERIFIED_PROTOCOLS"
         except Exception:
             shutil.rmtree(temporary, ignore_errors=True)
@@ -543,35 +638,265 @@ class VerificationDatasetStore:
                 "sha256": extraction_manifest["sha256"],
                 "file_count": extraction_manifest["file_count"],
             },
-            "protocols": [self.status(addon_id, verify_images=True) for addon_id in self.protocols],
+            "protocols": [self._raw_status(addon_id, verify_images=True) for addon_id in self.protocols],
             "transport": transport,
         }
         canonical = json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         evidence_sha256 = hashlib.sha256(canonical).hexdigest()
         receipt = {**core, "receipt_id": f"dataset-receipt:sha256:{evidence_sha256}", "evidence_sha256": evidence_sha256}
-        receipt_dir = self.data_dir / "acquisition-receipts" / "datasets"
-        _private_directory(receipt_dir)
+        receipt_dir = self._receipt_directory
         receipt_path = receipt_dir / f"{evidence_sha256}.json"
         payload = (json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
+        temporary: Path | None = None
+        handle: BinaryIO | None = None
+        published_inode: tuple[int, int] | None = None
         try:
-            with receipt_path.open("xb") as handle:
-                os.chmod(receipt_path, 0o600)
-                handle.write(payload)
-                handle.flush()
-                os.fsync(handle.fileno())
-        except FileExistsError:
-            if receipt_path.read_bytes() != payload:
-                raise DatasetAcquisitionError("existing dataset acquisition receipt differs")
+            _private_directory(receipt_dir)
+            handle = tempfile.NamedTemporaryFile(
+                mode="w+b",
+                prefix=".dataset-receipt.",
+                suffix=".partial",
+                dir=receipt_dir,
+                delete=False,
+            )
+            temporary = Path(handle.name)
+            os.fchmod(handle.fileno(), 0o600)
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+            handle.close()
+            handle = None
+            try:
+                temporary_stat = temporary.stat()
+                os.link(temporary, receipt_path, follow_symlinks=False)
+                published_inode = (temporary_stat.st_dev, temporary_stat.st_ino)
+            except FileExistsError:
+                observed = receipt_path.lstat()
+                if (
+                    stat.S_ISLNK(observed.st_mode)
+                    or not stat.S_ISREG(observed.st_mode)
+                    or receipt_path.read_bytes() != payload
+                ):
+                    raise DatasetAcquisitionError("existing dataset acquisition receipt differs")
+            temporary.unlink()
+            temporary = None
+            _sync_directory(receipt_dir)
+        except Exception as error:
+            if handle is not None:
+                handle.close()
+            cleanup_errors: list[str] = []
+            if published_inode is not None:
+                try:
+                    observed = receipt_path.lstat()
+                    if (observed.st_dev, observed.st_ino) == published_inode:
+                        receipt_path.unlink()
+                        _sync_directory(receipt_dir)
+                except OSError as cleanup_error:
+                    cleanup_errors.append(f"receipt rollback failed: {cleanup_error}")
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError as cleanup_error:
+                    cleanup_errors.append(f"partial receipt cleanup failed: {cleanup_error}")
+            suffix = f"; {'; '.join(cleanup_errors)}" if cleanup_errors else ""
+            raise DatasetAcquisitionError(
+                f"cannot persist verification dataset acquisition receipt{suffix}"
+            ) from error
         return {**receipt, "path": str(receipt_path)}
 
+    def _reconcile_receipt_publication(self) -> None:
+        receipt_dir = self._receipt_directory
+        if not receipt_dir.exists() or receipt_dir.is_symlink() or not receipt_dir.is_dir():
+            return
+        changed = False
+        for partial in receipt_dir.glob(".dataset-receipt.*.partial"):
+            observed = partial.lstat()
+            if stat.S_ISLNK(observed.st_mode) or not stat.S_ISREG(observed.st_mode):
+                raise DatasetAcquisitionError("stale acquisition receipt partial is not regular")
+            partial.unlink()
+            changed = True
+        if changed:
+            _sync_directory(receipt_dir)
+
+    def _rollback_acquisition(
+        self,
+        *,
+        archive_preexisting: bool,
+        extraction_preexisting: bool,
+        extraction_action: str | None,
+    ) -> None:
+        errors: list[str] = []
+        if not extraction_preexisting and os.path.lexists(self.extraction_root):
+            try:
+                observed = self.extraction_root.lstat()
+                if stat.S_ISLNK(observed.st_mode) or not stat.S_ISDIR(observed.st_mode):
+                    raise OSError("new extraction root is not a real directory")
+                shutil.rmtree(self.extraction_root)
+                _sync_directory(self.extraction_root.parent)
+            except OSError as error:
+                errors.append(f"extraction rollback failed: {error}")
+        elif extraction_action == "ADDED_VERIFIED_EXTRACTION_MANIFEST":
+            try:
+                self.extraction_manifest_path.unlink()
+                _sync_directory(self.extraction_root)
+            except OSError as error:
+                errors.append(f"extraction-manifest rollback failed: {error}")
+        if not archive_preexisting and os.path.lexists(self.archive_path):
+            try:
+                observed = self.archive_path.lstat()
+                if (
+                    stat.S_ISLNK(observed.st_mode)
+                    or not stat.S_ISREG(observed.st_mode)
+                    or observed.st_size != self.archive["size_bytes"]
+                    or _sha256(self.archive_path) != self.archive["sha256"]
+                ):
+                    raise OSError("new archive identity changed before rollback")
+                self.archive_path.unlink()
+                _sync_directory(self.archive_path.parent)
+            except OSError as error:
+                errors.append(f"archive rollback failed: {error}")
+        if errors:
+            raise DatasetAcquisitionError("; ".join(errors))
+
+    def rollback_acquisition(self, receipt: dict[str, Any]) -> None:
+        """Remove only state introduced by one receipt-bound acquisition."""
+
+        if not isinstance(receipt, dict) or set(receipt) != {
+            "schema_version",
+            "receipt_type",
+            "recorded_at",
+            "action",
+            "extraction_action",
+            "archive",
+            "extraction_manifest",
+            "protocols",
+            "transport",
+            "receipt_id",
+            "evidence_sha256",
+            "path",
+        }:
+            raise DatasetAcquisitionError("acquisition rollback receipt fields differ")
+        evidence_sha256 = receipt["evidence_sha256"]
+        if not isinstance(evidence_sha256, str) or len(evidence_sha256) != 64:
+            raise DatasetAcquisitionError("acquisition rollback receipt identity differs")
+        receipt_path = Path(receipt["path"])
+        expected_path = self._receipt_directory / f"{evidence_sha256}.json"
+        if receipt_path != expected_path:
+            raise DatasetAcquisitionError("acquisition rollback receipt path differs")
+        persisted_receipt = {key: value for key, value in receipt.items() if key != "path"}
+        core = {
+            key: value
+            for key, value in persisted_receipt.items()
+            if key not in {"receipt_id", "evidence_sha256"}
+        }
+        canonical = json.dumps(
+            core, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        if (
+            hashlib.sha256(canonical).hexdigest() != evidence_sha256
+            or receipt["receipt_id"] != f"dataset-receipt:sha256:{evidence_sha256}"
+        ):
+            raise DatasetAcquisitionError("acquisition rollback receipt evidence differs")
+        payload = (
+            json.dumps(
+                persisted_receipt,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+        try:
+            observed = receipt_path.lstat()
+            if stat.S_ISLNK(observed.st_mode) or not stat.S_ISREG(observed.st_mode):
+                raise OSError("receipt is not a private regular file")
+            if receipt_path.read_bytes() != payload:
+                raise OSError("receipt bytes differ from the acquisition result")
+        except OSError as error:
+            raise DatasetAcquisitionError(
+                "acquisition rollback receipt is unavailable or drifted"
+            ) from error
+
+        action = receipt["action"]
+        extraction_action = receipt["extraction_action"]
+        if action not in {
+            "ACQUIRED_OFFICIAL_HTTPS",
+            "REUSED_VERIFIED_ARCHIVE",
+            "RECONCILED_VERIFIED_LOCAL_STATE",
+        } or extraction_action not in {
+            "EXTRACTED_VERIFIED_PROTOCOLS",
+            "ADDED_VERIFIED_EXTRACTION_MANIFEST",
+            "REUSED_VERIFIED_EXTRACTION",
+        }:
+            raise DatasetAcquisitionError("acquisition rollback action differs")
+        if extraction_action != "REUSED_VERIFIED_EXTRACTION":
+            manifest = self._verify_extraction_manifest(
+                self.extraction_root, verify_bytes=True
+            )
+            recorded_manifest = receipt["extraction_manifest"]
+            if (
+                manifest["state"] != "VERIFIED"
+                or manifest["path"] != recorded_manifest.get("path")
+                or manifest["sha256"] != recorded_manifest.get("sha256")
+                or manifest["file_count"] != recorded_manifest.get("file_count")
+            ):
+                raise DatasetAcquisitionError(
+                    "acquisition rollback extraction identity differs"
+                )
+
+        try:
+            receipt_path.unlink()
+            _sync_directory(self._receipt_directory)
+        except OSError as error:
+            raise DatasetAcquisitionError(
+                "cannot withdraw acquisition receipt before rollback"
+            ) from error
+        try:
+            self._rollback_acquisition(
+                archive_preexisting=action != "ACQUIRED_OFFICIAL_HTTPS",
+                extraction_preexisting=extraction_action
+                != "EXTRACTED_VERIFIED_PROTOCOLS",
+                extraction_action=extraction_action,
+            )
+        except DatasetAcquisitionError as error:
+            raise DatasetAcquisitionError(
+                f"acquisition receipt was withdrawn but byte rollback was incomplete: {error}"
+            ) from error
+
     def acquire(self) -> dict[str, Any]:
+        self._reconcile_receipt_publication()
         archive_state = self._archive_state()
         if archive_state == "DRIFTED":
             raise DatasetAcquisitionError("managed verification archive is drifted; refusing to overwrite")
-        if archive_state == "VERIFIED":
-            action = "REUSED_VERIFIED_ARCHIVE"
-            transport = {"method": "LOCAL_VERIFIED_REUSE", "network_used": False}
-        else:
-            action, _size, transport = self._download()
-        extraction_action = self._extract()
-        return self._receipt(action, extraction_action, transport)
+        archive_preexisting = archive_state == "VERIFIED"
+        extraction_preexisting = os.path.lexists(self.extraction_root)
+        receipt_preexisting = self._valid_receipt() is not None
+        extraction_action: str | None = None
+        try:
+            if archive_preexisting:
+                action = "REUSED_VERIFIED_ARCHIVE"
+                transport = {"method": "LOCAL_VERIFIED_REUSE", "network_used": False}
+            else:
+                action, _size, transport = self._download()
+            extraction_action = self._extract()
+            if archive_preexisting and extraction_preexisting and not receipt_preexisting:
+                action = "RECONCILED_VERIFIED_LOCAL_STATE"
+                transport = {
+                    "method": "LOCAL_VERIFIED_RECONCILIATION",
+                    "network_used": False,
+                }
+            return self._receipt(action, extraction_action, transport)
+        except BaseException as error:
+            try:
+                self._rollback_acquisition(
+                    archive_preexisting=archive_preexisting,
+                    extraction_preexisting=extraction_preexisting,
+                    extraction_action=extraction_action,
+                )
+            except DatasetAcquisitionError as rollback_error:
+                raise DatasetAcquisitionError(
+                    f"verification dataset acquisition failed and rollback was incomplete: {rollback_error}"
+                ) from error
+            if isinstance(error, DatasetAcquisitionError):
+                raise
+            raise DatasetAcquisitionError("verification dataset acquisition failed") from error

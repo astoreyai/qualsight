@@ -1,16 +1,20 @@
 # QualSight
 
 Local, offline research workbench that relates **face image quality** (OFIQ v1.1.2, the ISO/IEC 29794-5
-reference implementation) to **face-matcher utility** (AdaFace, ElasticFace, MagFace, TopoFR,
-TransFace-B, and TransFace-S under two frozen
-preprocessing conditions; imported external scores marked `EXTERNALLY_COMPUTED`) over frozen protocols,
+reference implementation) to **face-matcher utility** (the beta-required AdaFace IR101,
+ElasticFace Arc R100, and TransFace-S matrix under two frozen SCRFD preprocessing conditions;
+catalogued MagFace, TopoFR, TransFace-B, and prealigned-pass-through research extensions; imported
+external scores marked `EXTERNALLY_COMPUTED`) over frozen protocols,
 with every number recorded as an immutable, hash-addressed Run: verification (FMR/FNMR/ROC/DET/EER),
 quality→utility (ERC, AU-ERC, risk-coverage, quality-conditioned error, error models, threshold-policy
 analysis), cross-matcher and preprocessing contrasts, 1:N identification, controlled degradation,
-provenance-bearing figures, dashboards, reports, exports, and reproduction bundles. Nothing leaves the
-workstation.
+provenance-bearing figures, dashboards, reports, exports, and reproduction bundles. The beta-3 release-candidate
+workflow is local and performs no automatic egress. Operator-downloaded reports, exports, and
+reproduction bundles remain governed files: they may contain deployment-local provenance and require
+disclosure review before any external transfer. Population 1:N, dataset degradation, and container
+execution remain research extensions outside beta acceptance.
 
-The *Add-ons · Connections* control surface exposes the closed, code-owned catalog: six matcher
+The left-navigation console and its **Manage system** surface expose the closed, code-owned catalog: six matcher
 drivers, the registered identity-labeled LFW driver, three downloadable pair-verification dataset
 drivers, three swappable matcher-preprocessing profiles (two SCRFD source-image profiles and one
 publisher-prealigned ArcFace-112 pass-through), and seven
@@ -24,18 +28,48 @@ owner authorization permits local noncommercial research acquisition but never r
 acquisition of the identity-labeled LFW tree remains blocked; the three author-published, pair-only
 verification protocols are downloadable and carry no fabricated identity labels.
 
-**Status:** 0.1.0-beta.2 — the 41-node controlled-workstation beta capability graph is accepted end to
-end on real data (`docs/BETA_ACCEPTANCE.md`). Later local research work implemented 1:N identification,
-controlled transformations, and a container execution adapter, but those extensions remain outside the 0.1.0 beta acceptance scope and grant no DHS transition or deployment authority.
+**Status:** the last packaged baseline is 0.1.0-beta.2. The current tree targets 0.1.0-beta.3 and must
+pass the complete controlled-workstation release gate before that version is tagged. The target scope
+and provisional evidence are recorded in `docs/BETA_ACCEPTANCE.md`; no local beta result grants DHS transition,
+remote deployment, production, ATO, or mission-readiness authority.
 
 ## Start here
 
-* Install and package boundary: `docs/INSTALL.md` (controlled reference workstation; not a relocatable
-  cold-start package). Run `bash scripts/install.sh`, then `python3 scripts/offline_gate.py`.
-* Use: `docs/USER_GUIDE.md` (console at <http://127.0.0.1:8480> after `qualsight serve`; every CLI block
-  in the guide is executed verbatim by `scripts/docs_workflow_gate.py`).
+The installer requires Linux x86-64, Python 3.11.2, `uv` 0.9.26, Node 26.7.0, pnpm 10.28.0, and the registered external
+OFIQ/resource locations described in `docs/INSTALL.md`.
+
+This beta is not a generic clone-and-run install. On the reviewed workstation, run from the deployment
+root recorded by its controlled registry after making the registered OFIQ/runtime assets available:
+
+```bash
+bash scripts/install.sh
+env PYTHONPATH="$PWD/backend/src:$PWD" uv run --directory backend --frozen python -m qualsight.cli setup
+python3 scripts/offline_gate.py --observation var/offline-gate.json
+env PYTHONPATH="$PWD/backend/src:$PWD" uv run --directory backend --frozen --offline python -m qualsight.cli serve
+```
+
+The `setup` command is the explicit network-enabled acquisition step for the exact pinned matcher
+architecture sources. It verifies and caches those sources before the offline gate; scientific
+execution then consumes the verified cache with network access disabled.
+
+An extracted release archive additionally requires `QUALSIGHT_REGISTRY_PATH` to the reviewed,
+unprojected controlled-host registry. `scripts/install.sh --validate-package-only` checks the embedded
+`QUALSIGHT-PACKAGE-CONTENTS.json`, the exact projected membership, hashes, sizes, safe modes, archive
+boundary, and toolchain without installing dependencies or claiming that external resources are present.
+The manifest must declare `0644` or `0755`; a hardened extraction umask may only remove group/world
+permissions while preserving required owner access.
+
+The offline gate owns port 8480, starts and stops its own server, and must run while no QualSight service
+is active. After it exits 0, start the product with the next command and open
+<http://127.0.0.1:8480>. Installation is for the controlled reference workstation; it is not a
+relocatable cold-start package.
+
+* Use: `docs/USER_GUIDE.md` (console at <http://127.0.0.1:8480> after `qualsight serve`). Start on
+  **Home**, choose or create a project under **Projects**, admit data under **Inputs**, then use
+  **Inspect quality**, **Compare**, **Stress test**, **Analyze utility**, **Results**,
+  **Evidence & reports**, and **Manage system**. Every CLI
+  block in the guide is also executed verbatim by `scripts/docs_workflow_gate.py`.
 * Methods and limitations: `docs/SCIENTIFIC_METHODS.md`. Threat model and local data controls: `docs/THREAT_MODEL.md`.
-* Demonstration: `bash scripts/demo.sh` runs the whole workflow on the registered subset fixture and starts the console.
 * OFIQ native rebuild: `scripts/ofiq_v112_build.sh --help` uses the committed Conan 2.18.1 lock/profile,
   downloads missing upstream archives and locked packages when allowed, and verifies every archive,
   dependency, conformance result, linked library, and real-image smoke output before writing a receipt.
@@ -43,13 +77,15 @@ controlled transformations, and a container execution adapter, but those extensi
   (append-only evidence ledger), `PRD.md`, `REQUIREMENTS.md`, `metrics/metric-registry.json`,
   `resources/resource-registry.json`.
 
-## Demonstration
+## Configuration
 
-`bash scripts/demo_dhs.sh` starts the console on the recorded evidence, verifies the demo state,
-and ensures the *Stakeholder Demo* dashboard; the timed 15-minute operator flow is
-`docs/DEMO_SCRIPT.md`. Evaluators can bring their own photo or directory (decision 30): inputs are
-hashed, recorded as `OWNER_SUPPLIED_LOCAL_INPUT`, assessed by the registered engine, never
-redistributed, and purgeable.
+The normal controlled-workstation start command needs no credential or remote-service environment
+variables. `QUALSIGHT_DATA_DIR`, `QUALSIGHT_REGISTRY_PATH`, `QUALSIGHT_SOURCE_CACHE_ROOT`, and
+`QUALSIGHT_RUNTIME_RESOURCE_ID` may override their documented local defaults for an isolated governed
+installation. `QUALSIGHT_SOURCE_CACHE_ROOT` selects an existing absolute, non-symlinked directory of
+manifest-verified upstream source bytes; it does not authorize a download. `QUALSIGHT_NETWORK_GUARD`
+defaults to enabled. QualSight has no admitted remote provider credentials or connection configuration in
+this beta.
 
 ## Rights and data
 
@@ -58,17 +94,35 @@ under recorded owner decisions for local noncommercial research. Release artifac
 model checkpoints, embeddings, operational databases, runtime observations, or recorded result fixtures.
 Internal agent/session records and machine-specific performance records are also excluded. The source
 archive does retain public protocol identifiers, registered byte hashes, and distributable aggregate
-assurance metadata. It also retains deployment registry paths needed to locate owner-held external assets,
-so it is a controlled-host research package rather than a portable or generally redistributable data package.
+assurance metadata. The archive projects operator-home locators to the external prefix declared in its release policy, retains the
+remaining controlled-host bindings and public acquisition pins, and requires a separately reviewed full
+registry at installation; it is not a portable or generally redistributable data package.
 Archive creation fails closed on prohibited biometric/model/data/native/screenshot file classes and
-high-confidence credential indicators. See `resources/authorizations/` and
+high-confidence credential indicators. Every projected regular file is also bound by path, SHA-256, byte
+length, and archive-declared safe mode in `QUALSIGHT-PACKAGE-CONTENTS.json`; release staging extracts the archive
+and validates it with the committed-tree validator and expected commit before publication. See `resources/authorizations/` and
 `resources/security/release-package-policy-v1.json`.
 
-## Layout
+Scientific work is bounded and recoverable within the local beta. Direct matcher execution has a hard
+deadline in a terminable process. Quality batches, matcher matrices, external-score imports, direct-pair
+comparisons, derived images, utility/cross-matcher/degradation/identification analyses, figures, reports,
+exports, and bundles use operation-bound prepared publication or equivalent durable result recovery before
+SQLite completion is claimed. Startup and exact-request retry reconcile only integrity-checked output.
+Transformation requests are refused before execution above 20,000 derived files; owner protocols refuse
+more than 20,000 admitted source samples or 20,000 output pairs before pair objects are materialized.
+
+## Controlled-checkout layout
 
 `backend/` (Python 3.11 control plane, engines, matchers, metrics, analyses, reporting, security),
 `frontend/` (Vite/React PWA console), `scripts/` (installation, gates, validators, verifiers),
 `tests/` and `backend/tests/` (real-data tests only), `docs/`, `metrics/`, `resources/`, `atg/`.
+
+The release source archive intentionally omits both test trees under its documented package policy.
+Those directories describe the clean controlled Git checkout used to build the archive, not the
+extracted package layout.
+
+Architecture and trust boundaries are in `docs/ARCHITECTURE.md`; the local browser/API contract is in
+`docs/API.md`.
 
 The complete release-authority split between controlled beta requirements and DHS transition-only
 controls is frozen in `REQUIREMENTS.md`. Remote API connectors remain unadmitted.

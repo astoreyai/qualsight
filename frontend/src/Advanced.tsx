@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, type AddonCatalogOut, type DegradationOut, type DegradationSummary, type DerivedSetOut, type IdentificationProtocolOut, type IdentificationSearchOut, type IdentificationSearchSummary, type JobOut, type MatcherAddonOut, type PreprocessingAddonOut, type TransformAddonOut } from "./api";
 import { numericParameterError } from "./parameterContract";
+import { EvidenceOpenButton, type EvidenceRequest } from "./EvidenceDetail";
 
 function shortHash(value: string, keep = 12): string {
   const marker = value.indexOf("sha256:");
@@ -41,10 +42,11 @@ interface AdvancedProps {
   datasetRepresentation: "SOURCE_IMAGE_REQUIRING_DETECTION" | "AUTHOR_PREALIGNED_ARCFACE112";
   onMessage: (message: string) => void;
   onWorkflowTerminal?: () => void;
+  onOpenEvidence: (request: EvidenceRequest) => void;
 }
 
 /** Phase 6 advanced analysis: 1:N identification (QS-X60) and controlled degradation responses (QS-X61). */
-export function Advanced({ projectId, datasetId, identityAuthorityAvailable, datasetRepresentation, onMessage, onWorkflowTerminal }: AdvancedProps) {
+export function Advanced({ projectId, datasetId, identityAuthorityAvailable, datasetRepresentation, onMessage, onWorkflowTerminal, onOpenEvidence }: AdvancedProps) {
   const contextKey = `${projectId ?? ""}\u001f${datasetId ?? ""}`;
   const [protocols, setProtocols] = useState<IdentificationProtocolOut[]>([]);
   const [searches, setSearches] = useState<IdentificationSearchSummary[]>([]);
@@ -179,11 +181,11 @@ export function Advanced({ projectId, datasetId, identityAuthorityAvailable, dat
   }, [refresh]);
 
   useEffect(() => {
-    if (!runningSearch) return;
+    if (!runningSearch || !projectId) return;
     const epoch = contextEpoch.current;
     const searchId = runningSearch;
     const handle = window.setInterval(() => {
-      api.identificationSearch(searchId).then((status) => {
+      api.identificationSearch(projectId, searchId).then((status) => {
         if (contextEpoch.current !== epoch) return;
         setPollError(null);
         if (status.state === "COMPLETED" || status.state === "FAILED" || status.state === "INTERRUPTED") {
@@ -205,14 +207,14 @@ export function Advanced({ projectId, datasetId, identityAuthorityAvailable, dat
       });
     }, 2000);
     return () => window.clearInterval(handle);
-  }, [runningSearch, refresh, onMessage, onWorkflowTerminal]);
+  }, [runningSearch, projectId, refresh, onMessage, onWorkflowTerminal]);
 
   useEffect(() => {
-    if (!runningDegradation) return;
+    if (!runningDegradation || !projectId) return;
     const epoch = contextEpoch.current;
     const analysisId = runningDegradation;
     const handle = window.setInterval(() => {
-      api.degradation(analysisId).then((status) => {
+      api.degradation(projectId, analysisId).then((status) => {
         if (contextEpoch.current !== epoch) return;
         setPollError(null);
         if (status.state === "COMPLETED" || status.state === "FAILED" || status.state === "INTERRUPTED") {
@@ -234,7 +236,7 @@ export function Advanced({ projectId, datasetId, identityAuthorityAvailable, dat
       });
     }, 2000);
     return () => window.clearInterval(handle);
-  }, [runningDegradation, refresh, onMessage, onWorkflowTerminal]);
+  }, [runningDegradation, projectId, refresh, onMessage, onWorkflowTerminal]);
 
   const guard = async (label: string, action: (epoch: number) => Promise<string>) => {
     const actionContextKey = contextKey;
@@ -273,21 +275,23 @@ export function Advanced({ projectId, datasetId, identityAuthorityAvailable, dat
     return `Identification search ${shortHash(started.search_id)} running on the matcher device`;
   });
   const openSearch = (searchId: string) => guard("open", async (epoch) => {
+    if (!projectId) throw new Error("no active project");
     if (!searches.some((search) => search.search_id === searchId && protocols.some((protocol) => protocol.protocol_id === search.protocol_id && protocol.dataset_id === datasetId))) {
       throw new Error("the selected identification search is not recorded for the active dataset");
     }
-    const status = await api.identificationSearch(searchId);
+    const status = await api.identificationSearch(projectId, searchId);
     if (contextEpoch.current !== epoch) return "";
     setSearchDetail(status); setCandidates(null);
     return `Search ${shortHash(searchId)} loaded`;
   });
   const showCandidates = (kind: string) => guard("candidates", async (epoch) => {
+    if (!projectId) throw new Error("no active project");
     if (!searchDetail) throw new Error("no search");
     const protocolId = searchDetail.summary?.protocol_id;
     if (!protocolId || !protocols.some((protocol) => protocol.protocol_id === protocolId && protocol.dataset_id === datasetId)) {
       throw new Error("the loaded identification search is not recorded for the active dataset");
     }
-    const body = await api.identificationCandidates(searchDetail.search_id, `probe_kind=${kind}&rank_le=5&limit=100`);
+    const body = await api.identificationCandidates(projectId, searchDetail.search_id, `probe_kind=${kind}&rank_le=5&limit=100`);
     if (contextEpoch.current !== epoch) return "";
     setCandidates(body.rows);
     return `${body.total} candidate rows (${kind}, rank ≤ 5)`;
@@ -325,10 +329,11 @@ export function Advanced({ projectId, datasetId, identityAuthorityAvailable, dat
     return `Degradation analysis ${shortHash(started.analysis_id)} running`;
   });
   const openDegradation = (id: string) => guard("open", async (epoch) => {
+    if (!projectId) throw new Error("no active project");
     if (!degradations.some((analysis) => analysis.analysis_id === id && derivedSets.some((set) => set.derived_set_id === analysis.derived_set_id))) {
       throw new Error("the selected degradation analysis is not in the active dataset lineage");
     }
-    const detail = await api.degradation(id);
+    const detail = await api.degradation(projectId, id);
     if (contextEpoch.current !== epoch) return "";
     setDegradationDetail(detail);
     return `Degradation ${shortHash(id)} loaded`;
@@ -426,6 +431,8 @@ export function Advanced({ projectId, datasetId, identityAuthorityAvailable, dat
                 : null;
   const matcherLabel = (matcherId: string) => matcherOptions.find((item) => item.matcher_id === matcherId)?.name ?? matcherId;
   const profileLabel = (profileId: string) => profileOptions.find((item) => item.addon_id === profileId)?.display_name ?? profileId;
+  const searchRunId = searchDetail?.run_id ?? null;
+  const degradationRunId = degradationDetail?.run_id ?? null;
   return (
     <section className="panel advanced" aria-labelledby="advanced-heading" data-testid="advanced">
       <h2 id="advanced-heading">Advanced analysis · 1:N identification · controlled degradation</h2>
@@ -461,7 +468,7 @@ export function Advanced({ projectId, datasetId, identityAuthorityAvailable, dat
           </tbody></table>
           {searchDetail?.metrics && (
             <div className="errors" data-testid="ident-detail">
-              <h4>Search <span className="mono">{shortHash(searchDetail.search_id, 12)}</span> · Run <a href={`/api/runs/${searchDetail.run_id}`} className="mono">{shortHash(searchDetail.run_id ?? "", 12)}</a></h4>
+              <h4>Search <span className="mono">{shortHash(searchDetail.search_id, 12)}</span> · Run {searchRunId ? <EvidenceOpenButton testId="advanced-search-run-evidence" request={{ kind: "run", href: `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(searchRunId)}`, evidenceId: searchRunId, projectId, label: `Identification Run ${shortHash(searchRunId, 12)}` }} onOpen={onOpenEvidence} className="mono">{shortHash(searchRunId, 12)}</EvidenceOpenButton> : "Not recorded"}</h4>
               <div className="utility-facts">
                 <div>
                   <h5>Closed set (mated searches)</h5>
@@ -560,7 +567,7 @@ export function Advanced({ projectId, datasetId, identityAuthorityAvailable, dat
           </tbody></table>
           {degradationDetail?.document && (
             <div className="errors" data-testid="degradation-detail">
-              <h4>Degradation response · Run <a href={`/api/runs/${degradationDetail.run_id}`} className="mono">{shortHash(degradationDetail.run_id ?? "", 12)}</a> · MATCHER THRESHOLD {num(degradationDetail.document.matcher_threshold.value, 4)}</h4>
+              <h4>Degradation response · Run {degradationRunId ? <EvidenceOpenButton testId="advanced-degradation-run-evidence" request={{ kind: "run", href: `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(degradationRunId)}`, evidenceId: degradationRunId, projectId, label: `Degradation Run ${shortHash(degradationRunId, 12)}` }} onOpen={onOpenEvidence} className="mono">{shortHash(degradationRunId, 12)}</EvidenceOpenButton> : "Not recorded"} · MATCHER THRESHOLD {num(degradationDetail.document.matcher_threshold.value, 4)}</h4>
               {degradationDetail.document.responses.map((r: any) => (
                 <table className="compact" key={r.transform} data-testid="degradation-table"><caption>{r.transform} response by {r.parameter_name}</caption><thead><tr><th scope="col">{r.transform} ({r.parameter_name})</th><th scope="col">UQS mean</th><th scope="col">Sharpness mean</th><th scope="col">Mated score mean</th><th scope="col">FNMR</th><th scope="col">FMR</th><th scope="col">Template failures</th></tr></thead><tbody>
                   <tr><th scope="row">baseline (originals)</th><td className="mono">{num(r.baseline.quality?.UnifiedQualityScore, 1)}</td><td className="mono">{num(r.baseline.quality?.Sharpness, 1)}</td><td className="mono">{num(r.baseline.mated_score_mean, 3)}</td><td className="mono">{pct(r.baseline.fnmr.rate)}</td><td className="mono">{pct(r.baseline.fmr.rate, 3)}</td><td>—</td></tr>

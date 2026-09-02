@@ -23,7 +23,6 @@ from qualsight.execution.registry_binding import (
 
 
 ROOT = Path(__file__).resolve().parents[3]
-R01 = "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/r-01-frontal.png"
 SCOPE = "REPRODUCE_OFIQ_CONFORMANCE_TESTS"
 
 
@@ -40,6 +39,11 @@ class RealProjectLifecycleTests(unittest.TestCase):
         )
         cls.client = TestClient(create_app(settings), base_url="http://127.0.0.1")
         cls.client.__enter__()
+        cls.registered_sample_id = next(
+            item["registered_sample_id"]
+            for item in cls.client.get("/api/samples/registered").json()
+            if item["resource_id"] == OFIQ_INPUT_RESOURCE_ID
+        )
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -77,11 +81,11 @@ class RealProjectLifecycleTests(unittest.TestCase):
         self.assertEqual(opened["lifecycle"], "OPEN")
         self.assertEqual(opened["version"], 2)
         assessed = self.client.post(
-            "/api/quality/assess", json={"image_path": R01, "purpose_scope": SCOPE, "project_id": project_id}
+            "/api/quality/assess", json={"registered_sample_id": self.registered_sample_id, "purpose_scope": SCOPE, "project_id": project_id}
         )
         self.assertEqual(assessed.status_code, 200, assessed.text)
         run_id = assessed.json()["run_id"]
-        stored_run = self.client.get(f"/api/runs/{run_id}").json()["run"]
+        stored_run = self.client.get(f"/api/projects/{project_id}/runs/{run_id}").json()["run"]
         self.assertEqual(stored_run["project_id"], project_id)
 
         # Save (rename) keeps configuration and references the immutable Run.
@@ -123,7 +127,7 @@ class RealProjectLifecycleTests(unittest.TestCase):
         self.assertEqual(archived["lifecycle"], "ARCHIVED")
         self.assertEqual(archived["run_ids"], [run_id])
         refused = self.client.post(
-            "/api/quality/assess", json={"image_path": R01, "purpose_scope": SCOPE, "project_id": project_id}
+            "/api/quality/assess", json={"registered_sample_id": self.registered_sample_id, "purpose_scope": SCOPE, "project_id": project_id}
         )
         self.assertEqual(refused.status_code, 409, refused.text)
         double_archive = self.client.post(f"/api/projects/{project_id}/archive")
@@ -156,19 +160,19 @@ class RealProjectLifecycleTests(unittest.TestCase):
         self.assertEqual(missing.status_code, 404)
         refused = self.client.post(
             "/api/quality/assess",
-            json={"image_path": R01, "purpose_scope": SCOPE, "project_id": "project:sha256:" + "1" * 64},
+            json={"registered_sample_id": self.registered_sample_id, "purpose_scope": SCOPE, "project_id": "project:sha256:" + "1" * 64},
         )
         self.assertEqual(refused.status_code, 404)
 
     def test_run_inventory_can_be_scoped_to_one_real_project(self) -> None:
         unscoped = self.client.get("/api/runs")
-        self.assertEqual(unscoped.status_code, 422, unscoped.text)
+        self.assertEqual(unscoped.status_code, 404, unscoped.text)
         projects = [self._create(name) for name in ("Run inventory scope A", "Run inventory scope B")]
         run_ids: list[str] = []
         for project in projects:
             assessed = self.client.post(
                 "/api/quality/assess",
-                json={"image_path": R01, "purpose_scope": SCOPE, "project_id": project["project_id"]},
+                json={"registered_sample_id": self.registered_sample_id, "purpose_scope": SCOPE, "project_id": project["project_id"]},
             )
             self.assertEqual(assessed.status_code, 200, assessed.text)
             run_ids.append(assessed.json()["run_id"])
@@ -177,7 +181,7 @@ class RealProjectLifecycleTests(unittest.TestCase):
             (projects[0], run_ids[0], run_ids[1]),
             (projects[1], run_ids[1], run_ids[0]),
         ):
-            response = self.client.get("/api/runs", params={"project_id": project["project_id"]})
+            response = self.client.get(f"/api/projects/{project['project_id']}/runs")
             self.assertEqual(response.status_code, 200, response.text)
             observed = [row["run_id"] for row in response.json()]
             self.assertEqual(observed, [expected_run_id])

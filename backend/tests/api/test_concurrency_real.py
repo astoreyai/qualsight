@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import hashlib
 from pathlib import Path
 import shutil
+import sqlite3
 import tempfile
 import threading
 import time
@@ -47,6 +48,7 @@ class ConcurrencyRealTests(unittest.TestCase):
             runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID,
             input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, LFW_RESOURCE_ID),
         )
+        cls.database_path = settings.database_path
         cls.client = TestClient(create_app(settings), base_url="http://127.0.0.1")
         cls.client.__enter__()
         project = cls.client.post(
@@ -152,8 +154,19 @@ class ConcurrencyRealTests(unittest.TestCase):
         self.assertTrue(all(code == 201 for code in statuses), [(r.status_code, r.text[:200]) for r in responses])
         shas = {r.json()["image_sha256"] for r in responses}
         self.assertEqual(len(shas), 1)
-        stored = {r.json()["stored_path"] for r in responses}
+        sample_ids = {r.json()["sample_id"] for r in responses}
+        self.assertEqual(len(sample_ids), 1)
+        store = RunStore(self.database_path)
+        try:
+            recorded_samples = [store.sample(sample_id) for sample_id in sample_ids]
+        finally:
+            store.close()
+        self.assertTrue(all(sample is not None for sample in recorded_samples))
+        stored = {Path(sample.source_path) for sample in recorded_samples if sample}
         self.assertEqual(len(stored), 1)
+        managed_path = next(iter(stored))
+        self.assertTrue(managed_path.is_relative_to(self.data_dir / "owner_supplied"))
+        self.assertEqual(hashlib.sha256(managed_path.read_bytes()).hexdigest(), next(iter(shas)))
         run_ids = {r.json()["run_id"] for r in responses}
         self.assertEqual(len(run_ids), 4, "each execution is its own recorded Run")
 
@@ -260,6 +273,146 @@ class OwnerFileCrossProjectRaceTests(unittest.TestCase):
                 self.assertEqual([record["path"] for record in destination_records], [str(shared_target)])
             finally:
                 store.close()
+        finally:
+            shutil.rmtree(data_dir, ignore_errors=True)
+
+
+class PurgeCompletionFenceRealTests(unittest.TestCase):
+    def test_verified_purge_keeps_mutation_fence_through_completion_audit(self) -> None:
+        data_dir = Path(tempfile.mkdtemp(prefix="qualsight-purge-fence-"))
+        settings = Settings(
+            repository_root=ROOT,
+            registry_path=ROOT / "resources" / "resource-registry.json",
+            data_dir=data_dir,
+            runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID,
+            input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, LFW_RESOURCE_ID),
+        )
+        database = settings.database_path
+        try:
+            with TestClient(
+                create_app(settings),
+                base_url="http://127.0.0.1",
+                raise_server_exceptions=False,
+            ) as client:
+                anchor = client.post(
+                    "/api/projects",
+                    json={
+                        "name": "purge fence anchor",
+                        "description": "Retains the real LFW rows used to expose the audit window.",
+                        "purpose_scope": RESEARCH_SCOPE,
+                    },
+                )
+                self.assertEqual(anchor.status_code, 201, anchor.text)
+                anchor_id = anchor.json()["project_id"]
+                self.assertEqual(client.post(f"/api/projects/{anchor_id}/open").status_code, 200)
+                imported = client.post(
+                    f"/api/projects/{anchor_id}/datasets/import-registered",
+                    json={"resource_id": LFW_RESOURCE_ID, "verify_hashes": False},
+                )
+                self.assertEqual(imported.status_code, 201, imported.text)
+
+                victim = client.post(
+                    "/api/projects",
+                    json={
+                        "name": "purge fence victim",
+                        "description": "Real owner bytes exercise the post-purge mutation boundary.",
+                        "purpose_scope": RESEARCH_SCOPE,
+                    },
+                )
+                self.assertEqual(victim.status_code, 201, victim.text)
+                victim_id = victim.json()["project_id"]
+                self.assertEqual(client.post(f"/api/projects/{victim_id}/open").status_code, 200)
+                first_source = LFW_TREE / "Colin_Powell" / "Colin_Powell_0002.jpg"
+                first = client.post(
+                    "/api/quality/assess-upload",
+                    params={
+                        "project_id": victim_id,
+                        "purpose_scope": RESEARCH_SCOPE,
+                        "filename": first_source.name,
+                    },
+                    content=first_source.read_bytes(),
+                    headers={"content-type": "application/octet-stream"},
+                )
+                self.assertEqual(first.status_code, 201, first.text)
+
+                connection = sqlite3.connect(database)
+                connection.execute(
+                    "CREATE TRIGGER stall_verified_purge_completion_audit "
+                    "BEFORE INSERT ON audit_events "
+                    "WHEN instr(NEW.record_json, '\"event_type\":\"DATASET_PURGED\"') > 0 "
+                    "BEGIN SELECT sum(length(a.record_json) + length(b.record_json)) "
+                    "FROM samples AS a CROSS JOIN samples AS b; END"
+                )
+                connection.commit()
+                connection.close()
+
+                try:
+                    with ThreadPoolExecutor(max_workers=1) as pool:
+                        purge_future = pool.submit(
+                            client.post,
+                            f"/api/projects/{victim_id}/purge",
+                            json={"confirm": victim_id},
+                        )
+
+                        def completion_audit_holds_writer() -> bool:
+                            probe = sqlite3.connect(database, timeout=0.01)
+                            try:
+                                recorded = probe.execute(
+                                    "SELECT 1 FROM purges WHERE project_id = ? LIMIT 1",
+                                    (victim_id,),
+                                ).fetchone()
+                                if recorded is None:
+                                    return False
+                                try:
+                                    probe.execute("BEGIN IMMEDIATE")
+                                except sqlite3.OperationalError as error:
+                                    return "locked" in str(error).lower()
+                                probe.execute("ROLLBACK")
+                                return False
+                            finally:
+                                probe.close()
+
+                        deadline = time.monotonic() + 120
+                        while not completion_audit_holds_writer():
+                            if purge_future.done():
+                                self.fail(
+                                    "purge completed before the real completion-audit window was observed"
+                                )
+                            if time.monotonic() >= deadline:
+                                self.fail(
+                                    "timed out waiting for the real completion-audit writer"
+                                )
+                            time.sleep(0.005)
+
+                        second_source = (
+                            LFW_TREE / "Colin_Powell" / "Colin_Powell_0003.jpg"
+                        )
+                        during_audit = client.post(
+                            "/api/quality/assess-upload",
+                            params={
+                                "project_id": victim_id,
+                                "purpose_scope": RESEARCH_SCOPE,
+                                "filename": second_source.name,
+                            },
+                            content=second_source.read_bytes(),
+                            headers={"content-type": "application/octet-stream"},
+                        )
+                        purge = purge_future.result(timeout=120)
+                finally:
+                    connection = sqlite3.connect(database)
+                    connection.execute(
+                        "DROP TRIGGER IF EXISTS stall_verified_purge_completion_audit"
+                    )
+                    connection.commit()
+                    connection.close()
+
+                self.assertEqual(purge.status_code, 201, purge.text)
+                self.assertTrue(purge.json()["verified"], purge.json())
+                self.assertEqual(during_audit.status_code, 409, during_audit.text)
+                self.assertEqual(
+                    client.get(f"/api/projects/{victim_id}/datasets").json(),
+                    [],
+                )
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
 

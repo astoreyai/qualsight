@@ -56,6 +56,11 @@ class RealProtocolTests(unittest.TestCase):
         )
         cls.client = TestClient(create_app(settings), base_url="http://127.0.0.1")
         cls.client.__enter__()
+        cls.registered_sample_id = next(
+            item["registered_sample_id"]
+            for item in cls.client.get("/api/samples/registered").json()
+            if item["resource_id"] == OFIQ_INPUT_RESOURCE_ID
+        )
         project = cls.client.post(
             "/api/projects", json={"name": "LFW protocol gate", "description": "QS-C20 real protocol.", "purpose_scope": RESEARCH_SCOPE}
         ).json()
@@ -86,9 +91,11 @@ class RealProtocolTests(unittest.TestCase):
         self.assertEqual(record["pair_policy"], "OFFICIAL_PROTOCOL_LIST")
         self.assertEqual(record["category"], "UNRESTRICTED_WITH_LABELED_OUTSIDE_DATA")
         self.assertEqual(record["pair_manifest"]["sha256"], hashlib.sha256(PAIR_MANIFEST.read_bytes()).hexdigest())
+        self.assertNotIn("path", record["pair_manifest"])
         self.assertEqual(len(record["protocol_authority"]), 3)
-        self.assertTrue(all(item["path"].endswith(".pdf") for item in record["protocol_authority"]))
-        head = self.client.get(f"/api/protocols/{record['protocol_id']}").json()
+        self.assertTrue(all("path" not in item for item in record["protocol_authority"]))
+        self.assertTrue(all(len(item["sha256"]) == 64 for item in record["protocol_authority"]))
+        head = self.client.get(f"/api/projects/{self.project_id}/protocols/{record['protocol_id']}").json()
         self.assertEqual(head["recorded_pair_count"], 6000)
 
         # Every pair resolves to real samples whose digests match the registered manifest.
@@ -99,7 +106,7 @@ class RealProtocolTests(unittest.TestCase):
             row = json.loads(line)
             if row.get("record_type") == "PAIR":
                 manifest_pairs[row["pair_id"]] = row
-        pairs = self.client.get(f"/api/protocols/{record['protocol_id']}/pairs", params={"limit": 10000}).json()
+        pairs = self.client.get(f"/api/projects/{self.project_id}/protocols/{record['protocol_id']}/pairs", params={"limit": 10000}).json()
         self.assertEqual(len(pairs), 6000)
         digest = hashlib.sha256()
         for pair in pairs:
@@ -116,9 +123,11 @@ class RealProtocolTests(unittest.TestCase):
         self.assertEqual(digest.hexdigest(), record["pairs_sha256"])
         # Samples resolve through the dataset sample endpoint.
         first = pairs[0]
-        sample = self.client.get(f"/api/samples/{first['left_sample_id']}").json()
+        sample = self.client.get(
+            f"/api/projects/{self.project_id}/samples/{first['left_sample_id']}"
+        ).json()
         self.assertEqual(sample["sha256"], first["left_sha256"])
-        fold_one = self.client.get(f"/api/protocols/{record['protocol_id']}/pairs", params={"fold": 1, "limit": 10000}).json()
+        fold_one = self.client.get(f"/api/projects/{self.project_id}/protocols/{record['protocol_id']}/pairs", params={"fold": 1, "limit": 10000}).json()
         self.assertEqual(len(fold_one), 600)
         self.assertEqual(sum(1 for p in fold_one if p["label"] == "MATED"), 300)
         # Refreezing is idempotent (same protocol id, same pairs).
@@ -129,7 +138,7 @@ class RealProtocolTests(unittest.TestCase):
 
     def test_schema_guards_keep_label_score_failure_threshold_and_provenance_apart(self) -> None:
         record = self.frozen.json()
-        pairs = self.client.get(f"/api/protocols/{record['protocol_id']}/pairs", params={"limit": 2}).json()
+        pairs = self.client.get(f"/api/projects/{self.project_id}/protocols/{record['protocol_id']}/pairs", params={"limit": 2}).json()
         real_mated = next(p for p in pairs if p["label"] == "MATED")
         # A mated pair cannot be re-labelled non-mated (subjects agree).
         with self.assertRaises(ValidationError):
@@ -169,7 +178,7 @@ class RealProtocolTests(unittest.TestCase):
         # The r-01 single-sample dataset created by an ad-hoc assessment is not the LFW resource.
         assessed = self.client.post(
             "/api/quality/assess",
-            json={"image_path": "/mnt/projects/02_perception_biometrics/OFIQ-Project/data/tests/images/r-01-frontal.png", "purpose_scope": "REPRODUCE_OFIQ_CONFORMANCE_TESTS", "project_id": self.project_id},
+            json={"registered_sample_id": self.registered_sample_id, "purpose_scope": "REPRODUCE_OFIQ_CONFORMANCE_TESTS", "project_id": self.project_id},
         )
         self.assertEqual(assessed.status_code, 200, assessed.text)
         datasets = self.client.get(f"/api/projects/{self.project_id}/datasets").json()

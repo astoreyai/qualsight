@@ -13,12 +13,26 @@ import tempfile
 from typing import NamedTuple
 
 
+BETA3_BROWSER_VALIDATORS = (
+    "validate_comparison_studio",
+    "validate_evidence_warning_privacy",
+    "validate_manage_system",
+    "validate_owner_purge_ui",
+    "validate_stress_studio",
+    "validate_structured_evidence_navigation",
+    "validate_upload_working_sample",
+    "validate_utility_overlay",
+    "observe_console",
+)
+
+
 class GateDefinition(NamedTuple):
     name: str
     argv: tuple[str, ...]
     timeout_seconds: int
     environment: tuple[tuple[str, str], ...] = ()
     working_directory: Path | None = None
+    evidence_path: Path | None = None
 
 
 def _release_interpreter(python: str) -> Path:
@@ -37,8 +51,22 @@ def gate_definitions(
     root = root.resolve(strict=True)
     deployment_root = (deployment_root or root).resolve(strict=True)
     work_root = work_root or root / ".release-beta-gate-work"
+    deployment_registry = (
+        deployment_root / "resources" / "resource-registry.json"
+    ).resolve(strict=True)
     deployment_environment = (
         ("QUALSIGHT_REPOSITORY_ROOT", str(deployment_root)),
+        ("QUALSIGHT_REGISTRY_PATH", str(deployment_registry)),
+        ("QUALSIGHT_RUNTIME_RESOURCE_ID", "ofiq-v1-1-2-linux-runtime"),
+        (
+            "QUALSIGHT_INPUT_RESOURCE_IDS",
+            "ofiq-r-01-conformance-input,lfw-funneled-local-candidate",
+        ),
+        ("QUALSIGHT_NETWORK_GUARD", "1"),
+        (
+            "QUALSIGHT_SOURCE_CACHE_ROOT",
+            str(deployment_root / "var" / "upstream"),
+        ),
     )
     backend_environment = (
         ("PYTHONPATH", f"{root / 'backend' / 'src'}:{root}"),
@@ -151,7 +179,7 @@ def gate_definitions(
                 str(deployment_root / "backend"),
                 "-q",
             ),
-            3600,
+            5400,
             backend_environment,
         ),
         GateDefinition(
@@ -179,6 +207,18 @@ def gate_definitions(
             for name, module, arguments in validators
         ),
         GateDefinition(
+            "documentation-workflow",
+            (
+                python,
+                str(root / "scripts" / "docs_workflow_gate.py"),
+                "--observation",
+                str(work_root / "documentation-workflow.json"),
+            ),
+            3600,
+            backend_environment,
+            evidence_path=work_root / "documentation-workflow.json",
+        ),
+        GateDefinition(
             "offline-workflow",
             (
                 python,
@@ -199,6 +239,24 @@ def gate_definitions(
             3600,
             backend_environment,
         ),
+        GateDefinition(
+            "browser-beta3-workflows",
+            (
+                python,
+                str(root / "scripts" / "validate_release_browser.py"),
+                "--root",
+                str(root),
+                "--work-root",
+                str(work_root / "browser-work"),
+                "--output",
+                str(work_root / "browser-aggregate.json"),
+                "--python",
+                python,
+            ),
+            14400,
+            backend_environment,
+            evidence_path=work_root / "browser-aggregate.json",
+        ),
     )
 
 
@@ -210,11 +268,14 @@ def _normalised_argv(
     root: Path,
     deployment_root: Path,
     argv: tuple[str, ...],
+    work_root: Path | None = None,
 ) -> list[str]:
-    replacements = (
+    replacements = [
         (str(root), "<COMMITTED_STAGE>"),
         (str(deployment_root), "<CONTROLLED_DEPLOYMENT>"),
-    )
+    ]
+    if work_root is not None:
+        replacements.append((str(work_root), "<GATE_WORK>"))
     normalised: list[str] = []
     for value in argv:
         for prefix, label in replacements:
@@ -223,6 +284,111 @@ def _normalised_argv(
                 break
         normalised.append(value)
     return normalised
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and not (set(value) - set("0123456789abcdef"))
+    )
+
+
+def _validate_gate_evidence(
+    gate_name: str,
+    evidence_body: bytes,
+    temporary: Path,
+) -> dict[str, object]:
+    evidence = json.loads(evidence_body)
+    if not isinstance(evidence, dict):
+        raise ValueError(f"{gate_name} evidence is not a JSON object")
+
+    if gate_name == "documentation-workflow":
+        if (
+            evidence.get("kind") != "QUALSIGHT_DOCS_WORKFLOW_GATE"
+            or evidence.get("guide") != "docs/USER_GUIDE.md"
+            or not _is_sha256(evidence.get("guide_sha256"))
+            or not _is_sha256(evidence.get("script_sha256"))
+            or not isinstance(evidence.get("blocks"), int)
+            or evidence["blocks"] < 1
+            or evidence.get("exit_code") != 0
+            or not isinstance(evidence.get("seconds"), (int, float))
+            or evidence["seconds"] < 0
+            or not isinstance(evidence.get("started_at"), str)
+            or not evidence["started_at"]
+        ):
+            raise ValueError("documentation evidence does not record a passing guide run")
+        report = {
+            key: evidence[key]
+            for key in (
+                "kind",
+                "guide",
+                "guide_sha256",
+                "blocks",
+                "script_sha256",
+                "exit_code",
+                "seconds",
+                "started_at",
+            )
+        }
+        return {
+            "path": "<GATE_WORK>/documentation-workflow.json",
+            "bytes": len(evidence_body),
+            "sha256": _sha256_bytes(evidence_body),
+            "report": report,
+        }
+
+    if gate_name != "browser-beta3-workflows":
+        raise ValueError(f"unsupported release-gate evidence type: {gate_name}")
+    validators = evidence.get("validators")
+    if (
+        evidence.get("schema_version") != "qualsight-beta3-browser-aggregate-v1"
+        or evidence.get("status") != "PASS"
+        or evidence.get("expected_validator_count") != 9
+        or evidence.get("completed_validator_count") != 9
+        or not isinstance(validators, list)
+        or [item.get("validator") for item in validators]
+        != list(BETA3_BROWSER_VALIDATORS)
+        or any(
+            item.get("exit_code") != 0
+            or not isinstance(item.get("observation"), dict)
+            or item["observation"].get("bytes", 0) < 1
+            or not _is_sha256(item["observation"].get("sha256"))
+            for item in validators
+        )
+        or evidence.get("privacy")
+        != {
+            "absolute_paths_included": False,
+            "full_sha256_identities_included": True,
+            "raw_observations_included": False,
+            "stdout_stderr_included": False,
+        }
+    ):
+        raise ValueError("browser aggregate does not record nine passing validators")
+    encoded = json.dumps(evidence, sort_keys=True)
+    forbidden_terms = (
+        "/" + "home/",
+        "/" + "mnt/",
+        "/" + "tmp/",
+        "assistant/" + "analysis",
+        "assistant/" + "commentary",
+        "assistant/" + "final",
+        "anth" + "ropic",
+        "clau" + "de code",
+        "co-authored" + "-by:",
+        "generated by " + "clau" + "de",
+        "session" + "_id",
+        "thread" + "_id",
+        "turn" + "_id",
+    )
+    if any(term in encoded for term in forbidden_terms) or str(temporary) in encoded:
+        raise ValueError("browser aggregate contains a private or ephemeral path")
+    return {
+        "path": "<GATE_WORK>/browser-aggregate.json",
+        "bytes": len(evidence_body),
+        "sha256": _sha256_bytes(evidence_body),
+        "report": evidence,
+    }
 
 
 def _git_identity(root: Path) -> tuple[str, str]:
@@ -243,6 +409,57 @@ def _git_identity(root: Path) -> tuple[str, str]:
     return commit, tree
 
 
+def _validate_deployment_git_state(
+    deployment_root: Path,
+    *,
+    commit: str,
+    tree: str,
+    after_gates: bool,
+) -> None:
+    deployment_commit, deployment_tree = _git_identity(deployment_root)
+    if (deployment_commit, deployment_tree) != (commit, tree):
+        if after_gates:
+            raise ValueError(
+                "controlled deployment Git identity changed while beta gates were running"
+            )
+        raise ValueError(
+            "controlled deployment Git identity differs from the committed release stage"
+        )
+    deployment_status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=deployment_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    if deployment_status:
+        if after_gates:
+            raise ValueError(
+                "controlled deployment worktree changed while beta gates were running"
+            )
+        raise ValueError("controlled deployment worktree is not clean")
+
+
+def _write_gate_record(
+    *,
+    output: Path,
+    record: dict[str, object],
+    deployment_root: Path,
+    commit: str,
+    tree: str,
+) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    _validate_deployment_git_state(
+        deployment_root,
+        commit=commit,
+        tree=tree,
+        after_gates=True,
+    )
+    with output.open("x", encoding="utf-8", newline="\n") as handle:
+        json.dump(record, handle, indent=2, sort_keys=True, allow_nan=False)
+        handle.write("\n")
+
+
 def run_beta_gate(
     root: Path,
     output: Path,
@@ -258,20 +475,12 @@ def run_beta_gate(
         raise FileExistsError(f"refusing to overwrite beta gate record: {output}")
     if len(commit) != 40 or len(tree) != 40:
         raise ValueError("commit and tree must be complete 40-character Git identities")
-    deployment_commit, deployment_tree = _git_identity(deployment_root)
-    if (deployment_commit, deployment_tree) != (commit, tree):
-        raise ValueError(
-            "controlled deployment Git identity differs from the committed release stage"
-        )
-    deployment_status = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=all"],
-        cwd=deployment_root,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    if deployment_status:
-        raise ValueError("controlled deployment worktree is not clean")
+    _validate_deployment_git_state(
+        deployment_root,
+        commit=commit,
+        tree=tree,
+        after_gates=False,
+    )
     interpreter = _release_interpreter(python)
 
     temporary = Path(tempfile.mkdtemp(prefix=".release-beta-gate.", dir=root.parent))
@@ -284,7 +493,11 @@ def run_beta_gate(
             deployment_root,
         )
         for gate in definitions:
-            environment = dict(os.environ)
+            environment = {
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith("QUALSIGHT_")
+            }
             environment.update(gate.environment)
             working_directory = gate.working_directory or root
             completed = subprocess.run(
@@ -295,23 +508,36 @@ def run_beta_gate(
                 check=False,
                 timeout=gate.timeout_seconds,
             )
-            results.append(
-                {
+            result: dict[str, object] = {
                     "name": gate.name,
-                    "argv": _normalised_argv(root, deployment_root, gate.argv),
+                    "argv": _normalised_argv(
+                        root, deployment_root, gate.argv, temporary
+                    ),
                     "working_directory": _normalised_argv(
                         root,
                         deployment_root,
                         (str(working_directory),),
+                        temporary,
                     )[0],
                     "exit_code": completed.returncode,
                     "stdout_bytes": len(completed.stdout),
                     "stdout_sha256": _sha256_bytes(completed.stdout),
                     "stderr_bytes": len(completed.stderr),
                     "stderr_sha256": _sha256_bytes(completed.stderr),
-                }
-            )
-            if completed.returncode != 0:
+            }
+            if gate.evidence_path is not None:
+                try:
+                    evidence_body = gate.evidence_path.read_bytes()
+                    result["evidence"] = _validate_gate_evidence(
+                        gate.name,
+                        evidence_body,
+                        temporary,
+                    )
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+                    result["evidence_error"] = str(error)
+                    result["exit_code"] = 1
+            results.append(result)
+            if result["exit_code"] != 0:
                 break
         expected_gate_count = len(definitions)
         succeeded = len(results) == expected_gate_count and all(
@@ -325,6 +551,15 @@ def run_beta_gate(
             "path_bindings": {
                 "<COMMITTED_STAGE>": "git archive of git_commit",
                 "<CONTROLLED_DEPLOYMENT>": "clean controlled workstation checkout at git_commit",
+            },
+            "runtime_registry": {
+                "path": "<CONTROLLED_DEPLOYMENT>/resources/resource-registry.json",
+                "sha256": hashlib.sha256(
+                    (deployment_root / "resources/resource-registry.json").read_bytes()
+                ).hexdigest(),
+                "size_bytes": (
+                    deployment_root / "resources/resource-registry.json"
+                ).stat().st_size,
             },
             "interpreter": {
                 "version": subprocess.run(
@@ -342,10 +577,13 @@ def run_beta_gate(
             "expected_gate_count": expected_gate_count,
             "results": results,
         }
-        output.parent.mkdir(parents=True, exist_ok=True)
-        with output.open("x", encoding="utf-8", newline="\n") as handle:
-            json.dump(record, handle, indent=2, sort_keys=True, allow_nan=False)
-            handle.write("\n")
+        _write_gate_record(
+            output=output,
+            record=record,
+            deployment_root=deployment_root,
+            commit=commit,
+            tree=tree,
+        )
         return record
     finally:
         shutil.rmtree(temporary)
