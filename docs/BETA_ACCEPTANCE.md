@@ -1,4 +1,4 @@
-# QualSight 0.1.0-beta.3 — release-candidate acceptance record
+# QualSight 0.1.0-beta.4 — release-candidate acceptance record
 
 This record combines historical accepted evidence with focused beta-3 development evidence. It is not
 final package authority until the frozen committed-tree release gate, installed-package gate, and rollback
@@ -261,6 +261,18 @@ The root pnpm policy now forces `fast-uri` 3.1.7, whose package-registry integri
 same vulnerability command changed from exit 1 with four frontend advisories to exit 0 with zero,
 without adding a policy exception; the two existing local-only PyTorch findings remain the exact accepted
 set. Final committed-package, installed-package, rollback, tag, and remote identities remain pending.
+
+Beta 3 was then published from commit `433c26a872ed40b25e2d5ce8ebbc0ea17cc78404` with all 15 gates,
+7/7 payload checksums, zero frontend vulnerability advisories, and aggregate release-set SHA-256
+`7d35b4cf6c101fc8c5baa5a512027384a2231f96fa00a43c8385583e990cb706`. Trusted extraction and the
+in-place installer passed; the installed offline workflow passed all 28 steps with observation SHA-256
+`a4d8ca6300d0244fbe01b7f369cb005c7898eb1e00ed2dc94ffc73f2055c5c9c`.
+Installed browser validation then failed validator 2/9 before beta 3 was accepted or tagged. The privacy
+validator correctly used the controlled Git repository and LFW tree but still hashed the package-projected
+LFW subset manifest as deployment authority, producing `immutable LFW subset manifest hash drift`.
+The beta-4 repair resolves that immutable manifest through the controlled repository root and adds an
+installed-package regression. Beta 3 remains preserved as failed installed-package evidence; it is not
+overwritten or described as accepted.
 
 ## Research extensions outside QS-H74 beta acceptance
 

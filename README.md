@@ -8,7 +8,7 @@ external scores marked `EXTERNALLY_COMPUTED`) over frozen protocols,
 with every number recorded as an immutable, hash-addressed Run: verification (FMR/FNMR/ROC/DET/EER),
 quality→utility (ERC, AU-ERC, risk-coverage, quality-conditioned error, error models, threshold-policy
 analysis), cross-matcher and preprocessing contrasts, 1:N identification, controlled degradation,
-provenance-bearing figures, dashboards, reports, exports, and reproduction bundles. The beta-3 release-candidate
+provenance-bearing figures, dashboards, reports, exports, and reproduction bundles. The beta-4 release-candidate
 workflow is local and performs no automatic egress. Operator-downloaded reports, exports, and
 reproduction bundles remain governed files: they may contain deployment-local provenance and require
 disclosure review before any external transfer. Population 1:N, dataset degradation, and container
@@ -28,8 +28,9 @@ owner authorization permits local noncommercial research acquisition but never r
 acquisition of the identity-labeled LFW tree remains blocked; the three author-published, pair-only
 verification protocols are downloadable and carry no fabricated identity labels.
 
-**Status:** the last packaged baseline is 0.1.0-beta.2. The current tree targets 0.1.0-beta.3 and must
-pass the complete controlled-workstation release gate before that version is tagged. The target scope
+**Status:** 0.1.0-beta.3 passed its release gate but failed the installed-package browser gate. The current
+tree targets 0.1.0-beta.4 and must pass the complete controlled-workstation release and installed-package
+gates before that version is tagged. The target scope
 and provisional evidence are recorded in `docs/BETA_ACCEPTANCE.md`; no local beta result grants DHS transition,
 remote deployment, production, ATO, or mission-readiness authority.
 

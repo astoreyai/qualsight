@@ -1992,6 +1992,75 @@ class ReleaseMetadataTests(unittest.TestCase):
             else:
                 os.environ[variable] = previous
 
+    def test_installed_privacy_browser_uses_the_controlled_fixture_manifest(
+        self,
+    ) -> None:
+        variable = "QUALSIGHT_REPOSITORY_ROOT"
+        registry_variable = "QUALSIGHT_REGISTRY_PATH"
+        previous = os.environ.get(variable)
+        previous_registry = os.environ.get(registry_variable)
+        with tempfile.TemporaryDirectory() as temporary:
+            installed_root = Path(temporary) / "installed-package"
+            installed_scripts = installed_root / "scripts"
+            installed_manifest = (
+                installed_root / "resources" / "manifests" / "lfw-subset-fixture-v1.json"
+            )
+            installed_scripts.mkdir(parents=True)
+            installed_manifest.parent.mkdir(parents=True)
+            shutil.copy2(
+                ROOT / "scripts" / "validate_evidence_warning_privacy.py",
+                installed_scripts / "validate_evidence_warning_privacy.py",
+            )
+            projector = _load_script("create_release_source_archive")
+            manifest_relative = PurePosixPath(
+                "resources/manifests/lfw-subset-fixture-v1.json"
+            )
+            projected, _ = projector._project_release_members(
+                {
+                    manifest_relative: (
+                        ROOT / manifest_relative
+                    ).read_bytes()
+                },
+                projector._load_policy(
+                    ROOT / "resources" / "security" / "release-package-policy-v1.json"
+                ),
+            )
+            installed_manifest.write_bytes(projected[manifest_relative])
+            self.assertNotEqual(
+                hashlib.sha256(installed_manifest.read_bytes()).hexdigest(),
+                "6d35c169199d83c12e0c76c90a0b1e67c432d0cf78df3aea66df293f65b8b6fe",
+            )
+            os.environ[variable] = str(ROOT.resolve())
+            os.environ[registry_variable] = str(
+                (ROOT / "resources" / "resource-registry.json").resolve()
+            )
+            operator_root = Path(temporary) / "operator-inputs"
+            script_path = installed_scripts / "validate_evidence_warning_privacy.py"
+            spec = importlib.util.spec_from_file_location("installed_privacy_validator", script_path)
+            self.assertIsNotNone(spec)
+            self.assertIsNotNone(spec.loader)
+            module = importlib.util.module_from_spec(spec)
+            sys.path.insert(0, str(ROOT / "scripts"))
+            try:
+                spec.loader.exec_module(module)
+                copied = module._verified_real_inputs(operator_root)
+                self.assertEqual(set(copied), set(module.REAL_INPUTS))
+                for relative, path in copied.items():
+                    self.assertEqual(
+                        hashlib.sha256(path.read_bytes()).hexdigest(),
+                        module.REAL_INPUTS[relative],
+                    )
+            finally:
+                sys.path.remove(str(ROOT / "scripts"))
+                if previous is None:
+                    del os.environ[variable]
+                else:
+                    os.environ[variable] = previous
+                if previous_registry is None:
+                    del os.environ[registry_variable]
+                else:
+                    os.environ[registry_variable] = previous_registry
+
     def test_structured_evidence_browser_uses_the_controlled_database_root(
         self,
     ) -> None:
@@ -2381,7 +2450,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         vite_ref = components[("javascript", "vite", "7.3.6")]["bom-ref"]
         esbuild_ref = components[("javascript", "esbuild", "0.28.2")]["bom-ref"]
         pip_audit_ref = components[("python", "pip-audit", "2.10.0")]["bom-ref"]
-        build_ref = components[("build", "QualSight release toolchain", "0.1.0b3")]["bom-ref"]
+        build_ref = components[("build", "QualSight release toolchain", "0.1.0b4")]["bom-ref"]
         self.assertIn(pydantic_ref, dependency_graph[fastapi_ref])
         self.assertIn(esbuild_ref, dependency_graph[vite_ref])
         self.assertIn(pip_audit_ref, dependency_graph[build_ref])
@@ -2592,7 +2661,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             module.write_manifest(
                 root=ROOT,
                 output=output,
-                version="0.1.0b3",
+                version="0.1.0b4",
                 commit=expected_commit,
                 tree=expected_tree,
                 artifacts=artifacts,
@@ -2619,7 +2688,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 module.write_manifest(
                     root=ROOT,
                     output=output,
-                    version="0.1.0b3",
+                    version="0.1.0b4",
                     commit=expected_commit,
                     tree=expected_tree,
                     artifacts=artifacts,

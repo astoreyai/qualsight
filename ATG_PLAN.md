@@ -2,7 +2,7 @@
 
 **Graph version:** v1.6  
 **Date:** August 17, 2026  
-**State:** The beta DAG is complete — every whole capability QS-A00 through QS-H74 (41 nodes; Phase 2 under owner decision 28, QS-C21 under decision 29) is accepted; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-D31.R0, and QS-H74.RELEASE.R1 are accepted; beta-3 release child QS-H74.RELEASE.R2 is ready after its implementation/runtime gates and awaits the committed-tree package gate; refinement parent QS-A02.LFW is accepted; QS-H74 (beta end-to-end acceptance) executed the section-57 chain offline on 2026-08-18; only the post-beta branch remains outside the DAG
+**State:** The beta DAG is complete — every whole capability QS-A00 through QS-H74 (41 nodes; Phase 2 under owner decision 28, QS-C21 under decision 29) is accepted; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-D31.R0, and QS-H74.RELEASE.R1 are accepted; beta-3 release child QS-H74.RELEASE.R2 failed installed-browser validation and beta-4 repair child QS-H74.RELEASE.R3 awaits clean release and installed-package gates; refinement parent QS-A02.LFW is accepted; QS-H74 (beta end-to-end acceptance) executed the section-57 chain offline on 2026-08-18; only the post-beta branch remains outside the DAG
 **Loop controller:** [ATG_LOOP.md](./ATG_LOOP.md)  
 **Canonical product requirements:** [PRD.md](./PRD.md)  
 **Evidence-only companion:** [PLAN.md](./PLAN.md)
@@ -1162,7 +1162,7 @@ and DHS transition boundaries are unchanged.
 
 **State:** ACCEPTED after the append-only release record and committed-tree package gate pass.
 
-### QS-H74.RELEASE.R2 — Beta release 0.1.0-beta.3 (ready evidence child)
+### QS-H74.RELEASE.R2 — Beta release 0.1.0-beta.3 (failed evidence child)
 
 **Safe gate:** bind all changed code, requirements, controller documents, registries, and real-browser
 evidence in the append-only ledger; require the complete discovered backend suite, root suite, frontend type/build, registry,
@@ -1180,8 +1180,21 @@ deployment, or DHS transition authority. The durable 32-step real-browser observ
 `atg/evidence/2026-09-01-console-beta3-scoped-final.json` (SHA-256
 `e6921165f3db43a4ba8e4a6bfffe37d20a9977a35fd38e0567faa32689062ca4`).
 
-**State:** READY. It becomes ACCEPTED only after the clean committed-tree release, package inspection,
-isolated installation, installed runtime/browser gates, beta-2 rollback, and version-tag verification pass.
+**State:** FAILED at installed browser validator 2/9 after the release, package inspection, installation,
+and installed offline gate passed. The preserved beta-3 package is not accepted or tagged.
+
+### QS-H74.RELEASE.R3 — Beta release 0.1.0-beta.4 (repair evidence child)
+
+**Safe gate:** preserve beta 3; resolve the installed validator's immutable LFW fixture manifest through
+the controlled deployment repository; add and pass the installed-package authority regression; bump all
+three component versions and frozen locks; then repeat R2's complete clean release, package inspection,
+isolated installation, installed offline/browser, controlled beta-2 rollback, restoration, and tag gates.
+
+**Acceptance boundary:** identical to R2 except for the installed-package manifest-authority repair and
+the explicit no-clobber beta-4 identity. It does not expand data, model, connection, deployment, rights,
+identity-truth, or DHS authority.
+
+**State:** READY. It becomes ACCEPTED only after every safe-gate step above passes from one clean commit.
 
 Historical accepted events QS-A02.R0, QS-A02.R1, QS-A02.R2, QS-A02.R3, QS-A02.R4, QS-A02.R5, QS-A02.R6, QS-A03.R0, QS-A04.R0, QS-A06.R0, and QS-A06.R1M retain their exact recorded counts and hashes in `atg/ledger.jsonl`; current refinements supersede them for reuse without rewriting history. The active accepted evidence set is `{QS-A00, QS-A01, QS-A02, QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03, QS-A03.R1, QS-A04, QS-A04.R1, QS-A04.R2, QS-A05, QS-A06, QS-A06.R1O, QS-A06.R2, QS-A07, QS-A08, QS-A09, QS-A10, QS-B10, QS-B11, QS-B12, QS-B12.LFW.FULL, QS-B13, QS-B14, QS-C20, QS-C22, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-C23, QS-C24, QS-C25, QS-D30, QS-D31, QS-D31.R0, QS-D32, QS-D33, QS-D34, QS-E40, QS-E41, QS-E42, QS-E43, QS-F50, QS-F51, QS-F52, QS-F53, QS-F54, QS-H70, QS-H71, QS-H72, QS-H73, QS-C21, QS-H74, QS-H74.RELEASE.R1}`. No beta whole capability remains dependency-ready because the beta DAG is closed.
 

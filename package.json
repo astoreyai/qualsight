@@ -1,6 +1,6 @@
 {
   "name": "qualsight",
-  "version": "0.1.0-beta.3",
+  "version": "0.1.0-beta.4",
   "private": true,
   "packageManager": "pnpm@10.28.0",
   "scripts": {

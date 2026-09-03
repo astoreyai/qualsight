@@ -38,7 +38,6 @@ if NODE_EXECUTABLE is None:
     raise RuntimeError("the reviewed Node executable is not available on PATH")
 NODE_BIN = str(Path(NODE_EXECUTABLE).parent)
 RESEARCH_SCOPE = "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
-FIXTURE_MANIFEST = ROOT / "resources" / "manifests" / "lfw-subset-fixture-v1.json"
 EXPECTED_FIXTURE_SHA256 = "6d35c169199d83c12e0c76c90a0b1e67c432d0cf78df3aea66df293f65b8b6fe"
 LFW_ROOT = lfw_tree_root(ROOT)
 REAL_INPUTS = {
@@ -282,9 +281,10 @@ def _extract_legacy_producer(target: Path) -> dict[str, str]:
 
 
 def _verified_real_inputs(operator_root: Path) -> dict[str, Path]:
-    if _sha256(FIXTURE_MANIFEST) != EXPECTED_FIXTURE_SHA256:
+    fixture_manifest = _controlled_repository_root() / "resources" / "manifests" / "lfw-subset-fixture-v1.json"
+    if _sha256(fixture_manifest) != EXPECTED_FIXTURE_SHA256:
         raise RuntimeError("the immutable LFW subset manifest hash drifted")
-    fixture = json.loads(FIXTURE_MANIFEST.read_text(encoding="utf-8"))
+    fixture = json.loads(fixture_manifest.read_text(encoding="utf-8"))
     registered = {
         str(item["path"]): str(item["sha256"])
         for item in fixture["images"]

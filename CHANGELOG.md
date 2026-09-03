@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.1.0-beta.3 (unreleased release candidate) — 2026-09-01
+## 0.1.0-beta.4 (unreleased release candidate) — 2026-09-03
+
+* Installed-package browser validation now reads the immutable LFW subset manifest from the controlled
+  deployment repository, matching the existing controlled Git, registry, source-cache, and real-input
+  boundaries. Beta 3 remains preserved because its package passed release and offline installation but
+  failed this browser validator; beta 4 is a no-clobber versioned repair.
+
+## 0.1.0-beta.3 (published candidate; not accepted) — 2026-09-03
 
 * Reorganized the console around the accepted persistent left-hand workflow: Home, Projects, Inputs,
   Inspect quality, Compare, Stress test, Analyze utility, Results, Evidence & reports, and Manage system. Workflow entries
