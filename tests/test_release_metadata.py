@@ -2023,9 +2023,25 @@ class ReleaseMetadataTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("exportTable:", api_source)
-        self.assertIn('method: "POST"', api_source[api_source.index("exportTable:"):])
-        self.assertIn("api.exportTable", reports_source)
+        self.assertIn(
+            'headers: { accept: "application/json" }',
+            api_source[api_source.index("exportTable:"):],
+        )
+        self.assertIn("await api.exportTable", reports_source)
         self.assertNotIn("/exports/", reports_source)
+        self.assertIn("download.href", reports_source)
+        self.assertIn("link.click()", reports_source)
+        self.assertIn("window.setTimeout(() => link.remove(), 0)", reports_source)
+        self.assertNotIn("URL.createObjectURL", reports_source)
+        self.assertNotIn("URL.revokeObjectURL", reports_source)
+        self.assertIn("export created", reports_source)
+        app_source = (ROOT / "frontend" / "src" / "App.tsx").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            r"(recorded|imported|frozen|saved|completed|created|cancelled)",
+            app_source,
+        )
         self.assertNotIn("export_parquet", system_source)
         self.assertNotIn("export_json", system_source)
         audit_source = (ROOT / "scripts" / "audit_console.py").read_text(
@@ -2040,7 +2056,6 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn('page.expect_download(timeout=60_000)', release_browser_source)
         self.assertIn('[data-governed-download="quality-csv"]', release_browser_source)
         self.assertIn("export_sha256", release_browser_source)
-        self.assertIn("window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)", reports_source)
 
     def test_offline_gate_requires_its_launched_process_to_own_the_listener(self) -> None:
         module = _load_script("offline_gate")

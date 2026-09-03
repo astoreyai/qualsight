@@ -383,19 +383,6 @@ async function readJson<T>(response: Response): Promise<T> {
   throw new ApiError(response.status, detail, failure);
 }
 
-async function readDownload(response: Response): Promise<{ blob: Blob; filename: string }> {
-  if (!response.ok) {
-    await readJson<never>(response);
-  }
-  const disposition = response.headers.get("content-disposition") ?? "";
-  const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
-  const filename = filenameMatch?.[1]?.trim();
-  if (!filename) {
-    throw new ApiError(response.status, "the export response omitted its governed filename");
-  }
-  return { blob: await response.blob(), filename };
-}
-
 export interface ProjectOut {
   project_id: string;
   name: string;
@@ -911,6 +898,19 @@ export interface ArtifactDownloadOut {
   href: string | null;
 }
 
+export interface TableExportOut {
+  export_id: string;
+  project_id: string;
+  category: string;
+  ref: string;
+  format: "csv" | "json" | "parquet";
+  rows: number;
+  classification: string;
+  sha256: string;
+  size_bytes: number;
+  download: ArtifactDownloadOut;
+}
+
 export interface BundleOut {
   bundle_id: string;
   run_id: string;
@@ -1158,7 +1158,10 @@ export const api = {
   createReport: (project_id: string, spec: Record<string, unknown>) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/reports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ spec }) }).then((r) => readJson<ReportOut>(r)),
   exportTable: (project_id: string, category: "quality_results" | "comparison_records" | "embeddings" | "metric_tables" | "statistical_results" | "annotations", ref: string, format: "csv" | "json" | "parquet") =>
-    fetch(`/api/projects/${encodeURIComponent(project_id)}/exports/${encodeURIComponent(category)}?ref=${encodeURIComponent(ref)}&format=${encodeURIComponent(format)}`, { method: "POST" }).then(readDownload),
+    fetch(`/api/projects/${encodeURIComponent(project_id)}/exports/${encodeURIComponent(category)}?ref=${encodeURIComponent(ref)}&format=${encodeURIComponent(format)}`, {
+      method: "POST",
+      headers: { accept: "application/json" },
+    }).then((response) => readJson<TableExportOut>(response)),
   bundles: (project_id: string) => fetch(`/api/projects/${encodeURIComponent(project_id)}/bundles`).then((r) => readJson<BundleOut[]>(r)),
   createBundle: (project_id: string, run_id: string) =>
     fetch(`/api/projects/${encodeURIComponent(project_id)}/bundles`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ run_id }) }).then((r) => readJson<BundleOut>(r)),

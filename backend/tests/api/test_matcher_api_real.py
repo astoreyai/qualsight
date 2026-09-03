@@ -1250,11 +1250,66 @@ class RealMatcherApiTests(unittest.TestCase):
             )
         )
         # Exports carry run identifiers and classification headers; every category and format serves a file.
+        export_root = self.data_dir / "exports"
+        export_files_before_uncreated_get = sorted(
+            path.relative_to(export_root)
+            for path in export_root.rglob("*")
+            if path.is_file()
+        ) if export_root.exists() else []
+        uncreated_get = self.client.get(
+            f"/api/projects/{self.project_id}/exports/quality_results/file",
+            params={"ref": job["job_id"], "format": "csv"},
+        )
+        self.assertEqual(uncreated_get.status_code, 410, uncreated_get.text)
+        self.assertEqual(
+            sorted(
+                path.relative_to(export_root)
+                for path in export_root.rglob("*")
+                if path.is_file()
+            ) if export_root.exists() else [],
+            export_files_before_uncreated_get,
+        )
         for category, ref in (("quality_results", job["job_id"]), ("comparison_records", leaf["run_id"]), ("embeddings", leaf["run_id"]), ("metric_tables", leaf["run_id"]), ("statistical_results", analysis_id), ("annotations", self.project_id)):
             for fmt in ("csv", "json", "parquet"):
                 response = self.client.post(f"/api/projects/{self.project_id}/exports/{category}", params={"ref": ref, "format": fmt})
                 self.assertEqual(response.status_code, 200, (category, fmt, response.text[:200]))
                 self.assertIn(response.headers["X-QualSight-Classification"], {"SENSITIVE_BIOMETRIC_DERIVED", "PRIVATE"})
+        receipt_response = self.client.post(
+            f"/api/projects/{self.project_id}/exports/quality_results",
+            params={"ref": job["job_id"], "format": "csv"},
+            headers={"Accept": "application/json"},
+        )
+        self.assertEqual(receipt_response.status_code, 200, receipt_response.text)
+        receipt = receipt_response.json()
+        self.assertEqual(
+            set(receipt),
+            {
+                "export_id",
+                "project_id",
+                "category",
+                "ref",
+                "format",
+                "rows",
+                "classification",
+                "sha256",
+                "size_bytes",
+                "download",
+            },
+        )
+        self.assertEqual(receipt["project_id"], self.project_id)
+        self.assertEqual(receipt["category"], "quality_results")
+        self.assertEqual(receipt["ref"], job["job_id"])
+        self.assertEqual(receipt["format"], "csv")
+        self.assertEqual(receipt["download"]["state"], "VERIFIED")
+        export_download = self.client.get(receipt["download"]["href"])
+        self.assertEqual(export_download.status_code, 200, export_download.text[:200])
+        self.assertEqual(
+            hashlib.sha256(export_download.content).hexdigest(), receipt["sha256"]
+        )
+        self.assertEqual(len(export_download.content), receipt["size_bytes"])
+        self.assertEqual(
+            export_download.headers["X-QualSight-Export-Id"], receipt["export_id"]
+        )
         export_files_before_retired_get = {
             path.relative_to(self.data_dir / "exports"): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in (self.data_dir / "exports").rglob("*")
@@ -1280,6 +1335,12 @@ class RealMatcherApiTests(unittest.TestCase):
             headers={"Origin": "https://attacker.invalid"},
         )
         self.assertEqual(cross_site.status_code, 403, cross_site.text)
+        cross_port = self.client.post(
+            f"/api/projects/{self.project_id}/exports/embeddings",
+            params={"ref": leaf["run_id"], "format": "json"},
+            headers={"Origin": "http://127.0.0.1:65535"},
+        )
+        self.assertEqual(cross_port.status_code, 403, cross_port.text)
         embeddings = self.client.post(f"/api/projects/{self.project_id}/exports/embeddings", params={"ref": leaf["run_id"], "format": "json"}).json()
         self.assertTrue(all(row["run_id"] == leaf["run_id"] and len(row["embedding"]) == 512 for row in embeddings["rows"]))
         foreign = self.client.post(
@@ -1292,7 +1353,6 @@ class RealMatcherApiTests(unittest.TestCase):
         )
         self.assertEqual(foreign.status_code, 201, foreign.text)
         foreign_project_id = foreign.json()["project_id"]
-        export_root = self.data_dir / "exports"
         exports_before_denial = sorted(path.relative_to(export_root) for path in export_root.rglob("*") if path.is_file())
         denied_export = self.client.post(
             f"/api/projects/{foreign_project_id}/exports/embeddings",

@@ -75,9 +75,13 @@
   Controlled LFW input resolution is registry-driven rather than bound to a workstation pathname.
   `QUALSIGHT_SOURCE_CACHE_ROOT` selects an existing absolute, non-symlinked verified cache without
   silently contacting a publisher or granting network access.
-* Governed table exports now require origin-checked POST requests and download through the console as
-  real attachment bytes; retired GET export routes are refused without changing stored export state.
-  The browser audit verifies the downloaded CSV filename, nonempty byte count, and SHA-256.
+* Governed table exports now require origin-checked POST creation and download through the console as real
+  attachment bytes. A JSON-accepting console request receives a verified export receipt, then lets Chromium
+  retrieve that exact recorded file through a read-only project-scoped download route; this preserves API
+  error handling without a client-created blob URL. Direct POST clients retain the attachment response,
+  while retired GET creation routes are refused without changing stored export state. Browser mutations now
+  match Origin scheme, host, and effective port rather than accepting every loopback port. The browser audit
+  verifies the downloaded CSV filename, nonempty byte count, and SHA-256.
 * Release publication rechecks the commit, tree, and clean tracked state immediately before the atomic
   no-clobber rename. Source projection and extracted-package validation reject raw, encoded, and
   platform-specific operator-home paths while retaining only reviewed external locator bindings.

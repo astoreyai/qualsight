@@ -263,7 +263,15 @@ def recover_prepared_export(
         raise ExportError("prepared export failed integrity verification") from error
 
 
-def export_table(store: Any, *, category: str, ref: str, fmt: str, root: Path) -> dict[str, Any]:
+def export_table(
+    store: Any,
+    *,
+    category: str,
+    ref: str,
+    fmt: str,
+    root: Path,
+    existing_only: bool = False,
+) -> dict[str, Any]:
     if category not in CATEGORIES:
         raise ExportError(f"unknown export category {category}")
     if fmt not in FORMATS:
@@ -317,6 +325,8 @@ def export_table(store: Any, *, category: str, ref: str, fmt: str, root: Path) -
             fmt=fmt,
             request_sha256=request_sha256,
         )
+    if existing_only:
+        raise ExportError("export is not recorded")
     stage = create_staging_directory(
         directory,
         operation_kind="TABULAR_EXPORT",

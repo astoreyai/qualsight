@@ -868,10 +868,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             origin = request.headers.get("origin")
             if origin:
                 try:
-                    origin_host = urlsplit(origin).hostname
+                    origin_parts = urlsplit(origin)
+                    request_parts = urlsplit(
+                        f"{request.url.scheme}://{request.headers.get('host', '')}"
+                    )
+                    origin_port = origin_parts.port or (
+                        443 if origin_parts.scheme == "https" else 80
+                    )
+                    request_port = request_parts.port or (
+                        443 if request_parts.scheme == "https" else 80
+                    )
                 except ValueError:
-                    origin_host = None
-                if origin_host not in allowed_hosts:
+                    origin_parts = request_parts = None
+                    origin_port = request_port = None
+                if (
+                    origin_parts is None
+                    or request_parts is None
+                    or origin_parts.scheme != request_parts.scheme
+                    or origin_parts.hostname != request_parts.hostname
+                    or origin_port != request_port
+                    or origin_parts.username is not None
+                    or origin_parts.password is not None
+                    or origin_parts.path not in {"", "/"}
+                    or origin_parts.query
+                    or origin_parts.fragment
+                ):
                     return JSONResponse(status_code=403, content={"detail": "cross-site mutation of the local control plane is refused"})
         parts = request.url.path.strip("/").split("/")
         mutation_project = (
@@ -3519,7 +3540,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return None
 
     @app.post("/api/projects/{project_id}/exports/{category}")
-    def export_category(project_id: str, category: str, ref: str = Query(min_length=1), format: Literal["csv", "json", "parquet"] = Query(default="csv")) -> StreamingResponse:
+    def export_category(
+        project_id: str,
+        category: str,
+        request: Request,
+        ref: str = Query(min_length=1),
+        format: Literal["csv", "json", "parquet"] = Query(default="csv"),
+    ) -> Response:
         with admitted_mutation(project_id):
             if store().project(project_id) is None or _project_of_ref(category, ref) != project_id:
                 raise HTTPException(status_code=404, detail="export source is not recorded in this project")
@@ -3538,8 +3565,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "TABULAR_EXPORT", record, actor_id=settings.actor
                 ),
             )
+            accepted_media = {
+                item.split(";", maxsplit=1)[0].strip().lower()
+                for item in request.headers.get("accept", "").split(",")
+            }
+            if "application/json" in accepted_media:
+                href = (
+                    f"/api/projects/{quote(project_id, safe='')}/exports/"
+                    f"{quote(category, safe='')}/file?ref={quote(ref, safe='')}"
+                    f"&format={format}"
+                )
+                return JSONResponse(
+                    {
+                        "export_id": record["export_id"],
+                        "project_id": project_id,
+                        "category": category,
+                        "ref": ref,
+                        "format": format,
+                        "rows": record["rows"],
+                        "classification": record["classification"],
+                        "sha256": record["sha256"],
+                        "size_bytes": record["size_bytes"],
+                        "download": {
+                            "state": "VERIFIED",
+                            "reason": None,
+                            "href": href,
+                        },
+                    }
+                )
             snapshot, observed_sha256 = open_recorded_snapshot(Path(record["path"]), record["sha256"], "export")
             return recorded_snapshot_response(snapshot, media_type=media, filename=f"{category}-{ref[-12:]}.{format}", headers={"X-QualSight-Export-Id": record["export_id"], "X-QualSight-Export-Sha256": observed_sha256, "X-QualSight-Export-Rows": str(record["rows"]), "X-QualSight-Classification": record["classification"]})
+
+    @app.get("/api/projects/{project_id}/exports/{category}/file")
+    def download_export(
+        project_id: str,
+        category: str,
+        ref: str = Query(min_length=1),
+        format: Literal["csv", "json", "parquet"] = Query(default="csv"),
+    ) -> StreamingResponse:
+        if store().project(project_id) is None or _project_of_ref(category, ref) != project_id:
+            raise HTTPException(status_code=404, detail="export source is not recorded in this project")
+        try:
+            record = export_table(
+                store(),
+                category=category,
+                ref=ref,
+                fmt=format,
+                root=settings.data_dir / "exports",
+                existing_only=True,
+            )
+        except ExportError as error:
+            raise HTTPException(status_code=410, detail=redact_private_paths(str(error))) from error
+        if record["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="export source is not recorded in this project")
+        media = {"csv": "text/csv", "json": "application/json", "parquet": "application/vnd.apache.parquet"}[format]
+        snapshot, observed_sha256 = open_recorded_snapshot(Path(record["path"]), record["sha256"], "export")
+        return recorded_snapshot_response(snapshot, media_type=media, filename=f"{category}-{ref[-12:]}.{format}", headers={"X-QualSight-Export-Id": record["export_id"], "X-QualSight-Export-Sha256": observed_sha256, "X-QualSight-Export-Rows": str(record["rows"]), "X-QualSight-Classification": record["classification"]})
 
     @app.post("/api/projects/{project_id}/bundles", status_code=201)
     def create_bundle(project_id: str, request: BundleCreate) -> JSONResponse:

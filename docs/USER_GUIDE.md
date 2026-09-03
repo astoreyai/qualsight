@@ -267,9 +267,12 @@ rm -- "$SNAPSHOT_PATH"
 ## 7. Figures, exports, bundles, reproduction (console: **Evidence & reports**)
 
 Figures render PNG/SVG/PDF/CSV plus `figure.provenance.json`; the console builds dashboards and
-HTML/PDF reports from the same records; tabular exports use an origin-checked `POST` to
-`/api/projects/{project_id}/exports/{category}?ref=&format=csv|json|parquet`
-carry Run identifiers on every row; a `.qsexp` bundle packages a Run for reproduction, and
+HTML/PDF reports from the same records. A console export button submits an origin-checked, same-origin
+`POST` to `/api/projects/{project_id}/exports/{category}?ref=&format=csv|json|parquet`. The API first
+returns a verified creation receipt to the console; the browser then saves that exact recorded file from
+the receipt's read-only project-scoped link. This preserves a visible API error if creation is refused and
+does not hold the governed table in a client-created blob URL. Exports carry Run identifiers on every row.
+A `.qsexp` bundle packages a Run for reproduction, and
 `reproduce-bundle` re-executes it and reports EXACT / WITHIN_TOLERANCE / DIFFERENT /
 MISSING_DEPENDENCY / MISSING_DATA / BLOCKED (exit 0 only for the first two).
 

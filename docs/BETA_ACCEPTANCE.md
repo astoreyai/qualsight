@@ -146,7 +146,7 @@ pairs. Direct matcher inference executes in a terminable child process under the
 The pre-latest-repair backend baseline ran 225 tests in 1,811.356 seconds: 223 passed and two explicitly
 opt-in large-network tests skipped. Those numbers are historical and are not the final beta-3 tree count.
 The corresponding frontend TypeScript and production build passed under the then-pinned Node 20.20.2/pnpm
-10.28.0 toolchain with 48 modules transformed. The definitive post-repair backend discovery then ran
+10.28.0 toolchain with 48 modules transformed. An earlier post-repair backend discovery then ran
 303 tests in 4,047.221 seconds: 298 passed, five explicitly opt-in checkpoint/dataset network acquisition
 tests skipped, exit 0, and no SIGBUS recurrence. Focused development-tree Chromium evidence includes:
 
@@ -202,6 +202,33 @@ and path-bearing warning presentation. Those findings are now RED-tested and rep
 route families require project identity; durable incomplete purges refuse new mutations; job results are path-free;
 new Run warnings are structured and path-free; and legacy path-bearing warnings are sanitized in primary Evidence.
 Packaging remains stopped until the complete post-repair gates and final hostile review pass.
+
+## 2026-09-02 beta-3 release-blocker closure evidence
+
+The third clean-commit package attempt at `27711c13ad91404fa4dc9b82dbe5376052dbadcf` passed release
+gates 1–14 and failed only `browser-beta3-workflows`. Eight validators exited 0; `observe_console.py`
+timed out waiting for the governed quality-CSV download even though the backend had already published
+the real 16,622-byte export. A production build that retained the client blob URL for 60 seconds failed
+the same way, disproving early URL revocation as the cause.
+
+A native same-origin POST form first restored the browser event: its 32-step observation had SHA-256
+`c93b61d332c38cb7bb1179ef4c42cc36720fda3e1a59b19a1bc7fa100ed688f8`, and its complete browser
+aggregate passed 9/9 at SHA-256 `f8ae646d6e322d9f895bc832ccf3f6bb6fbebedcee1acde51a65d1c60afe6dc9`.
+Adversarial review did not accept that interim mechanism because a form response could not return a
+creation refusal to the React workflow or keep its busy state bound to server completion.
+
+The accepted development-tree mechanism keeps export creation behind the project purge fence and exact
+scheme/host/port Origin check. A JSON-accepting POST returns a path-free hash/size/classification receipt;
+the receipt links to a read-only project-scoped GET that can only recover and stream the already-created,
+integrity-checked prepared output. The source contract was observed red before implementation. The real
+LFW API regression was observed failing on the old attachment representation, then passed in 162.546
+seconds with receipt shape, downloaded SHA-256/size equality, and wrong-port Origin refusal. The rebuilt
+console passed all 32 Chromium steps with observation SHA-256
+`63c454bb206df2a24615601979c48951f836b7be3e5cd9992ac09e8366a3b701`; the complete nine-validator
+aggregate passed 9/9 with SHA-256
+`30491cb1d2c9a4f2e577d6106283b93225144b0ded24e26434df1c83d564e2f9` and no nonzero validator.
+These are development-tree closure results. Final committed-package, installed-package, rollback, tag,
+and remote identities remain pending and are not implied by this section.
 
 ## Research extensions outside QS-H74 beta acceptance
 

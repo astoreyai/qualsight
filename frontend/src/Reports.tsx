@@ -270,19 +270,17 @@ export function Reports({ projectId, datasetId, onMessage, onOpenEvidence }: Rep
     format: "csv" | "json" | "parquet",
   ) => run(`export-${category}-${format}`, async () => {
     if (!projectId) throw new Error("no project");
-    const download = await api.exportTable(projectId, category, ref, format);
-    const objectUrl = URL.createObjectURL(download.blob);
-    try {
-      const link = document.createElement("a");
-      link.href = objectUrl;
-      link.download = download.filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    } finally {
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    const exported = await api.exportTable(projectId, category, ref, format);
+    if (exported.download.state !== "VERIFIED" || !exported.download.href) {
+      throw new Error(exported.download.reason ?? "the recorded export is unavailable for download");
     }
-    return `${download.filename} downloaded (${download.blob.size.toLocaleString()} bytes)`;
+    const link = document.createElement("a");
+    link.href = exported.download.href;
+    link.hidden = true;
+    document.body.appendChild(link);
+    link.click();
+    window.setTimeout(() => link.remove(), 0);
+    return `${format.toUpperCase()} export created (${exported.size_bytes.toLocaleString()} bytes); browser download requested`;
   });
 
   const reproduce = (bundle: BundleOut) => run("reproduce", async () => {
