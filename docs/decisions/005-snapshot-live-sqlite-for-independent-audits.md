@@ -18,6 +18,13 @@ non-symlink snapshot path and open it read-only and immutable; the latter contin
 tree for stored files and secrets. Without a snapshot, the local-data audit must acquire the same exclusive
 lease or fail before opening the live database.
 
+On 2026-09-03, apply the same boundary to process-death recovery tests. An API worker publishes its actual
+accepted HTTP result identifier through an atomic, private, no-clobber record; a CLI worker is identified by its
+canonical prepared-output receipt. The parent observes that identity and the real prepared output files without
+opening SQLite, kills and reaps the worker, and only then verifies database state. The parent never joins the
+child-owned live WAL merely to discover progress. Result identities come from the worker or canonical receipt,
+not from filename reconstruction, and a partial artifact alone is not evidence that publication completed.
+
 ## Why
 
 SQLite's WAL and shared-memory files are part of the live database state. A child verifier needs a stable
@@ -33,4 +40,6 @@ non-regular file, a multi-link alias, a wrong-schema database, or the live store
 hold a no-follow file descriptor through validation and give SQLite the descriptor through `/proc/self/fd`,
 so a path replacement cannot change the inspected inode. Callers delete the snapshot after inspection. The
 ordered real API regression binds the live WAL/SHM device and inode identities before and after verification
-and exercises report, bundle, reproduction, audit, and purge afterward.
+and exercises report, bundle, reproduction, audit, and purge afterward. A beta-5 gate failure confirmed why this
+also applies to tests: the process received `SIGBUS` in `sqlite3WalFindFrame`, and the fault address was within the
+active database's mapped WAL-index file while a parent observer and child worker overlapped.

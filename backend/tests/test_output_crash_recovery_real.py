@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import signal
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,53 @@ ABEL_RIGHT = LFW_TREE / "Abel_Pacheco" / "Abel_Pacheco_0004.jpg"
 ABEL_LEFT_SHA256 = "8b6fff626f3d778d34027e19fc88c521a9e1307cf735b22a1406c17e55e8a967"
 ABEL_RIGHT_SHA256 = "8050daa859e7e05aedd5c7ec3851e5d5bddcb2b9797d23958664ec2958a230ae"
 RESEARCH_SCOPE = "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+
+
+def _publish_worker_response(path: Path, payload: dict[str, str]) -> None:
+    """Atomically publish the real accepted-response identity to the parent."""
+
+    body = (CanonicalJson.from_value(payload).text + "\n").encode("utf-8")
+    partial = path.with_name(f".{path.name}.writing")
+    descriptor = os.open(
+        partial,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        0o600,
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(body)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(partial, path, follow_symlinks=False)
+    finally:
+        partial.unlink(missing_ok=True)
+    directory_descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_descriptor)
+    finally:
+        os.close(directory_descriptor)
+
+
+def _read_worker_response_id(path: Path, field: str) -> str | None:
+    if not path.exists():
+        return None
+    observed = path.lstat()
+    if not stat.S_ISREG(observed.st_mode):
+        raise AssertionError("worker response is not a regular file")
+    if stat.S_IMODE(observed.st_mode) != 0o600:
+        raise AssertionError("worker response mode differs")
+    if observed.st_nlink not in {1, 2}:
+        raise AssertionError("worker response link count differs")
+    text = path.read_text(encoding="utf-8")
+    payload = json.loads(text)
+    if set(payload) != {field}:
+        raise AssertionError("worker response fields differ")
+    if text != CanonicalJson.from_value(payload).text + "\n":
+        raise AssertionError("worker response is not canonical")
+    value = payload[field]
+    if not isinstance(value, str) or not value:
+        raise AssertionError("worker response identity is absent")
+    return value
 
 
 class OutputCrashRecoveryRealTests(unittest.TestCase):
@@ -162,6 +210,9 @@ class OutputCrashRecoveryRealTests(unittest.TestCase):
         self.assertEqual(worker.returncode, -signal.SIGKILL, (stdout, stderr))
         return stdout, stderr
 
+    def _worker_response_id(self, path: Path, field: str) -> str | None:
+        return _read_worker_response_id(path, field)
+
     def _utility_inputs(
         self, *, leaves: str = "QS-C22.AS"
     ) -> tuple[str, str, dict]:
@@ -250,6 +301,7 @@ from pathlib import Path
 import sys
 import time
 from fastapi.testclient import TestClient
+from backend.tests.test_output_crash_recovery_real import _publish_worker_response
 from qualsight.api import Settings, create_app
 from qualsight.execution.registry_binding import OFIQ_INPUT_RESOURCE_ID, OFIQ_V112_RUNTIME_RESOURCE_ID
 
@@ -257,12 +309,14 @@ root = Path(sys.argv[1])
 data_dir = Path(sys.argv[2])
 project_id = sys.argv[3]
 request = json.loads(sys.argv[4])
+response_marker = Path(sys.argv[5])
 settings = Settings(repository_root=root, registry_path=root / "resources" / "resource-registry.json", data_dir=data_dir, runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID, input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, "lfw-funneled-local-candidate"))
 with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_exceptions=False) as client:
     response = client.post(f"/api/projects/{project_id}/cross-matcher", json=request)
     if response.status_code != 202:
         raise RuntimeError(response.text)
     analysis_id = response.json()["analysis_id"]
+    _publish_worker_response(response_marker, {"analysis_id": analysis_id})
     while True:
         state = client.get(f"/api/projects/{project_id}/cross-matcher/{analysis_id}").json()["state"]
         if state in {"COMPLETED", "FAILED", "INTERRUPTED"}:
@@ -279,35 +333,24 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_
         )
         connection.commit()
         connection.close()
+        response_marker = self.data_dir / ".cross-matcher-worker-response.json"
         worker = self._worker(
             worker_source,
             str(ROOT),
             str(self.data_dir),
             self.project_id,
             json.dumps(request, sort_keys=True),
+            str(response_marker),
         )
         analysis_id: str | None = None
 
         def final_files_exist() -> bool:
             nonlocal analysis_id
-            query = sqlite3.connect(database)
-            try:
-                operation = query.execute(
-                    "SELECT operation_id FROM operations "
-                    "WHERE operation_kind = 'CROSS_MATCHER_ANALYSIS' AND state = 'RUNNING' "
-                    "ORDER BY accepted_at DESC LIMIT 1"
-                ).fetchone()
-                if operation is None:
-                    return False
-                analysis_id = operation[0]
-                recorded = query.execute(
-                    "SELECT 1 FROM cross_matcher_analyses WHERE analysis_id = ?",
-                    (analysis_id,),
-                ).fetchone()
-            finally:
-                query.close()
+            analysis_id = self._worker_response_id(response_marker, "analysis_id")
+            if analysis_id is None:
+                return False
             directory = self.data_dir / "analyses" / analysis_id.replace(":", "_")
-            return recorded is None and all(
+            return all(
                 (directory / name).is_file()
                 for name in (
                     "contrast_pairs.parquet",
@@ -329,6 +372,17 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_
                 for name in ("contrast_pairs.parquet", "crossmatcher.json")
             }
             self._kill(worker)
+            connection = sqlite3.connect(database)
+            try:
+                self.assertIsNone(
+                    connection.execute(
+                        "SELECT analysis_id FROM cross_matcher_analyses "
+                        "WHERE analysis_id = ?",
+                        (analysis_id,),
+                    ).fetchone()
+                )
+            finally:
+                connection.close()
         finally:
             if worker.poll() is None:
                 self._kill(worker)
@@ -377,6 +431,7 @@ from pathlib import Path
 import sys
 import time
 from fastapi.testclient import TestClient
+from backend.tests.test_output_crash_recovery_real import _publish_worker_response
 from qualsight.api import Settings, create_app
 from qualsight.execution.registry_binding import OFIQ_INPUT_RESOURCE_ID, OFIQ_V112_RUNTIME_RESOURCE_ID
 
@@ -385,12 +440,14 @@ data_dir = Path(sys.argv[2])
 project_id = sys.argv[3]
 protocol_id = sys.argv[4]
 request = json.loads(sys.argv[5])
+response_marker = Path(sys.argv[6])
 settings = Settings(repository_root=root, registry_path=root / "resources" / "resource-registry.json", data_dir=data_dir, runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID, input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, "lfw-funneled-local-candidate"))
 with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_exceptions=False) as client:
     response = client.post(f"/api/projects/{project_id}/identification-protocols/{protocol_id}/search", json=request)
     if response.status_code != 202:
         raise RuntimeError(response.text)
     search_id = response.json()["search_id"]
+    _publish_worker_response(response_marker, {"search_id": search_id})
     while True:
         state = client.get(f"/api/projects/{project_id}/identification-searches/{search_id}").json()["state"]
         if state in {"COMPLETED", "FAILED", "INTERRUPTED"}:
@@ -407,6 +464,7 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_
         )
         connection.commit()
         connection.close()
+        response_marker = self.data_dir / ".identification-worker-response.json"
         worker = self._worker(
             worker_source,
             str(ROOT),
@@ -414,31 +472,19 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_
             self.project_id,
             protocol_id,
             json.dumps(request, sort_keys=True),
+            str(response_marker),
         )
         search_id: str | None = None
 
         def final_files_exist() -> bool:
             nonlocal search_id
-            query = sqlite3.connect(database)
-            try:
-                operation = query.execute(
-                    "SELECT operation_id FROM operations "
-                    "WHERE operation_kind = 'IDENTIFICATION_SEARCH' AND state = 'RUNNING' "
-                    "ORDER BY accepted_at DESC LIMIT 1"
-                ).fetchone()
-                if operation is None:
-                    return False
-                search_id = operation[0]
-                recorded = query.execute(
-                    "SELECT 1 FROM identification_searches WHERE search_id = ?",
-                    (search_id,),
-                ).fetchone()
-            finally:
-                query.close()
+            search_id = self._worker_response_id(response_marker, "search_id")
+            if search_id is None:
+                return False
             directory = (
                 self.data_dir / "identification" / search_id.replace(":", "_")
             )
-            return recorded is None and all(
+            return all(
                 (directory / name).is_file()
                 for name in (
                     "candidates.parquet",
@@ -467,6 +513,17 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_
                 )
             }
             self._kill(worker)
+            connection = sqlite3.connect(database)
+            try:
+                self.assertIsNone(
+                    connection.execute(
+                        "SELECT search_id FROM identification_searches "
+                        "WHERE search_id = ?",
+                        (search_id,),
+                    ).fetchone()
+                )
+            finally:
+                connection.close()
         finally:
             if worker.poll() is None:
                 self._kill(worker)
@@ -553,6 +610,7 @@ from pathlib import Path
 import sys
 import time
 from fastapi.testclient import TestClient
+from backend.tests.test_output_crash_recovery_real import _publish_worker_response
 from qualsight.api import Settings, create_app
 from qualsight.execution.registry_binding import OFIQ_INPUT_RESOURCE_ID, OFIQ_V112_RUNTIME_RESOURCE_ID
 
@@ -560,12 +618,14 @@ root = Path(sys.argv[1])
 data_dir = Path(sys.argv[2])
 project_id = sys.argv[3]
 request = json.loads(sys.argv[4])
+response_marker = Path(sys.argv[5])
 settings = Settings(repository_root=root, registry_path=root / "resources" / "resource-registry.json", data_dir=data_dir, runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID, input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, "lfw-funneled-local-candidate"))
 with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_exceptions=False) as client:
     response = client.post(f"/api/projects/{project_id}/degradation-analyses", json=request)
     if response.status_code != 202:
         raise RuntimeError(response.text)
     analysis_id = response.json()["analysis_id"]
+    _publish_worker_response(response_marker, {"analysis_id": analysis_id})
     while True:
         state = client.get(f"/api/projects/{project_id}/degradation-analyses/{analysis_id}").json()["state"]
         if state in {"COMPLETED", "FAILED", "INTERRUPTED"}:
@@ -582,35 +642,24 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_
         )
         connection.commit()
         connection.close()
+        response_marker = self.data_dir / ".degradation-worker-response.json"
         worker = self._worker(
             worker_source,
             str(ROOT),
             str(self.data_dir),
             self.project_id,
             json.dumps(request, sort_keys=True),
+            str(response_marker),
         )
         analysis_id: str | None = None
 
         def final_files_exist() -> bool:
             nonlocal analysis_id
-            query = sqlite3.connect(database)
-            try:
-                operation = query.execute(
-                    "SELECT operation_id FROM operations "
-                    "WHERE operation_kind = 'DEGRADATION_ANALYSIS' AND state = 'RUNNING' "
-                    "ORDER BY accepted_at DESC LIMIT 1"
-                ).fetchone()
-                if operation is None:
-                    return False
-                analysis_id = operation[0]
-                recorded = query.execute(
-                    "SELECT 1 FROM degradation_analyses WHERE analysis_id = ?",
-                    (analysis_id,),
-                ).fetchone()
-            finally:
-                query.close()
+            analysis_id = self._worker_response_id(response_marker, "analysis_id")
+            if analysis_id is None:
+                return False
             directory = self.data_dir / "analyses" / analysis_id.replace(":", "_")
-            return recorded is None and all(
+            return all(
                 (directory / name).is_file()
                 for name in (
                     "degradation.json",
@@ -630,6 +679,17 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_
                 (directory / "degradation.json").read_bytes()
             ).hexdigest()
             self._kill(worker)
+            connection = sqlite3.connect(database)
+            try:
+                self.assertIsNone(
+                    connection.execute(
+                        "SELECT analysis_id FROM degradation_analyses "
+                        "WHERE analysis_id = ?",
+                        (analysis_id,),
+                    ).fetchone()
+                )
+            finally:
+                connection.close()
         finally:
             if worker.poll() is None:
                 self._kill(worker)
@@ -665,6 +725,7 @@ from pathlib import Path
 import sys
 import time
 from fastapi.testclient import TestClient
+from backend.tests.test_output_crash_recovery_real import _publish_worker_response
 from qualsight.api import Settings, create_app
 from qualsight.execution.registry_binding import OFIQ_INPUT_RESOURCE_ID, OFIQ_V112_RUNTIME_RESOURCE_ID
 
@@ -672,12 +733,14 @@ root = Path(sys.argv[1])
 data_dir = Path(sys.argv[2])
 project_id = sys.argv[3]
 request = json.loads(sys.argv[4])
+response_marker = Path(sys.argv[5])
 settings = Settings(repository_root=root, registry_path=root / "resources" / "resource-registry.json", data_dir=data_dir, runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID, input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, "lfw-funneled-local-candidate"))
 with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_exceptions=False) as client:
     response = client.post(f"/api/projects/{project_id}/utility-analyses", json=request)
     if response.status_code != 202:
         raise RuntimeError(response.text)
     analysis_id = response.json()["analysis_id"]
+    _publish_worker_response(response_marker, {"analysis_id": analysis_id})
     while True:
         state = client.get(f"/api/projects/{project_id}/utility-analyses/{analysis_id}").json()["state"]
         if state in {"COMPLETED", "FAILED", "INTERRUPTED"}:
@@ -695,37 +758,26 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_
         connection.commit()
         connection.close()
 
+        response_marker = self.data_dir / ".utility-worker-response.json"
         worker = self._worker(
             worker_source,
             str(ROOT),
             str(self.data_dir),
             self.project_id,
             json.dumps(request, sort_keys=True),
+            str(response_marker),
         )
         analysis_id: str | None = None
 
         def final_files_exist_without_database_result() -> bool:
             nonlocal analysis_id
-            query = sqlite3.connect(database)
-            try:
-                operation = query.execute(
-                    "SELECT operation_id FROM operations "
-                    "WHERE operation_kind = 'UTILITY_ANALYSIS' AND state = 'RUNNING' "
-                    "ORDER BY accepted_at DESC LIMIT 1"
-                ).fetchone()
-                if operation is None:
-                    return False
-                analysis_id = operation[0]
-                recorded = query.execute(
-                    "SELECT 1 FROM utility_analyses WHERE analysis_id = ?",
-                    (analysis_id,),
-                ).fetchone()
-            finally:
-                query.close()
+            analysis_id = self._worker_response_id(response_marker, "analysis_id")
+            if analysis_id is None:
+                return False
             directory = (
                 self.data_dir / "analyses" / analysis_id.replace(":", "_")
             )
-            return recorded is None and all(
+            return all(
                 (directory / name).is_file()
                 for name in ("pair_quality.parquet", "utility.json", "policy.json")
             )
@@ -868,6 +920,7 @@ from pathlib import Path
 import sys
 import time
 from fastapi.testclient import TestClient
+from backend.tests.test_output_crash_recovery_real import _publish_worker_response
 from qualsight.api import Settings, create_app
 from qualsight.execution.registry_binding import OFIQ_INPUT_RESOURCE_ID, OFIQ_V112_RUNTIME_RESOURCE_ID
 
@@ -875,12 +928,14 @@ root = Path(sys.argv[1])
 data_dir = Path(sys.argv[2])
 project_id = sys.argv[3]
 request = json.loads(sys.argv[4])
+response_marker = Path(sys.argv[5])
 settings = Settings(repository_root=root, registry_path=root / "resources" / "resource-registry.json", data_dir=data_dir, runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID, input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, "lfw-funneled-local-candidate"))
 with TestClient(create_app(settings), base_url="http://127.0.0.1") as client:
     response = client.post(f"/api/projects/{project_id}/owner-pair-comparisons", json=request)
     if response.status_code != 202:
         raise RuntimeError(response.text)
     comparison_id = response.json()["comparison_id"]
+    _publish_worker_response(response_marker, {"comparison_id": comparison_id})
     while True:
         state = client.get(f"/api/projects/{project_id}/owner-pair-comparisons/{comparison_id}").json()["state"]
         if state in {"COMPLETED", "FAILED", "INTERRUPTED"}:
@@ -897,52 +952,43 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1") as client:
         )
         trigger_connection.commit()
         trigger_connection.close()
+        response_marker = self.data_dir / ".direct-pair-worker-response.json"
         worker = self._worker(
             worker_source,
             str(ROOT),
             str(self.data_dir),
             self.project_id,
             json.dumps(request, sort_keys=True),
+            str(response_marker),
         )
-        operation: tuple[str, str] | None = None
-
-        def operation_is_running() -> bool:
-            nonlocal operation
-            connection = sqlite3.connect(database)
-            try:
-                operation = connection.execute(
-                    "SELECT operation_id, state FROM operations "
-                    "WHERE operation_kind = 'DIRECT_PAIR_COMPARISON' "
-                    "ORDER BY accepted_at DESC LIMIT 1"
-                ).fetchone()
-            finally:
-                connection.close()
-            return operation is not None and operation[1] == "RUNNING"
-
-        self._wait_for(
-            operation_is_running,
-            timeout=60,
-            description="the direct comparison RUNNING transaction",
-        )
-        assert operation is not None
-        comparison_id = operation[0]
-        directory = (
-            self.data_dir
-            / "direct-pair-comparisons"
-            / comparison_id.replace(":", "_")
-        )
+        comparison_id: str | None = None
         try:
-            self._wait_for(
-                lambda: (
+            def final_files_exist() -> bool:
+                nonlocal comparison_id
+                comparison_id = self._worker_response_id(
+                    response_marker, "comparison_id"
+                )
+                if comparison_id is None:
+                    return False
+                directory = (
+                    self.data_dir
+                    / "direct-pair-comparisons"
+                    / comparison_id.replace(":", "_")
+                )
+                return (
                     (directory / ".qualsight-direct-pair.prepared.json").is_file()
                     or (
                         (directory / "left-embedding.npy").is_file()
                         and (directory / "right-embedding.npy").is_file()
                     )
-                ),
+                )
+
+            self._wait_for(
+                final_files_exist,
                 timeout=180,
                 description="the complete real direct-pair output boundary",
             )
+            assert comparison_id is not None
             self._kill(worker)
         finally:
             if worker.poll() is None:
@@ -952,6 +998,12 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1") as client:
             trigger_connection.commit()
             trigger_connection.close()
 
+        assert comparison_id is not None
+        directory = (
+            self.data_dir
+            / "direct-pair-comparisons"
+            / comparison_id.replace(":", "_")
+        )
         connection = sqlite3.connect(database)
         try:
             self.assertIsNone(
@@ -1056,12 +1108,14 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1") as client:
         }
         ready = self.data_dir / "derived-worker.ready"
         proceed = self.data_dir / "derived-worker.proceed"
+        response_path = self.data_dir / "derived-worker.response.json"
         worker_source = """
 import hashlib
 import json
 from pathlib import Path
 import sys
 import time
+from backend.tests.test_output_crash_recovery_real import _publish_worker_response
 from qualsight.api.store import RunStore
 from qualsight.domain.primitives import CanonicalJson
 from qualsight.transforms.derived import build_derived_set, derived_set_identity
@@ -1072,6 +1126,7 @@ dataset_id = sys.argv[3]
 sample_id = sys.argv[4]
 ready = Path(sys.argv[5])
 proceed = Path(sys.argv[6])
+response_path = Path(sys.argv[7])
 store = RunStore(data_dir / "qualsight.sqlite3")
 try:
     project = store.project(project_id)
@@ -1089,6 +1144,7 @@ try:
         samples=[sample],
         transforms=transforms,
     )
+    _publish_worker_response(response_path, {"derived_set_id": derived_set_id})
     operation_request = {
         "dataset_id": dataset_id,
         "derived_set_id": derived_set_id,
@@ -1121,6 +1177,7 @@ finally:
             self.source_sample_id,
             str(ready),
             str(proceed),
+            str(response_path),
         )
         ready_deadline = time.monotonic() + 60
         while time.monotonic() < ready_deadline and not ready.is_file():
@@ -1136,11 +1193,6 @@ finally:
             self.fail("timed out waiting for the derived worker's real recorded source context")
         database = self.data_dir / "qualsight.sqlite3"
         derived_root = self.data_dir / "derived"
-        existing_final_directories = {
-            path.name
-            for path in derived_root.iterdir()
-            if path.is_dir() and not path.name.startswith(".")
-        } if derived_root.is_dir() else set()
         with sqlite3.connect(database) as trigger_connection:
             trigger_connection.execute(
                 "CREATE TRIGGER stall_derived_set_recording "
@@ -1151,26 +1203,21 @@ finally:
         writer_lock = sqlite3.connect(database)
         writer_lock.execute("BEGIN IMMEDIATE")
         proceed.write_text("proceed\n", encoding="utf-8")
+        derived_set_id: str | None = None
         final_directory: Path | None = None
 
         def final_output_is_complete() -> bool:
-            nonlocal final_directory
-            if not derived_root.exists():
+            nonlocal derived_set_id, final_directory
+            if derived_set_id is None:
+                derived_set_id = self._worker_response_id(
+                    response_path, "derived_set_id"
+                )
+            if derived_set_id is None:
                 return False
-            candidates = [
-                path
-                for path in derived_root.iterdir()
-                if path.is_dir()
-                and not path.name.startswith(".")
-                and path.name not in existing_final_directories
-            ]
-            if len(candidates) != 1:
-                return False
-            final_directory = candidates[0]
+            final_directory = derived_root / derived_set_id.replace(":", "_")
             return (
-                (final_directory / ".qualsight-derived-set.prepared.json").is_file()
-                or len(list(final_directory.rglob("*.jpg"))) == 1
-            )
+                final_directory / ".qualsight-derived-set.prepared.json"
+            ).is_file()
 
         try:
             output_deadline = time.monotonic() + 60
@@ -1200,8 +1247,7 @@ finally:
                 trigger_connection.execute(
                     "DROP TRIGGER IF EXISTS stall_derived_set_recording"
                 )
-        assert final_directory is not None
-        derived_set_id = final_directory.name.replace("derived-set_sha256_", "derived-set:sha256:")
+        assert derived_set_id is not None and final_directory is not None
 
         connection = sqlite3.connect(database)
         try:
@@ -1765,6 +1811,7 @@ from pathlib import Path
 import sys
 import time
 from fastapi.testclient import TestClient
+from backend.tests.test_output_crash_recovery_real import _publish_worker_response
 from qualsight.api import Settings, create_app
 from qualsight.execution.registry_binding import OFIQ_INPUT_RESOURCE_ID, OFIQ_V112_RUNTIME_RESOURCE_ID
 
@@ -1772,21 +1819,25 @@ root = Path(sys.argv[1])
 data_dir = Path(sys.argv[2])
 project_id = sys.argv[3]
 protocol_id = sys.argv[4]
+response_marker = Path(sys.argv[5])
 settings = Settings(repository_root=root, registry_path=root / "resources" / "resource-registry.json", data_dir=data_dir, runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID, input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, "lfw-funneled-local-candidate"))
 with TestClient(create_app(settings), base_url="http://127.0.0.1") as client:
     response = client.post(f"/api/projects/{project_id}/protocols/{protocol_id}/matrix", params={"fixture_pairs_only": "true", "leaves": "QS-C22.AS"})
     if response.status_code != 202:
         raise RuntimeError(response.text)
+    _publish_worker_response(response_marker, {"matrix_id": response.json()["matrix_id"]})
     while True:
         time.sleep(0.05)
 """
         database = self.data_dir / "qualsight.sqlite3"
+        response_marker = self.data_dir / ".matrix-worker-response.json"
         worker = self._worker(
             worker_source,
             str(ROOT),
             str(self.data_dir),
             self.project_id,
             protocol_id,
+            str(response_marker),
         )
         matrix_id: str | None = None
         leaf_directory: Path | None = None
@@ -1801,19 +1852,12 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1") as client:
                     f"returncode={worker.returncode}; stdout={stdout[-1000:]!r}; "
                     f"stderr={stderr[-2000:]!r}"
                 )
-            connection = sqlite3.connect(database)
-            try:
-                operation = connection.execute(
-                    "SELECT operation_id, output_path FROM operations "
-                    "WHERE operation_kind = 'MATCHER_MATRIX' AND state = 'RUNNING' "
-                    "ORDER BY accepted_at DESC LIMIT 1"
-                ).fetchone()
-                if operation is None:
-                    return False
-                matrix_id = operation[0]
-            finally:
-                connection.close()
-            leaf_directory = Path(operation[1]) / "QS-C22_AS"
+            matrix_id = _read_worker_response_id(response_marker, "matrix_id")
+            if matrix_id is None:
+                return False
+            leaf_directory = (
+                self.data_dir / "matrix" / matrix_id.replace(":", "_") / "QS-C22_AS"
+            )
             return True
 
         def final_leaf_exists_without_database_record() -> bool:
@@ -1825,14 +1869,7 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1") as client:
                     f"returncode={worker.returncode}; stdout={stdout[-1000:]!r}; "
                     f"stderr={stderr[-2000:]!r}"
                 )
-            connection = sqlite3.connect(database)
-            try:
-                recorded = connection.execute(
-                    "SELECT 1 FROM matcher_leaves WHERE matrix_id = ?", (matrix_id,)
-                ).fetchone()
-            finally:
-                connection.close()
-            return recorded is None and all(
+            return all(
                 (leaf_directory / name).is_file()
                 for name in (
                     "embeddings.npy",
@@ -1869,6 +1906,21 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1") as client:
                 writer_lock.close()
 
         assert matrix_id is not None and leaf_directory is not None
+        connection = sqlite3.connect(database)
+        try:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT state FROM operations WHERE operation_id = ?", (matrix_id,)
+                ).fetchone(),
+                ("RUNNING",),
+            )
+            self.assertIsNone(
+                connection.execute(
+                    "SELECT 1 FROM matcher_leaves WHERE matrix_id = ?", (matrix_id,)
+                ).fetchone()
+            )
+        finally:
+            connection.close()
         with self._client() as restarted:
             recovered = restarted.post(
                 f"/api/projects/{self.project_id}/protocols/{protocol_id}/matrix",
@@ -1903,6 +1955,7 @@ from pathlib import Path
 import sys
 import time
 from fastapi.testclient import TestClient
+from backend.tests.test_output_crash_recovery_real import _publish_worker_response
 from qualsight.api import Settings, create_app
 from qualsight.execution.registry_binding import OFIQ_INPUT_RESOURCE_ID, OFIQ_V112_RUNTIME_RESOURCE_ID
 
@@ -1910,11 +1963,13 @@ root = Path(sys.argv[1])
 data_dir = Path(sys.argv[2])
 project_id = sys.argv[3]
 protocol_id = sys.argv[4]
+response_marker = Path(sys.argv[5])
 settings = Settings(repository_root=root, registry_path=root / "resources" / "resource-registry.json", data_dir=data_dir, runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID, input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, "lfw-funneled-local-candidate"))
 with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_exceptions=False) as client:
     response = client.post(f"/api/projects/{project_id}/protocols/{protocol_id}/matrix", params={"fixture_pairs_only": "true", "leaves": "QS-C22.AS,QS-C22.AN"})
     if response.status_code != 202:
         raise RuntimeError(response.text)
+    _publish_worker_response(response_marker, {"matrix_id": response.json()["matrix_id"]})
     while True:
         time.sleep(0.05)
 """
@@ -1929,12 +1984,14 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_
         )
         trigger.commit()
         trigger.close()
+        response_marker = self.data_dir / ".two-leaf-worker-response.json"
         worker = self._worker(
             worker_source,
             str(ROOT),
             str(self.data_dir),
             self.project_id,
             protocol_id,
+            str(response_marker),
         )
         matrix_id: str | None = None
         first_directory: Path | None = None
@@ -1942,29 +1999,14 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_
 
         def first_leaf_is_prepared_before_second_leaf() -> bool:
             nonlocal matrix_id, first_directory, second_directory
-            connection = sqlite3.connect(database)
-            try:
-                operation = connection.execute(
-                    "SELECT operation_id, output_path FROM operations "
-                    "WHERE operation_kind = 'MATCHER_MATRIX' AND state = 'RUNNING' "
-                    "ORDER BY accepted_at DESC LIMIT 1"
-                ).fetchone()
-                if operation is None:
-                    return False
-                matrix_id = str(operation[0])
-                recorded_count = int(
-                    connection.execute(
-                        "SELECT COUNT(*) FROM matcher_leaves WHERE matrix_id = ?",
-                        (matrix_id,),
-                    ).fetchone()[0]
-                )
-            finally:
-                connection.close()
-            first_directory = Path(str(operation[1])) / "QS-C22_AN"
-            second_directory = Path(str(operation[1])) / "QS-C22_AS"
+            matrix_id = _read_worker_response_id(response_marker, "matrix_id")
+            if matrix_id is None:
+                return False
+            matrix_directory = self.data_dir / "matrix" / matrix_id.replace(":", "_")
+            first_directory = matrix_directory / "QS-C22_AN"
+            second_directory = matrix_directory / "QS-C22_AS"
             return (
-                recorded_count == 0
-                and all(
+                all(
                     (first_directory / name).is_file()
                     for name in (
                         ".qualsight-prepared-output.json",
@@ -2002,6 +2044,23 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_
         assert matrix_id is not None
         assert first_directory is not None
         assert second_directory is not None
+        connection = sqlite3.connect(database)
+        try:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT state FROM operations WHERE operation_id = ?", (matrix_id,)
+                ).fetchone(),
+                ("RUNNING",),
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM matcher_leaves WHERE matrix_id = ?",
+                    (matrix_id,),
+                ).fetchone(),
+                (0,),
+            )
+        finally:
+            connection.close()
         with self._client() as restarted:
             connection = sqlite3.connect(database)
             try:

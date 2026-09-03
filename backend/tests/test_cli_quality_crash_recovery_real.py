@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from qualsight.api import Settings, create_app
 from qualsight.api.store import RunStore
+from qualsight.domain.primitives import CanonicalJson
 from qualsight.engines.ofiq.batch import PREPARED_BATCH_FILENAME
 from qualsight.execution.registry_binding import (
     OFIQ_INPUT_RESOURCE_ID,
@@ -107,6 +108,7 @@ class CLIQualityCrashRecoveryRealTests(unittest.TestCase):
             text=True,
         )
         operation: tuple[str, str, str, str] | None = None
+        result_id: str | None = None
         output_directory: Path | None = None
         parquet_sha256: str | None = None
         try:
@@ -115,18 +117,16 @@ class CLIQualityCrashRecoveryRealTests(unittest.TestCase):
                 prepared = tuple(
                     (data_dir / "jobs").glob(f"*/{PREPARED_BATCH_FILENAME}")
                 )
-                query = sqlite3.connect(database)
-                try:
-                    operation = query.execute(
-                        "SELECT operation_id, result_id, state, output_path FROM operations "
-                        "WHERE operation_kind = 'QUALITY_BATCH' AND project_id = ? "
-                        "ORDER BY accepted_at DESC LIMIT 1",
-                        (project_id,),
-                    ).fetchone()
-                finally:
-                    query.close()
                 if prepared:
                     self.assertEqual(len(prepared), 1)
+                    receipt_text = prepared[0].read_text(encoding="utf-8")
+                    receipt = json.loads(receipt_text)
+                    self.assertEqual(
+                        receipt_text, CanonicalJson.from_value(receipt).text + "\n"
+                    )
+                    self.assertEqual(receipt["operation_kind"], "QUALITY_BATCH")
+                    self.assertEqual(receipt["project_id"], project_id)
+                    result_id = str(receipt["job_id"])
                     output_directory = prepared[0].parent
                     break
                 if worker.poll() is not None:
@@ -136,14 +136,7 @@ class CLIQualityCrashRecoveryRealTests(unittest.TestCase):
             else:
                 self.fail("timed out waiting for real CLI quality receipt publication")
 
-            self.assertIsNotNone(
-                operation,
-                "CLI quality execution published final evidence without a durable operation",
-            )
-            assert operation is not None and output_directory is not None
-            operation_id, result_id, state, output_path = operation
-            self.assertEqual(state, "RUNNING")
-            self.assertEqual(Path(output_path), output_directory)
+            assert result_id is not None and output_directory is not None
             self.assertEqual(output_directory.name, result_id.replace(":", "_"))
             parquet = output_directory / "quality_measurements.parquet"
             self.assertTrue(parquet.is_file())
@@ -162,7 +155,30 @@ class CLIQualityCrashRecoveryRealTests(unittest.TestCase):
             connection.commit()
             connection.close()
 
-        assert operation is not None and output_directory is not None
+        assert result_id is not None and output_directory is not None
+        connection = sqlite3.connect(database)
+        try:
+            operation = connection.execute(
+                "SELECT operation_id, result_id, state, output_path FROM operations "
+                "WHERE operation_kind = 'QUALITY_BATCH' AND project_id = ? "
+                "ORDER BY accepted_at DESC LIMIT 1",
+                (project_id,),
+            ).fetchone()
+            recorded_job = connection.execute(
+                "SELECT 1 FROM jobs WHERE job_id = ?", (result_id,)
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertIsNotNone(
+            operation,
+            "CLI quality execution published final evidence without a durable operation",
+        )
+        assert operation is not None
+        operation_id, recorded_result_id, state, output_path = operation
+        self.assertEqual(recorded_result_id, result_id)
+        self.assertEqual(state, "RUNNING")
+        self.assertEqual(Path(output_path), output_directory)
+        self.assertIsNone(recorded_job)
         operation_id, result_id, _, _ = operation
         before_restart = RunStore(database)
         try:

@@ -251,6 +251,251 @@ class ReleaseMetadataTests(unittest.TestCase):
                 relative,
             )
 
+    def test_process_death_workers_are_not_observed_through_the_live_wal(self) -> None:
+        source_path = ROOT / "backend" / "tests" / "test_output_crash_recovery_real.py"
+        live_wal_observers: set[str] = set()
+        for crash_path in sorted(
+            (ROOT / "backend" / "tests").glob("*crash_recovery_real.py")
+        ):
+            tree = ast.parse(
+                crash_path.read_text(encoding="utf-8"), filename=str(crash_path)
+            )
+            parents = {
+                child: parent
+                for parent in ast.walk(tree)
+                for child in ast.iter_child_nodes(parent)
+            }
+
+            def is_nested_function(node: ast.AST) -> bool:
+                parent = parents.get(node)
+                while parent is not None:
+                    if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        return True
+                    parent = parents.get(parent)
+                return False
+
+            poll_scopes: list[ast.AST] = [
+                node for node in ast.walk(tree) if isinstance(node, ast.While)
+            ]
+            poll_scopes.extend(
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and is_nested_function(node)
+            )
+            for scope in poll_scopes:
+                for call in ast.walk(scope):
+                    target = call.func if isinstance(call, ast.Call) else None
+                    if (
+                        isinstance(target, ast.Attribute)
+                        and isinstance(target.value, ast.Name)
+                        and target.value.id == "sqlite3"
+                        and target.attr == "connect"
+                    ):
+                        live_wal_observers.add(
+                            f"{crash_path.name}:{call.lineno}"
+                        )
+        self.assertEqual(sorted(live_wal_observers), [])
+        tree = ast.parse(
+            source_path.read_text(encoding="utf-8"), filename=str(source_path)
+        )
+        response_reader = next(
+            method
+            for method in tree.body
+            if isinstance(method, ast.FunctionDef)
+            and method.name == "_read_worker_response_id"
+        )
+        reader_source = ast.get_source_segment(
+            source_path.read_text(encoding="utf-8"), response_reader
+        )
+        self.assertNotIn("assertEqual(observed.st_nlink, 1)", reader_source)
+        self.assertIn("{1, 2}", reader_source)
+        batch_path = (
+            ROOT / "backend" / "src" / "qualsight" / "engines" / "ofiq" / "batch.py"
+        )
+        batch_tree = ast.parse(
+            batch_path.read_text(encoding="utf-8"), filename=str(batch_path)
+        )
+        batch_class = next(
+            node
+            for node in batch_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "OFIQBatchJob"
+        )
+        receipt_writer = next(
+            node
+            for node in batch_class.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_write_prepared_receipt"
+        )
+        receipt_calls = [
+            node for node in ast.walk(receipt_writer) if isinstance(node, ast.Call)
+        ]
+        open_call = next(
+            call
+            for call in receipt_calls
+            if isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "os"
+            and call.func.attr == "open"
+        )
+        self.assertEqual(ast.unparse(open_call.args[0]), "partial_path")
+        open_flags = {
+            node.attr
+            for node in ast.walk(open_call.args[1])
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "os"
+        }
+        self.assertTrue({"O_WRONLY", "O_CREAT", "O_EXCL"} <= open_flags)
+        fallback_flag_names = {
+            node.value
+            for node in ast.walk(open_call.args[1])
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        self.assertTrue({"O_CLOEXEC", "O_NOFOLLOW"} <= fallback_flag_names)
+        fsync_call = next(
+            call
+            for call in receipt_calls
+            if isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "os"
+            and call.func.attr == "fsync"
+        )
+        close_call = next(
+            call
+            for call in receipt_calls
+            if isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "os"
+            and call.func.attr == "close"
+        )
+        link_call = next(
+            call
+            for call in receipt_calls
+            if isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "os"
+            and call.func.attr == "link"
+        )
+        self.assertEqual(
+            [ast.unparse(argument) for argument in link_call.args],
+            ["partial_path", "receipt_path"],
+        )
+        self.assertEqual(
+            {keyword.arg: ast.literal_eval(keyword.value) for keyword in link_call.keywords},
+            {"follow_symlinks": False},
+        )
+        unlink_call = next(
+            call
+            for call in receipt_calls
+            if isinstance(call.func, ast.Attribute)
+            and ast.unparse(call.func.value) == "partial_path"
+            and call.func.attr == "unlink"
+        )
+        sync_calls = [
+            call
+            for call in receipt_calls
+            if isinstance(call.func, ast.Name) and call.func.id == "_sync_directory"
+        ]
+        self.assertEqual(
+            [ast.unparse(call.args[0]) for call in sorted(sync_calls, key=lambda call: call.lineno)],
+            ["self.job_dir", "self.job_dir.parent"],
+        )
+        self.assertLess(fsync_call.lineno, close_call.lineno)
+        self.assertLess(close_call.lineno, link_call.lineno)
+        self.assertLess(link_call.lineno, unlink_call.lineno)
+        self.assertTrue(all(link_call.lineno < call.lineno for call in sync_calls))
+
+        matcher_class = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef)
+            and node.name == "FailedPreparedOutputRecoveryRealTests"
+        )
+        matcher_test = next(
+            node
+            for node in matcher_class.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name
+            == "test_a_matcher_leaf_final_output_is_reconciled_after_real_process_death"
+        )
+        worker_kill_lines = [
+            call.lineno
+            for call in ast.walk(matcher_test)
+            if isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "self"
+            and call.func.attr == "_kill"
+            and call.args
+            and ast.unparse(call.args[0]) == "worker"
+        ]
+        running_assertion = next(
+            call
+            for call in ast.walk(matcher_test)
+            if isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "self"
+            and call.func.attr == "assertEqual"
+            and "SELECT state FROM operations WHERE operation_id = ?"
+            in ast.get_source_segment(source_path.read_text(encoding="utf-8"), call)
+            and "RUNNING" in ast.get_source_segment(
+                source_path.read_text(encoding="utf-8"), call
+            )
+        )
+        self.assertGreater(running_assertion.lineno, max(worker_kill_lines))
+        matcher_source_text = source_path.read_text(encoding="utf-8")
+        derived_test = next(
+            node
+            for parent in tree.body
+            if isinstance(parent, ast.ClassDef)
+            for node in parent.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name
+            == "test_derived_set_final_output_is_recovered_on_real_retry_after_process_death"
+        )
+        derived_test_source = ast.get_source_segment(matcher_source_text, derived_test)
+        self.assertNotIn('.replace("derived-set_sha256_",', derived_test_source)
+        self.assertNotIn('rglob("*.jpg")', derived_test_source)
+        self.assertIn(
+            'self._worker_response_id(\n                    response_path, "derived_set_id"',
+            derived_test_source,
+        )
+        self.assertIn(
+            '_publish_worker_response(response_path, {"derived_set_id": derived_set_id})',
+            derived_test_source,
+        )
+        self.assertIn(
+            'final_directory / ".qualsight-derived-set.prepared.json"',
+            derived_test_source,
+        )
+        derived_worker_kill_lines = [
+            call.lineno
+            for call in ast.walk(derived_test)
+            if isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "self"
+            and call.func.attr == "_kill"
+            and call.args
+            and ast.unparse(call.args[0]) == "worker"
+        ]
+        derived_database_assertion = next(
+            call
+            for call in ast.walk(derived_test)
+            if isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "self"
+            and call.func.attr == "assertIsNone"
+            and "SELECT derived_set_id FROM derived_sets WHERE derived_set_id = ?"
+            in ast.get_source_segment(matcher_source_text, call)
+        )
+        self.assertGreater(
+            derived_database_assertion.lineno, max(derived_worker_kill_lines)
+        )
+
     def test_source_archive_secret_gate_covers_github_fine_grained_tokens(self) -> None:
         module = _load_script("create_release_source_archive")
         patterns = {label: pattern.pattern for label, pattern in module.SECRET_PATTERNS}
@@ -258,6 +503,8 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn(b"github_pat_", patterns["GitHub fine-grained access token"])
 
     def test_backend_source_has_no_empty_loop_implementations(self) -> None:
+        """Reject pass-only loops in the current backend source tree."""
+
         offenders: list[str] = []
         for path in sorted((ROOT / "backend" / "src").rglob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -2068,7 +2315,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             encoding="utf-8"
         )
         gate_call = release_script.index(
-            'if ! "$RELEASE_PYTHON" "$BUILD_ROOT/scripts/run_release_beta_gate.py"'
+            '"$RELEASE_PYTHON" "$BUILD_ROOT/scripts/run_release_beta_gate.py"'
         )
         failure_root = release_script.index(
             'FAILURE_ROOT="${OUT}/.release-failures"'
@@ -2094,6 +2341,13 @@ class ReleaseMetadataTests(unittest.TestCase):
             '${FAILURE_ATTEMPT}/BETA-GATE.json',
             release_script,
         )
+        self.assertIn(
+            'if [ -f "$BETA_GATE" ] && [ ! -L "$BETA_GATE" ]; then',
+            release_script,
+        )
+        self.assertIn(
+            "qualsight-controlled-beta-gate-runner-failure-v1", release_script
+        )
         gate_script = (ROOT / "scripts" / "run_release_beta_gate.py").read_text(
             encoding="utf-8"
         )
@@ -2104,9 +2358,473 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertNotIn('result["stdout_tail"]', gate_script)
         self.assertNotIn('result["stderr_tail"]', gate_script)
         self.assertIn('result["failure_evidence"]', gate_script)
-        self.assertIn('"redacted_stdout_tail"', gate_script)
-        self.assertIn('"redacted_stderr_tail"', gate_script)
-        self.assertIn("MAX_FAILURE_TAIL_CHARACTERS = 4_000", gate_script)
+        self.assertNotIn('"redacted_stdout_tail"', gate_script)
+        self.assertNotIn('"redacted_stderr_tail"', gate_script)
+        self.assertNotIn("MAX_FAILURE_TAIL_CHARACTERS", gate_script)
+
+    def test_release_gate_retains_only_structured_process_failure_diagnostics(
+        self,
+    ) -> None:
+        gate = _load_script("run_release_beta_gate")
+        with tempfile.TemporaryDirectory(dir=ROOT / "dist") as temporary_text:
+            temporary = Path(temporary_text)
+            normalised = gate._normalised_argv(
+                ROOT,
+                ROOT,
+                (str(temporary / "evidence.json"),),
+                temporary,
+            )
+            self.assertEqual(normalised, ["<GATE_WORK>/evidence.json"])
+
+            real_unittest = gate.GateDefinition(
+                "real-unittest-diagnostic",
+                (
+                    sys.executable,
+                    "-m",
+                    "unittest",
+                    "tests.test_release_metadata.ReleaseMetadataTests.test_backend_source_has_no_empty_loop_implementations",
+                    "-v",
+                ),
+                30,
+                working_directory=ROOT,
+            )
+            unittest_result = gate._execute_gate(
+                real_unittest,
+                root=ROOT,
+                deployment_root=ROOT,
+                temporary=temporary,
+                environment=os.environ.copy(),
+            )
+            self.assertEqual(unittest_result["exit_code"], 0, unittest_result)
+            self.assertNotIn("failure_diagnostic", unittest_result)
+            unittest_stream = subprocess.run(
+                real_unittest.argv,
+                cwd=ROOT,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(unittest_stream.returncode, 0, unittest_stream.stderr)
+            self.assertEqual(
+                gate._unittest_failure_diagnostic(unittest_stream.stderr),
+                {
+                    "last_test_id": (
+                        "tests.test_release_metadata.ReleaseMetadataTests."
+                        "test_backend_source_has_no_empty_loop_implementations"
+                    )
+                },
+            )
+
+            signal_process = gate.GateDefinition(
+                "real-signal-diagnostic",
+                (
+                    sys.executable,
+                    "-c",
+                    "import os,resource,signal; resource.setrlimit(resource.RLIMIT_CORE, (0, 0)); os.kill(os.getpid(), signal.SIGBUS)",
+                ),
+                30,
+                working_directory=ROOT,
+            )
+            signal_result = gate._execute_gate(
+                signal_process,
+                root=ROOT,
+                deployment_root=ROOT,
+                temporary=temporary,
+                environment=os.environ.copy(),
+            )
+            self.assertEqual(signal_result["exit_code"], -signal.SIGBUS)
+            self.assertEqual(
+                signal_result["failure_diagnostic"],
+                {"kind": "PROCESS_EXIT", "termination_signal": "SIGBUS"},
+            )
+
+            sigbus_unittest = temporary / "test_real_sigbus.py"
+            sigbus_unittest.write_text(
+                "import os\n"
+                "import resource\n"
+                "import signal\n"
+                "import unittest\n\n"
+                "class RealSignalTests(unittest.TestCase):\n"
+                "    def test_real_sigbus(self):\n"
+                "        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))\n"
+                "        os.kill(os.getpid(), signal.SIGBUS)\n",
+                encoding="utf-8",
+            )
+            sigbus_unittest_process = gate.GateDefinition(
+                "backend-tests",
+                (
+                    sys.executable,
+                    "-m",
+                    "unittest",
+                    "-v",
+                    "test_real_sigbus.RealSignalTests.test_real_sigbus",
+                ),
+                30,
+                working_directory=temporary,
+            )
+            sigbus_unittest_result = gate._execute_gate(
+                sigbus_unittest_process,
+                root=ROOT,
+                deployment_root=ROOT,
+                temporary=temporary,
+                environment={**os.environ, "PYTHONFAULTHANDLER": "1"},
+            )
+            self.assertEqual(sigbus_unittest_result["exit_code"], -signal.SIGBUS)
+            self.assertEqual(
+                sigbus_unittest_result["failure_diagnostic"],
+                {
+                    "kind": "PROCESS_EXIT",
+                    "last_test_id": (
+                        "test_real_sigbus.RealSignalTests.test_real_sigbus"
+                    ),
+                    "termination_signal": "SIGBUS",
+                },
+            )
+
+            child_pid_path = temporary / "timeout-child.pid"
+            reparented_pid_path = temporary / "timeout-reparented-child.pid"
+            detached_child_script = temporary / "timeout-detached-child.py"
+            detached_child_script.write_text(
+                "from pathlib import Path\n"
+                "import signal\n"
+                "import subprocess\n"
+                "import sys\n"
+                "import time\n\n"
+                "created = False\n\n"
+                "def terminate(_signal, _frame):\n"
+                "    global created\n"
+                "    if created:\n"
+                "        return\n"
+                "    created = True\n"
+                "    child = subprocess.Popen([sys.executable, '-c', "
+                "'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)'], "
+                "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, "
+                "start_new_session=True)\n"
+                "    Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii')\n"
+                "    raise SystemExit(0)\n\n"
+                "signal.signal(signal.SIGTERM, terminate)\n"
+                "time.sleep(30)\n",
+                encoding="utf-8",
+            )
+            timeout_script = temporary / "timeout-process-tree.py"
+            timeout_script.write_text(
+                "from pathlib import Path\n"
+                "import signal\n"
+                "import subprocess\n"
+                "import sys\n"
+                "import time\n\n"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                "child = subprocess.Popen([sys.executable, sys.argv[2], sys.argv[3]], "
+                "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, "
+                "start_new_session=True)\n"
+                "Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii')\n"
+                "time.sleep(30)\n",
+                encoding="utf-8",
+            )
+            timeout_process = gate.GateDefinition(
+                "real-timeout-diagnostic",
+                (
+                    sys.executable,
+                    str(timeout_script),
+                    str(child_pid_path),
+                    str(detached_child_script),
+                    str(reparented_pid_path),
+                ),
+                0.25,
+                working_directory=ROOT,
+            )
+            timeout_result = gate._execute_gate(
+                timeout_process,
+                root=ROOT,
+                deployment_root=ROOT,
+                temporary=temporary,
+                environment=os.environ.copy(),
+            )
+            self.assertEqual(timeout_result["exit_code"], 124)
+            self.assertEqual(timeout_result["failure_diagnostic"]["kind"], "TIMEOUT")
+            self.assertIs(timeout_result["failure_diagnostic"]["timed_out"], True)
+            self.assertEqual(
+                timeout_result["failure_diagnostic"]["termination_signal"],
+                "SIGKILL",
+            )
+            child_pid = int(child_pid_path.read_text(encoding="ascii"))
+
+            def child_is_running() -> bool:
+                stat_path = Path("/proc") / str(child_pid) / "stat"
+                try:
+                    fields = stat_path.read_text(encoding="ascii").split()
+                except FileNotFoundError:
+                    return False
+                return len(fields) > 2 and fields[2] != "Z"
+
+            try:
+                self.assertFalse(child_is_running())
+                reparented_pid = int(
+                    reparented_pid_path.read_text(encoding="ascii")
+                )
+                reparented_stat = Path("/proc") / str(reparented_pid) / "stat"
+                self.assertFalse(
+                    reparented_stat.is_file()
+                    and reparented_stat.read_text(encoding="ascii").split()[2] != "Z"
+                )
+            finally:
+                if child_is_running():
+                    os.kill(child_pid, signal.SIGKILL)
+                if reparented_pid_path.is_file():
+                    reparented_pid = int(
+                        reparented_pid_path.read_text(encoding="ascii")
+                    )
+                    reparented_stat = Path("/proc") / str(reparented_pid) / "stat"
+                    if (
+                        reparented_stat.is_file()
+                        and reparented_stat.read_text(encoding="ascii").split()[2]
+                        != "Z"
+                    ):
+                        os.kill(reparented_pid, signal.SIGKILL)
+
+            leaked_pid_path = temporary / "successful-gate-child.pid"
+            leaked_ready_path = temporary / "successful-gate-child.ready"
+            successful_child_script = temporary / "successful-gate-child.py"
+            successful_child_script.write_text(
+                "from pathlib import Path\n"
+                "import signal\n"
+                "import sys\n"
+                "import time\n"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                "Path(sys.argv[1]).write_text('ready', encoding='ascii')\n"
+                "time.sleep(30)\n",
+                encoding="utf-8",
+            )
+            successful_gate_script = temporary / "successful-gate-with-child.py"
+            successful_gate_script.write_text(
+                "from pathlib import Path\n"
+                "import subprocess\n"
+                "import sys\n"
+                "import time\n"
+                "child = subprocess.Popen([sys.executable, sys.argv[2], sys.argv[3]], "
+                "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, "
+                "start_new_session=True)\n"
+                "Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii')\n"
+                "while not Path(sys.argv[3]).is_file():\n"
+                "    time.sleep(0.01)\n",
+                encoding="utf-8",
+            )
+            successful_leak_process = gate.GateDefinition(
+                "real-success-process-leak",
+                (
+                    sys.executable,
+                    str(successful_gate_script),
+                    str(leaked_pid_path),
+                    str(successful_child_script),
+                    str(leaked_ready_path),
+                ),
+                30,
+                working_directory=ROOT,
+            )
+            successful_leak_result = gate._execute_gate(
+                successful_leak_process,
+                root=ROOT,
+                deployment_root=ROOT,
+                temporary=temporary,
+                environment=os.environ.copy(),
+            )
+            leaked_pid = int(leaked_pid_path.read_text(encoding="ascii"))
+            leaked_stat = Path("/proc") / str(leaked_pid) / "stat"
+            try:
+                self.assertEqual(successful_leak_result["exit_code"], 125)
+                self.assertEqual(
+                    successful_leak_result["failure_diagnostic"],
+                    {
+                        "cleanup_signal": "SIGKILL",
+                        "kind": "PROCESS_LEAK",
+                        "original_exit_code": 0,
+                    },
+                )
+                self.assertFalse(
+                    leaked_stat.is_file()
+                    and leaked_stat.read_text(encoding="ascii").split()[2] != "Z"
+                )
+            finally:
+                if (
+                    leaked_stat.is_file()
+                    and leaked_stat.read_text(encoding="ascii").split()[2] != "Z"
+                ):
+                    os.kill(leaked_pid, signal.SIGKILL)
+
+            sigbus_leak_pid_path = temporary / "sigbus-leak-child.pid"
+            sigbus_leak_ready_path = temporary / "sigbus-leak-child.ready"
+            sigbus_leak_test = temporary / "test_real_sigbus_leak.py"
+            sigbus_leak_test.write_text(
+                "from pathlib import Path\n"
+                "import os\n"
+                "import resource\n"
+                "import signal\n"
+                "import subprocess\n"
+                "import sys\n"
+                "import time\n"
+                "import unittest\n\n"
+                "class RealSignalLeakTests(unittest.TestCase):\n"
+                "    def test_real_sigbus_with_detached_child(self):\n"
+                f"        ready = Path({str(sigbus_leak_ready_path)!r})\n"
+                "        child = subprocess.Popen([sys.executable, "
+                f"{str(successful_child_script)!r}, str(ready)], "
+                "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, "
+                "start_new_session=True)\n"
+                f"        Path({str(sigbus_leak_pid_path)!r}).write_text(str(child.pid), encoding='ascii')\n"
+                "        while not ready.is_file():\n"
+                "            time.sleep(0.01)\n"
+                "        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))\n"
+                "        os.kill(os.getpid(), signal.SIGBUS)\n",
+                encoding="utf-8",
+            )
+            sigbus_leak_process = gate.GateDefinition(
+                "backend-tests",
+                (
+                    sys.executable,
+                    "-m",
+                    "unittest",
+                    "-v",
+                    (
+                        "test_real_sigbus_leak.RealSignalLeakTests."
+                        "test_real_sigbus_with_detached_child"
+                    ),
+                ),
+                30,
+                working_directory=temporary,
+            )
+            sigbus_leak_result = gate._execute_gate(
+                sigbus_leak_process,
+                root=ROOT,
+                deployment_root=ROOT,
+                temporary=temporary,
+                environment={**os.environ, "PYTHONFAULTHANDLER": "1"},
+            )
+            sigbus_leak_pid = int(
+                sigbus_leak_pid_path.read_text(encoding="ascii")
+            )
+            sigbus_leak_stat = Path("/proc") / str(sigbus_leak_pid) / "stat"
+            try:
+                self.assertEqual(sigbus_leak_result["exit_code"], 125)
+                self.assertEqual(
+                    sigbus_leak_result["failure_diagnostic"],
+                    {
+                        "cleanup_signal": "SIGKILL",
+                        "kind": "PROCESS_LEAK",
+                        "last_test_id": (
+                            "test_real_sigbus_leak.RealSignalLeakTests."
+                            "test_real_sigbus_with_detached_child"
+                        ),
+                        "original_exit_code": -signal.SIGBUS,
+                        "original_termination_signal": "SIGBUS",
+                    },
+                )
+                self.assertFalse(
+                    sigbus_leak_stat.is_file()
+                    and sigbus_leak_stat.read_text(encoding="ascii").split()[2]
+                    != "Z"
+                )
+            finally:
+                if (
+                    sigbus_leak_stat.is_file()
+                    and sigbus_leak_stat.read_text(encoding="ascii").split()[2]
+                    != "Z"
+                ):
+                    os.kill(sigbus_leak_pid, signal.SIGKILL)
+
+            missing_process = gate.GateDefinition(
+                "real-launch-diagnostic",
+                (str(temporary / "absent-command"),),
+                30,
+                working_directory=ROOT,
+            )
+            launch_result = gate._execute_gate(
+                missing_process,
+                root=ROOT,
+                deployment_root=ROOT,
+                temporary=temporary,
+                environment=os.environ.copy(),
+            )
+            self.assertEqual(launch_result["exit_code"], 126)
+            self.assertEqual(
+                launch_result["failure_diagnostic"],
+                {"error_type": "FileNotFoundError", "kind": "LAUNCH_ERROR"},
+            )
+            real_biometric = (
+                Path("/mnt/projects/datasets/lfw/lfw_funneled")
+                / "Abel_Pacheco"
+                / "Abel_Pacheco_0001.jpg"
+            )
+            self.assertTrue(real_biometric.is_file())
+            failing_script = temporary / "emit-private-diagnostic.py"
+            failing_script.write_text(
+                "import sys\n"
+                f"sys.stderr.write({str(real_biometric)!r})\n"
+                "raise SystemExit(1)\n",
+                encoding="utf-8",
+            )
+            private_output_process = gate.GateDefinition(
+                "real-private-output-diagnostic",
+                (sys.executable, str(failing_script)),
+                30,
+                working_directory=ROOT,
+            )
+            private_output_result = gate._execute_gate(
+                private_output_process,
+                root=ROOT,
+                deployment_root=ROOT,
+                temporary=temporary,
+                environment=os.environ.copy(),
+            )
+            self.assertEqual(private_output_result["exit_code"], 1)
+            retained = json.dumps(private_output_result, sort_keys=True)
+            self.assertNotIn(str(real_biometric), retained)
+            self.assertNotIn(real_biometric.name, retained)
+
+            for result in (
+                signal_result,
+                sigbus_unittest_result,
+                timeout_result,
+                successful_leak_result,
+                sigbus_leak_result,
+                launch_result,
+                private_output_result,
+            ):
+                self.assertNotIn("stdout", result)
+                self.assertNotIn("stderr", result)
+
+            malformed_browser_evidence = json.dumps(
+                {
+                    "schema_version": "qualsight-beta3-browser-aggregate-v1",
+                    "status": "PASS",
+                    "expected_validator_count": 9,
+                    "completed_validator_count": 9,
+                    "validators": [None],
+                    "privacy": {
+                        "absolute_paths_included": False,
+                        "full_sha256_identities_included": True,
+                        "raw_observations_included": False,
+                        "stdout_stderr_included": False,
+                    },
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+            with self.assertRaisesRegex(ValueError, "nine passing validators"):
+                gate._validate_gate_evidence(
+                    "browser-beta3-workflows",
+                    malformed_browser_evidence,
+                    temporary,
+                )
+
+    def test_release_unittest_gates_emit_test_ids_and_enable_faulthandler(self) -> None:
+        gate = _load_script("run_release_beta_gate")
+        definitions = {
+            definition.name: definition
+            for definition in gate.gate_definitions(ROOT, sys.executable)
+        }
+        for name in ("root-tests", "backend-tests"):
+            definition = definitions[name]
+            self.assertIn("-v", definition.argv)
+            self.assertNotIn("-q", definition.argv)
+            self.assertEqual(dict(definition.environment)["PYTHONFAULTHANDLER"], "1")
 
     def test_release_gate_refuses_pass_if_deployment_changes_during_a_gate(
         self,

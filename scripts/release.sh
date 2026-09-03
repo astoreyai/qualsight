@@ -51,18 +51,30 @@ BETA_GATE="${SET}/${NAME}-BETA-GATE.json"
 MANIFEST="${SET}/${NAME}-RELEASE.json"
 CHECKSUMS="${SET}/${NAME}-SHA256SUMS"
 COMMIT_FILE="${SET}/${NAME}-COMMIT"
-if ! "$RELEASE_PYTHON" "$BUILD_ROOT/scripts/run_release_beta_gate.py" \
+set +e
+"$RELEASE_PYTHON" "$BUILD_ROOT/scripts/run_release_beta_gate.py" \
   --root "$BUILD_ROOT" --deployment-root "$ROOT" \
   --output "$BETA_GATE" --python "$RELEASE_PYTHON" \
-  --commit "$COMMIT" --tree "$TREE"; then
+  --commit "$COMMIT" --tree "$TREE"
+BETA_GATE_STATUS=$?
+set -e
+if [ "$BETA_GATE_STATUS" -ne 0 ]; then
   FAILURE_ROOT="${OUT}/.release-failures"
   mkdir -m 700 -p "$FAILURE_ROOT"
   chmod 700 "$FAILURE_ROOT"
   FAILURE_ATTEMPT="$(mktemp -d "${FAILURE_ROOT}/${NAME}.${COMMIT}.XXXXXX")"
   chmod 700 "$FAILURE_ATTEMPT"
-  install -m 600 "$BETA_GATE" "$FAILURE_ATTEMPT/BETA-GATE.json"
+  if [ -f "$BETA_GATE" ] && [ ! -L "$BETA_GATE" ]; then
+    install -m 600 "$BETA_GATE" "$FAILURE_ATTEMPT/BETA-GATE.json"
+  else
+    (
+      umask 077
+      printf '{"exit_code":%s,"failure_diagnostic":{"error_type":"MISSING_GATE_RECORD","kind":"GATE_RUNNER_ABORT"},"git_commit":"%s","git_tree":"%s","schema_version":"qualsight-controlled-beta-gate-runner-failure-v1","status":"FAIL"}\n' \
+        "$BETA_GATE_STATUS" "$COMMIT" "$TREE" > "$FAILURE_ATTEMPT/BETA-GATE.json"
+    )
+  fi
   echo "release failed; private gate diagnostic retained at ${FAILURE_ATTEMPT}/BETA-GATE.json" >&2
-  exit 1
+  exit "$BETA_GATE_STATUS"
 fi
 "$RELEASE_PYTHON" "$BUILD_ROOT/scripts/create_release_source_archive.py" \
   --root "$ROOT" --output "$SOURCE_ARCHIVE" --commit "$COMMIT" --prefix "$NAME" \

@@ -17,6 +17,16 @@
   provenance-review, and registry-repin entrypoints instead of shipping commands that cannot operate inside
   the projected archive. Real generated-archive regressions execute the installed validator imports and
   installer authority checks.
+* Process-death recovery tests no longer open a worker-owned live SQLite WAL to discover progress. API workers
+  publish their actual accepted result identifiers through private atomic records, including the worker-computed
+  derived-set identity; CLI workers are observed through canonical prepared-output receipts. Readiness requires
+  the canonical prepared receipt rather than a partial artifact. Quality receipt final names now appear only
+  after complete write and file fsync. Parents inspect SQLite only after the worker is killed and reaped.
+* Failed release records retain structured process evidence without raw output: strict unittest identifiers,
+  original and cleanup signals, timeout/launch/evidence types, and known browser-validator failures. Linux
+  subreaper and pidfd supervision terminates descendants across nested sessions, including children created
+  during termination and children leaked by an otherwise successful gate. A missing runner record produces a
+  minimal mode-private fallback instead of weakening the no-clobber release boundary.
 
 ## 0.1.0-beta.4 (published candidate; not accepted) — 2026-09-03
 

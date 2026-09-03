@@ -838,9 +838,10 @@ class OFIQBatchJob:
             "record": record,
         }
         receipt_path = self.job_dir / PREPARED_BATCH_FILENAME
+        partial_path = receipt_path.with_name(f"{receipt_path.name}.writing")
         encoded = (CanonicalJson.from_value(receipt).text + "\n").encode("utf-8")
         descriptor = os.open(
-            receipt_path,
+            partial_path,
             os.O_WRONLY
             | os.O_CREAT
             | os.O_EXCL
@@ -849,15 +850,21 @@ class OFIQBatchJob:
             0o600,
         )
         try:
-            written = 0
-            while written < len(encoded):
-                count = os.write(descriptor, encoded[written:])
-                if count <= 0:
-                    raise OSError("prepared quality-batch receipt write made no progress")
-                written += count
-            os.fsync(descriptor)
+            try:
+                written = 0
+                while written < len(encoded):
+                    count = os.write(descriptor, encoded[written:])
+                    if count <= 0:
+                        raise OSError(
+                            "prepared quality-batch receipt write made no progress"
+                        )
+                    written += count
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            os.link(partial_path, receipt_path, follow_symlinks=False)
         finally:
-            os.close(descriptor)
+            partial_path.unlink(missing_ok=True)
         _sync_directory(self.job_dir)
         _sync_directory(self.job_dir.parent)
 

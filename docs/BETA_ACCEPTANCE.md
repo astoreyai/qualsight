@@ -1,6 +1,6 @@
 # QualSight 0.1.0-beta.5 — release-candidate acceptance record
 
-This record combines historical accepted evidence with focused beta-3 development evidence. It is not
+This record combines historical accepted evidence with focused beta-5 development evidence. It is not
 final package authority until the frozen committed-tree release gate, installed-package gate, and rollback
 check complete. Every row below names its evidence. Identifiers are content hashes recorded in the
 append-only `atg/ledger.jsonl` and in the persistent store on the reference workstation;
@@ -292,6 +292,46 @@ provenance-review, and registry-repin scripts are excluded by the version-2 pack
 shipped in a nonfunctional form. Beta 4 remains preserved,
 untagged, and unaccepted; beta 5 must repeat the complete release, installation, browser, and rollback gates
 before acceptance.
+
+## 2026-09-03 beta-5 release-gate crash and harness repair
+
+The first beta-5 release attempt at `be4cc4695f5189a9bd4a4b6d025af1b3379bab1a` failed its root gate
+because one package-only test inherited the outer deployment authority; commit
+`bae3fae7b55cc1d2e6a121dcaf2f755e065f2b98` repaired that test boundary. The next release reached the
+backend gate and terminated with `SIGBUS`. Its private fail-closed record has SHA-256
+`293acb7bbf6b71bdf96f8b573550345ce234c78c0347e36f5c0dba3cfaa6dada`; no beta-5 package was
+published. The retained core places the native fault in `sqlite3WalFindFrame`, with the fault address in the
+active crash test database's SQLite shared-memory WAL index. Verbose discovery and the recorded store state
+identify `test_direct_pair_final_output_is_reconciled_after_real_process_death` as the active test.
+
+The failing harness had the parent repeatedly open the same live SQLite WAL while the worker owned it. The
+repair applies decision 005 consistently across every process-death suite: API workers publish the actual
+accepted result ID through a private atomic no-clobber record, CLI workers expose their identity through the
+canonical prepared-output receipt, parents observe only those records and final files, and SQLite verification
+begins only after the worker is killed and reaped. The derived-set worker publishes its computed ID rather than
+letting the parent reconstruct one from a directory name, and its readiness boundary requires the canonical
+prepared receipt rather than a JPEG alone. Quality receipt final names become visible only after the complete
+receipt body is written and fsynced. The direct-pair test passed in three fresh processes and the
+complete ten-test `OutputCrashRecoveryRealTests` class passed three times in 308.850, 317.826, and 307.471
+seconds. The broadened static guard first identified six remaining live-WAL pollers across matrix, quality, and
+external-score recovery and one filename-derived result identity; it now identifies zero. The five affected
+real-data tests pass across current-code reruns: the three quality/external-score paths passed together, followed
+by both corrected matrix paths. The complete five-test `FailedPreparedOutputRecoveryRealTests` class then passed
+in 215.378 seconds. After the final guard refinements, the API and CLI quality cases passed 2/2 in 65.949 seconds,
+the matrix recovery case passed in 53.206 seconds, and the derived-set recovery case passed in 28.013 seconds.
+The final current-worktree backend discovery then completed 311 tests in 4,034.532 seconds: 306 passed, five
+explicitly opt-in publisher-network tests were skipped, exit status was zero, and `SIGBUS` did not recur.
+
+Release failure evidence is now structured rather than retaining redacted raw tails. Root and backend gates run
+verbose unittest with Python faulthandler; strict test identifiers, original signals, cleanup signals, and typed
+timeout/launch/evidence failures are retained without assertion bodies or native output. Linux subreaper and
+pidfd supervision owns descendants across nested sessions, including descendants created during termination and
+children leaked by an otherwise successful or crashing gate. The focused real-process regression passes and an
+independent adversarial process-topology review reports no remaining blocker. The first 109-test root run exposed
+one incomplete ATG output binding after V67; 108 tests passed and only governance failed. Append-only successor
+V68 restored the complete 288-path binding without rewriting V67, and the full root suite then passed 109/109 in
+101.819 seconds. These are pre-release repair results; the clean committed release, installation, installed
+offline/browser validation, rollback, tag, and push remain required before beta-5 acceptance.
 
 ## Research extensions outside QS-H74 beta acceptance
 

@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 from typing import NamedTuple
 
 
@@ -26,16 +29,19 @@ BETA3_BROWSER_VALIDATORS = (
     "validate_utility_overlay",
     "observe_console",
 )
-MAX_FAILURE_TAIL_CHARACTERS = 4_000
-PRIVATE_ABSOLUTE_PATH = re.compile(
-    r"(?<![A-Za-z0-9])/(?:home|mnt|tmp)/[^\s\"'<>]*"
+UNITTEST_VERBOSE_PREFIX = re.compile(
+    rb"^(?P<method>[A-Za-z_][A-Za-z0-9_]*) \("
+    rb"(?P<test_id>(?:[A-Za-z_][A-Za-z0-9_]*\.){2,}"
+    rb"[A-Za-z_][A-Za-z0-9_]*)\)(?: \.\.\. ?)?"
 )
+PR_SET_CHILD_SUBREAPER = 36
+PR_GET_CHILD_SUBREAPER = 37
 
 
 class GateDefinition(NamedTuple):
     name: str
     argv: tuple[str, ...]
-    timeout_seconds: int
+    timeout_seconds: float
     environment: tuple[tuple[str, str], ...] = ()
     working_directory: Path | None = None
     evidence_path: Path | None = None
@@ -75,9 +81,13 @@ def gate_definitions(
             str(deployment_root / "var" / "upstream"),
         ),
     )
+    unittest_environment = (
+        ("PYTHONFAULTHANDLER", "1"),
+        *deployment_environment,
+    )
     backend_environment = (
         ("PYTHONPATH", f"{root / 'backend' / 'src'}:{root}"),
-        *deployment_environment,
+        *unittest_environment,
         *(
             (
                 ("QUALSIGHT_COMMITTED_STAGE_ROOT", str(root)),
@@ -175,10 +185,10 @@ def gate_definitions(
                 "discover",
                 "-s",
                 str(deployment_root / "tests"),
-                "-q",
+                "-v",
             ),
             600,
-            deployment_environment,
+            unittest_environment,
             working_directory=deployment_root,
         ),
         GateDefinition(
@@ -192,7 +202,7 @@ def gate_definitions(
                 str(deployment_root / "backend" / "tests"),
                 "-t",
                 str(deployment_root / "backend"),
-                "-q",
+                "-v",
             ),
             5400,
             backend_environment,
@@ -291,6 +301,7 @@ def _normalised_argv(
     ]
     if work_root is not None:
         replacements.append((str(work_root), "<GATE_WORK>"))
+    replacements.sort(key=lambda item: len(item[0]), reverse=True)
     normalised: list[str] = []
     for value in argv:
         for prefix, label in replacements:
@@ -309,70 +320,333 @@ def _is_sha256(value: object) -> bool:
     )
 
 
-def _redact_failure_text(
-    value: str,
-    *,
-    root: Path,
-    deployment_root: Path,
-    temporary: Path,
-) -> str:
-    redacted = value
-    replacements = (
-        (str(root), "<COMMITTED_STAGE>"),
-        (str(deployment_root), "<CONTROLLED_DEPLOYMENT>"),
-        (str(temporary), "<GATE_WORK>"),
-        (str(Path.home()), "<OPERATOR_HOME>"),
-    )
-    for private_path, label in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
-        redacted = redacted.replace(private_path, label)
-    redacted = PRIVATE_ABSOLUTE_PATH.sub("<PRIVATE_PATH>", redacted)
-    return redacted[-MAX_FAILURE_TAIL_CHARACTERS:]
-
-
 def _failure_evidence_summary(
     gate_name: str,
     evidence_body: bytes,
-    *,
-    root: Path,
-    deployment_root: Path,
-    temporary: Path,
 ) -> dict[str, object]:
     summary: dict[str, object] = {
         "bytes": len(evidence_body),
         "sha256": _sha256_bytes(evidence_body),
     }
-    try:
-        evidence = json.loads(evidence_body)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return summary
-    if not isinstance(evidence, dict):
-        return summary
-    if gate_name == "documentation-workflow":
-        for key in (
-            "kind",
-            "guide",
-            "guide_sha256",
-            "script_sha256",
-            "blocks",
-            "exit_code",
-            "seconds",
-            "started_at",
-        ):
-            if key in evidence:
-                summary[key] = evidence[key]
-        for source_key, output_key in (
-            ("stdout_tail", "redacted_stdout_tail"),
-            ("stderr_tail", "redacted_stderr_tail"),
-        ):
-            value = evidence.get(source_key)
-            if isinstance(value, str):
-                summary[output_key] = _redact_failure_text(
-                    value,
-                    root=root,
-                    deployment_root=deployment_root,
-                    temporary=temporary,
-                )
+    if gate_name == "browser-beta3-workflows":
+        try:
+            evidence = json.loads(evidence_body)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return summary
+        validators = evidence.get("validators") if isinstance(evidence, dict) else None
+        if isinstance(validators, list):
+            for item in validators:
+                if not isinstance(item, dict):
+                    continue
+                validator = item.get("validator")
+                exit_code = item.get("exit_code")
+                if (
+                    validator in BETA3_BROWSER_VALIDATORS
+                    and isinstance(exit_code, int)
+                    and exit_code != 0
+                ):
+                    summary["first_failed_validator"] = validator
+                    summary["validator_exit_code"] = exit_code
+                    break
     return summary
+
+
+def _unittest_failure_diagnostic(stderr: bytes) -> dict[str, object]:
+    last_test_id: str | None = None
+    failed_test_ids: list[str] = []
+    for line in stderr.splitlines():
+        match = UNITTEST_VERBOSE_PREFIX.match(line)
+        if match is None:
+            if last_test_id is not None and line.endswith((b" ... FAIL", b" ... ERROR")):
+                failed_test_ids.append(last_test_id)
+            continue
+        test_id = match.group("test_id").decode("ascii")
+        last_test_id = test_id
+        if line.endswith((b" ... FAIL", b" ... ERROR")):
+            failed_test_ids.append(test_id)
+    diagnostic: dict[str, object] = {}
+    if last_test_id is not None:
+        diagnostic["last_test_id"] = last_test_id
+    if failed_test_ids:
+        diagnostic["failed_test_ids"] = list(dict.fromkeys(failed_test_ids))
+    return diagnostic
+
+
+def _linux_process_identity(pid: int) -> str | None:
+    """Return the kernel start-time identity for a live Linux process."""
+    try:
+        body = (Path("/proc") / str(pid) / "stat").read_text(encoding="ascii")
+    except OSError:
+        return None
+    closing_parenthesis = body.rfind(")")
+    if closing_parenthesis < 0:
+        return None
+    fields = body[closing_parenthesis + 1 :].split()
+    if len(fields) <= 19 or fields[0] == "Z":
+        return None
+    return fields[19]
+
+
+def _linux_descendant_identities(root_pid: int) -> dict[int, str]:
+    """Snapshot all descendants, including children in separate sessions."""
+    descendants: dict[int, str] = {}
+    pending = [root_pid]
+    visited = {root_pid}
+    while pending:
+        parent_pid = pending.pop()
+        task_root = Path("/proc") / str(parent_pid) / "task"
+        try:
+            task_directories = tuple(task_root.iterdir())
+        except OSError:
+            continue
+        child_pids: set[int] = set()
+        for task_directory in task_directories:
+            try:
+                children = (task_directory / "children").read_text(
+                    encoding="ascii"
+                )
+            except OSError:
+                continue
+            child_pids.update(int(value) for value in children.split())
+        for child_pid in child_pids:
+            if child_pid in visited:
+                continue
+            visited.add(child_pid)
+            identity = _linux_process_identity(child_pid)
+            if identity is None:
+                continue
+            descendants[child_pid] = identity
+            pending.append(child_pid)
+    return descendants
+
+
+def _set_child_subreaper(enabled: bool) -> bool:
+    """Set Linux orphan adoption for the current release-gate supervisor."""
+    if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+        raise RuntimeError("release process supervision requires Linux pidfd support")
+    libc = ctypes.CDLL(None, use_errno=True)
+    state = ctypes.c_int()
+    result = libc.prctl(
+        ctypes.c_int(PR_GET_CHILD_SUBREAPER),
+        ctypes.c_ulong(ctypes.addressof(state)),
+        ctypes.c_ulong(0),
+        ctypes.c_ulong(0),
+        ctypes.c_ulong(0),
+    )
+    if result != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number))
+    result = libc.prctl(
+        ctypes.c_int(PR_SET_CHILD_SUBREAPER),
+        ctypes.c_ulong(int(enabled)),
+        ctypes.c_ulong(0),
+        ctypes.c_ulong(0),
+        ctypes.c_ulong(0),
+    )
+    if result != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number))
+    return bool(state.value)
+
+
+def _pidfd_signal_linux_processes(
+    identities: dict[int, str], termination_signal: signal.Signals
+) -> None:
+    """Signal only the exact processes bound by their PID descriptors."""
+    for pid, identity in identities.items():
+        try:
+            descriptor = os.pidfd_open(pid)
+        except ProcessLookupError:
+            continue
+        try:
+            if _linux_process_identity(pid) != identity:
+                continue
+            try:
+                signal.pidfd_send_signal(descriptor, termination_signal)
+            except ProcessLookupError:
+                pass
+        finally:
+            os.close(descriptor)
+
+
+def _new_linux_descendants(
+    controller_pid: int, baseline: dict[int, str]
+) -> dict[int, str]:
+    return {
+        pid: identity
+        for pid, identity in _linux_descendant_identities(controller_pid).items()
+        if baseline.get(pid) != identity
+    }
+
+
+def _terminate_release_process_tree(
+    baseline: dict[int, str],
+) -> tuple[signal.Signals, dict[int, str]]:
+    """Terminate the full gate tree, including reparented new-session children."""
+    controller_pid = os.getpid()
+    term_signalled: dict[int, str] = {}
+    term_deadline = time.monotonic() + 2
+    termination_signal = signal.SIGTERM
+    while True:
+        descendants = _new_linux_descendants(controller_pid, baseline)
+        pending_term = {
+            pid: identity
+            for pid, identity in descendants.items()
+            if term_signalled.get(pid) != identity
+        }
+        if pending_term:
+            _pidfd_signal_linux_processes(pending_term, signal.SIGTERM)
+            term_signalled.update(pending_term)
+        if not descendants:
+            break
+        if time.monotonic() >= term_deadline:
+            termination_signal = signal.SIGKILL
+            break
+        time.sleep(0.02)
+
+    all_seen = dict(term_signalled)
+    if termination_signal == signal.SIGKILL:
+        kill_deadline = time.monotonic() + 2
+        while True:
+            descendants = _new_linux_descendants(controller_pid, baseline)
+            all_seen.update(descendants)
+            if not descendants:
+                break
+            _pidfd_signal_linux_processes(descendants, signal.SIGKILL)
+            if time.monotonic() >= kill_deadline:
+                raise RuntimeError("release process tree survived SIGKILL")
+            time.sleep(0.02)
+
+    return termination_signal, all_seen
+
+
+def _reap_adopted_processes(identities: dict[int, str], root_pid: int) -> None:
+    """Reap exited processes adopted through the temporary subreaper boundary."""
+    for pid in identities:
+        if pid == root_pid:
+            continue
+        try:
+            os.waitpid(pid, os.WNOHANG)
+        except (ChildProcessError, ProcessLookupError):
+            pass
+
+
+def _execute_gate(
+    gate: GateDefinition,
+    *,
+    root: Path,
+    deployment_root: Path,
+    temporary: Path,
+    environment: dict[str, str],
+) -> dict[str, object]:
+    working_directory = gate.working_directory or root
+    failure_diagnostic: dict[str, object] | None = None
+    previous_subreaper_state = _set_child_subreaper(True)
+    descendant_baseline = _linux_descendant_identities(os.getpid())
+    try:
+        try:
+            process = subprocess.Popen(
+                gate.argv,
+                cwd=working_directory,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+            try:
+                stdout, stderr = process.communicate(timeout=gate.timeout_seconds)
+            except subprocess.TimeoutExpired:
+                termination_signal, adopted = _terminate_release_process_tree(
+                    descendant_baseline
+                )
+                stdout, stderr = process.communicate()
+                _reap_adopted_processes(adopted, process.pid)
+                exit_code = 124
+                unittest_diagnostic = (
+                    _unittest_failure_diagnostic(stderr)
+                    if gate.name in {"root-tests", "backend-tests"}
+                    else {}
+                )
+                failure_diagnostic = {
+                    "kind": "TIMEOUT",
+                    "timed_out": True,
+                    "termination_signal": signal.Signals(termination_signal).name,
+                    **unittest_diagnostic,
+                }
+            else:
+                exit_code = process.returncode
+                if _new_linux_descendants(os.getpid(), descendant_baseline):
+                    original_exit_code = exit_code
+                    termination_signal, adopted = _terminate_release_process_tree(
+                        descendant_baseline
+                    )
+                    _reap_adopted_processes(adopted, process.pid)
+                    exit_code = 125
+                    failure_diagnostic = {
+                        "cleanup_signal": signal.Signals(termination_signal).name,
+                        "kind": "PROCESS_LEAK",
+                        "original_exit_code": original_exit_code,
+                        **(
+                            _unittest_failure_diagnostic(stderr)
+                            if gate.name in {"root-tests", "backend-tests"}
+                            else {}
+                        ),
+                    }
+                    if original_exit_code < 0:
+                        try:
+                            failure_diagnostic["original_termination_signal"] = (
+                                signal.Signals(-original_exit_code).name
+                            )
+                        except ValueError:
+                            failure_diagnostic["original_termination_signal"] = (
+                                "UNKNOWN"
+                            )
+            if exit_code != 0:
+                unittest_diagnostic = (
+                    _unittest_failure_diagnostic(stderr)
+                    if gate.name in {"root-tests", "backend-tests"}
+                    else {}
+                )
+                if failure_diagnostic is None:
+                    failure_diagnostic = {
+                        "kind": "PROCESS_EXIT",
+                        **unittest_diagnostic,
+                    }
+                    if exit_code < 0:
+                        try:
+                            failure_diagnostic["termination_signal"] = signal.Signals(
+                                -exit_code
+                            ).name
+                        except ValueError:
+                            failure_diagnostic["termination_signal"] = "UNKNOWN"
+        except OSError as error:
+            exit_code = 126
+            stdout = b""
+            stderr = b""
+            failure_diagnostic = {
+                "kind": "LAUNCH_ERROR",
+                "error_type": type(error).__name__,
+            }
+    finally:
+        _set_child_subreaper(previous_subreaper_state)
+    result: dict[str, object] = {
+        "name": gate.name,
+        "argv": _normalised_argv(root, deployment_root, gate.argv, temporary),
+        "working_directory": _normalised_argv(
+            root,
+            deployment_root,
+            (str(working_directory),),
+            temporary,
+        )[0],
+        "exit_code": exit_code,
+        "stdout_bytes": len(stdout),
+        "stdout_sha256": _sha256_bytes(stdout),
+        "stderr_bytes": len(stderr),
+        "stderr_sha256": _sha256_bytes(stderr),
+    }
+    if failure_diagnostic is not None:
+        result["failure_diagnostic"] = failure_diagnostic
+    return result
 
 
 def _validate_gate_evidence(
@@ -428,6 +702,7 @@ def _validate_gate_evidence(
         or evidence.get("expected_validator_count") != 9
         or evidence.get("completed_validator_count") != 9
         or not isinstance(validators, list)
+        or any(not isinstance(item, dict) for item in validators)
         or [item.get("validator") for item in validators]
         != list(BETA3_BROWSER_VALIDATORS)
         or any(
@@ -581,32 +856,13 @@ def run_beta_gate(
                 if not key.startswith("QUALSIGHT_")
             }
             environment.update(gate.environment)
-            working_directory = gate.working_directory or root
-            completed = subprocess.run(
-                gate.argv,
-                cwd=working_directory,
-                env=environment,
-                capture_output=True,
-                check=False,
-                timeout=gate.timeout_seconds,
+            result = _execute_gate(
+                gate,
+                root=root,
+                deployment_root=deployment_root,
+                temporary=temporary,
+                environment=environment,
             )
-            result: dict[str, object] = {
-                    "name": gate.name,
-                    "argv": _normalised_argv(
-                        root, deployment_root, gate.argv, temporary
-                    ),
-                    "working_directory": _normalised_argv(
-                        root,
-                        deployment_root,
-                        (str(working_directory),),
-                        temporary,
-                    )[0],
-                    "exit_code": completed.returncode,
-                    "stdout_bytes": len(completed.stdout),
-                    "stdout_sha256": _sha256_bytes(completed.stdout),
-                    "stderr_bytes": len(completed.stderr),
-                    "stderr_sha256": _sha256_bytes(completed.stderr),
-            }
             if gate.evidence_path is not None:
                 evidence_body: bytes | None = None
                 try:
@@ -616,17 +872,29 @@ def run_beta_gate(
                         evidence_body,
                         temporary,
                     )
-                except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
-                    result["evidence_error"] = str(error)
+                except (
+                    OSError,
+                    UnicodeDecodeError,
+                    json.JSONDecodeError,
+                    ValueError,
+                    TypeError,
+                    AttributeError,
+                    KeyError,
+                ) as error:
+                    result["evidence_error_type"] = type(error).__name__
                     if evidence_body is not None:
                         result["failure_evidence"] = _failure_evidence_summary(
                             gate.name,
                             evidence_body,
-                            root=root,
-                            deployment_root=deployment_root,
-                            temporary=temporary,
                         )
                     result["exit_code"] = 1
+                    result.setdefault(
+                        "failure_diagnostic",
+                        {
+                            "kind": "EVIDENCE_ERROR",
+                            "error_type": type(error).__name__,
+                        },
+                    )
             results.append(result)
             if result["exit_code"] != 0:
                 break
@@ -642,6 +910,7 @@ def run_beta_gate(
             "path_bindings": {
                 "<COMMITTED_STAGE>": "git archive of git_commit",
                 "<CONTROLLED_DEPLOYMENT>": "clean controlled workstation checkout at git_commit",
+                "<GATE_WORK>": "deleted private release-gate workspace",
             },
             "runtime_registry": {
                 "path": "<CONTROLLED_DEPLOYMENT>/resources/resource-registry.json",
@@ -716,7 +985,7 @@ def main() -> int:
             f"stdout_sha256={failed['stdout_sha256']} "
             f"stderr_bytes={failed['stderr_bytes']} "
             f"stderr_sha256={failed['stderr_sha256']} "
-            f"evidence_error={failed.get('evidence_error', 'none')}",
+            f"evidence_error_type={failed.get('evidence_error_type', 'none')}",
             file=sys.stderr,
         )
     return 0 if record["status"] == "PASS" else 1

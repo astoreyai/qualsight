@@ -129,11 +129,18 @@ The package carries no cryptographic publisher signature.
 If a beta gate returns nonzero, the terminal distinguishes passed, failed, and not-run gates and names the
 first failed gate using only its exit code plus stdout/stderr byte counts and SHA-256 digests. Before the
 disposable release stage is removed, `release.sh` retains that same path-normalized gate record as a mode-0600
-file beneath a unique mode-0700 `dist/.release-failures/qualsight-<version>.<commit>.*` directory. Captured
-stdout/stderr is limited to the final 4,000 characters, with controlled roots replaced by stable labels and
-remaining absolute home, mount, or temporary paths removed. Biometric inputs, embeddings, checkpoints, and
-temporary working records are not retained. These private diagnostics are not release artifacts and are never
-copied into the versioned package directory. When a committed stage executes the user guide, the gate preserves
+file beneath a unique mode-0700 `dist/.release-failures/qualsight-<version>.<commit>.*` directory. Raw
+stdout/stderr and output tails are never retained. A failed process may add only a strict unittest identifier,
+failed unittest identifiers, symbolic original/cleanup signals, timeout state, process-leak state, or launch-error
+type; invalid browser evidence may add only a known validator name and numeric exit code. Path bindings prefer the
+most-specific controlled root. A timed-out gate, or any gate that exits while retaining live descendants,
+terminates its complete Linux descendant tree across nested sessions with PID-bound signaling, escalating to
+`SIGKILL` when needed. The release refuses if that tree cannot be terminated.
+If the gate runner exits before creating a record, the release retains a minimal runner-abort record rather than
+assuming the missing file exists. Biometric inputs, filenames, embeddings, checkpoints, native messages,
+assertion payloads, and temporary working records are not retained. These private diagnostics are not release
+artifacts and are never copied into the versioned package directory. When a committed stage executes the user
+guide, the gate preserves
 the caller's validated `QUALSIGHT_REPOSITORY_ROOT`; it does not reinterpret deployment-bound authorization paths
 relative to the disposable stage.
 

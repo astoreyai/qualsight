@@ -386,7 +386,8 @@ class ExternalScoreCrashRecoveryRealTests(unittest.TestCase):
             text=True,
         )
         operation = None
-        leaf_directory = None
+        result_id: str | None = None
+        leaf_directory: Path | None = None
         try:
             deadline = time.monotonic() + 180
             while time.monotonic() < deadline:
@@ -395,18 +396,18 @@ class ExternalScoreCrashRecoveryRealTests(unittest.TestCase):
                         f"*/QS-C21_EXTERNAL/{PREPARED_OUTPUT_FILENAME}"
                     )
                 )
-                query = sqlite3.connect(database)
-                query.row_factory = sqlite3.Row
-                try:
-                    operation = query.execute(
-                        "SELECT * FROM operations WHERE operation_kind = 'EXTERNAL_SCORE_IMPORT' "
-                        "AND project_id = ? ORDER BY attempt DESC LIMIT 1",
-                        (project_id,),
-                    ).fetchone()
-                finally:
-                    query.close()
                 if receipts:
                     self.assertEqual(len(receipts), 1, receipts)
+                    receipt_text = receipts[0].read_text(encoding="utf-8")
+                    receipt = json.loads(receipt_text)
+                    self.assertEqual(
+                        receipt_text, CanonicalJson.from_value(receipt).text + "\n"
+                    )
+                    self.assertEqual(
+                        receipt["operation_kind"], "EXTERNAL_SCORE_IMPORT"
+                    )
+                    self.assertEqual(receipt["project_id"], project_id)
+                    result_id = str(receipt["result_id"])
                     leaf_directory = receipts[0].parent
                     break
                 if worker.poll() is not None:
@@ -417,10 +418,10 @@ class ExternalScoreCrashRecoveryRealTests(unittest.TestCase):
                 time.sleep(0.01)
             else:
                 self.fail("timed out waiting for external-score prepared receipt")
-            self.assertIsNotNone(operation)
-            assert operation is not None
-            self.assertEqual(operation["state"], "RUNNING")
-            self.assertIsNotNone(leaf_directory)
+            assert result_id is not None and leaf_directory is not None
+            self.assertEqual(
+                leaf_directory.parent.name, result_id.replace(":", "_")
+            )
             time.sleep(0.5)
             self.assertIsNone(
                 worker.poll(), "CLI external-score worker left the SQLite stall"
@@ -439,7 +440,26 @@ class ExternalScoreCrashRecoveryRealTests(unittest.TestCase):
             finally:
                 trigger.close()
 
-        assert operation is not None and leaf_directory is not None
+        assert result_id is not None and leaf_directory is not None
+        connection = sqlite3.connect(database)
+        connection.row_factory = sqlite3.Row
+        try:
+            operation = connection.execute(
+                "SELECT * FROM operations WHERE operation_kind = 'EXTERNAL_SCORE_IMPORT' "
+                "AND project_id = ? ORDER BY attempt DESC LIMIT 1",
+                (project_id,),
+            ).fetchone()
+            recorded_leaf = connection.execute(
+                "SELECT 1 FROM matcher_leaves WHERE matrix_id = ?", (result_id,)
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertIsNotNone(operation)
+        assert operation is not None
+        self.assertEqual(operation["state"], "RUNNING")
+        self.assertEqual(operation["result_id"], result_id)
+        self.assertEqual(Path(operation["output_path"]), leaf_directory.parent)
+        self.assertIsNone(recorded_leaf)
         before_restart = RunStore(database)
         try:
             self.assertIn(

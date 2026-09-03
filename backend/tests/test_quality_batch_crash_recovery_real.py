@@ -80,6 +80,7 @@ from pathlib import Path
 import sys
 import time
 from fastapi.testclient import TestClient
+from backend.tests.test_output_crash_recovery_real import _publish_worker_response
 from qualsight.api import Settings, create_app
 from qualsight.execution.registry_binding import OFIQ_INPUT_RESOURCE_ID, OFIQ_V112_RUNTIME_RESOURCE_ID
 
@@ -87,16 +88,19 @@ root = Path(sys.argv[1])
 data_dir = Path(sys.argv[2])
 project_id = sys.argv[3]
 dataset_id = sys.argv[4]
+response_marker = Path(sys.argv[5])
 settings = Settings(repository_root=root, registry_path=root / "resources" / "resource-registry.json", data_dir=data_dir, runtime_resource_id=OFIQ_V112_RUNTIME_RESOURCE_ID, input_resource_ids=(OFIQ_INPUT_RESOURCE_ID, "lfw-funneled-local-candidate"))
 with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_exceptions=False) as client:
     response = client.post(f"/api/projects/{project_id}/datasets/{dataset_id}/quality-batch", json={"selection": {"kind": "subset_fixture"}, "chunks": 1})
     if response.status_code != 202:
         raise RuntimeError(response.text)
+    _publish_worker_response(response_marker, {"job_id": response.json()["job_id"]})
     while True:
         time.sleep(0.05)
 """
         environment = os.environ.copy()
         environment["PYTHONPATH"] = f"{ROOT / 'backend' / 'src'}:{ROOT}"
+        response_marker = data_dir / ".quality-worker-response.json"
         worker = subprocess.Popen(
             [
                 sys.executable,
@@ -106,6 +110,7 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_
                 str(data_dir),
                 project_id,
                 dataset_id,
+                str(response_marker),
             ],
             cwd=ROOT,
             env=environment,
@@ -118,27 +123,17 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_
         deadline = time.monotonic() + 300
         try:
             while time.monotonic() < deadline:
-                query = sqlite3.connect(database)
-                try:
-                    operation = query.execute(
-                        "SELECT result_id, output_path FROM operations "
-                        "WHERE operation_kind = 'QUALITY_BATCH' AND state = 'RUNNING' "
-                        "ORDER BY accepted_at DESC LIMIT 1"
-                    ).fetchone()
-                    recorded = (
-                        query.execute(
-                            "SELECT 1 FROM jobs WHERE job_id = ?", (operation[0],)
-                        ).fetchone()
-                        if operation is not None
-                        else None
+                if response_marker.is_file():
+                    marker_text = response_marker.read_text(encoding="utf-8")
+                    marker = json.loads(marker_text)
+                    self.assertEqual(
+                        marker_text, CanonicalJson.from_value(marker).text + "\n"
                     )
-                finally:
-                    query.close()
-                if operation is not None:
-                    job_id = str(operation[0])
-                    output_directory = Path(str(operation[1]))
+                    self.assertEqual(set(marker), {"job_id"})
+                    job_id = str(marker["job_id"])
+                    output_directory = data_dir / "jobs" / job_id.replace(":", "_")
                     parquet = output_directory / "quality_measurements.parquet"
-                    if recorded is None and parquet.is_file():
+                    if parquet.is_file():
                         break
                 time.sleep(0.01)
             else:
@@ -165,6 +160,11 @@ with TestClient(create_app(settings), base_url="http://127.0.0.1", raise_server_
                 "SELECT request_json FROM operations WHERE result_id = ? ORDER BY attempt DESC LIMIT 1",
                 (job_id,),
             ).fetchone()[0]
+        )
+        self.assertIsNone(
+            connection.execute(
+                "SELECT 1 FROM jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
         )
         connection.commit()
         connection.close()
