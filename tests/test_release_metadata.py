@@ -1186,6 +1186,11 @@ class ReleaseMetadataTests(unittest.TestCase):
                     "--validate-package-only",
                 ],
                 cwd=package_root,
+                env={
+                    key: value
+                    for key, value in os.environ.items()
+                    if not key.startswith("QUALSIGHT_")
+                },
                 capture_output=True,
                 text=True,
                 check=False,
