@@ -250,6 +250,18 @@ browser aggregate passes 9/9 at SHA-256
 observation has SHA-256 `86fa59ead978725b5da23178a769fe3cd2e46e6509ee0948860a5207664fbe55`.
 These are staged repair results, not final package acceptance. A new clean committed-tree release remains required.
 
+The clean release from repair commit `7abfd880e7dc46724b61e738a472536a26263e39` then passed all
+15 product gates, including the complete nine-workflow browser aggregate. Publication still failed closed:
+the post-gate lock audit found four high-severity advisories published on 2026-09-02 against transitive
+`fast-uri` 3.1.5 in the PWA build chain. The audit report recorded frontend advisory ids 1158521,
+1158524, 1158527, and 1158530; no beta-3 directory was published. The dependency path is
+`vite-plugin-pwa` → `workbox-build` → `ajv` → `fast-uri`.
+
+The root pnpm policy now forces `fast-uri` 3.1.7, whose package-registry integrity is locked. The exact
+same vulnerability command changed from exit 1 with four frontend advisories to exit 0 with zero,
+without adding a policy exception; the two existing local-only PyTorch findings remain the exact accepted
+set. Final committed-package, installed-package, rollback, tag, and remote identities remain pending.
+
 ## Research extensions outside QS-H74 beta acceptance
 
 1:N identification, controlled degradation, and container execution were implemented and locally

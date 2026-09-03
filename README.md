@@ -64,7 +64,7 @@ is active. After it exits 0, start the product with the next command and open
 <http://127.0.0.1:8480>. Installation is for the controlled reference workstation; it is not a
 relocatable cold-start package.
 
-* Use: `docs/USER_GUIDE.md` (console at <http://127.0.0.1:8480> after `qualsight serve`). Start on
+* Use: `docs/USER_GUIDE.md` (console at <http://127.0.0.1:8480> after the explicit serve command above). Start on
   **Home**, choose or create a project under **Projects**, admit data under **Inputs**, then use
   **Inspect quality**, **Compare**, **Stress test**, **Analyze utility**, **Results**,
   **Evidence & reports**, and **Manage system**. Every CLI

@@ -133,10 +133,13 @@ Licenses are each package's own declared metadata, recorded verbatim — not leg
 
 `python3 scripts/audit_vulnerabilities.py --output <new-path>` audits the complete real locks with
 `pip-audit` and `pnpm audit`, binds the result to both lock hashes, and refuses to overwrite evidence.
-The current gate is recorded at
-`atg/evidence/2026-08-29-dependency-vulnerability-audit-final-v6.json`:
+The most recent release-candidate gate was rerun on 2026-09-02 after the lock repair described below;
+its local report SHA-256 was `5859ec907c4f57641f948db5c56b3f5bf6f58aa9130a5af98fcaf14630e01dd1`:
 
-* Frontend: **0** advisories after the Vite/PWA build-toolchain upgrade.
+* Frontend: **0** advisories. Four high-severity advisories published on 2026-09-02 against transitive
+  `fast-uri` 3.1.5 were first observed as a release-stopping audit failure. The root pnpm policy now
+  forces patched 3.1.7 through the existing `vite-plugin-pwa` → `workbox-build` → `ajv` path; no
+  vulnerability-policy exception was added.
 * Backend: **2 accepted local-only PyTorch findings**, `PYSEC-2025-194` and `PYSEC-2026-139`.
   The project-pinned isolated auditor covers every current-platform runtime and development requirement
   exported from `uv.lock` (87 reported dependency records). AST analysis of 73 repository Python

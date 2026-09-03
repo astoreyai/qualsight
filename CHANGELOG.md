@@ -63,6 +63,9 @@
 * The exact reviewed Node runtime is now 26.7.0 with pnpm 10.28.0. Install, release, and browser
   validation use the reviewed `node` selected on `PATH` and fail preflight before dependency mutation
   when its identity differs; they no longer force the retired Node 20 system binary.
+* The release vulnerability gate caught four newly published high-severity `fast-uri` advisories in
+  the PWA build chain after all 15 product gates passed. The lock now forces patched `fast-uri` 3.1.7;
+  the same complete lock audit reports zero frontend advisories. No exception was added to policy.
 * A failed release now reports passed, failed, and not-run gate counts plus the first failed gate, and retains
   the path-normalized gate record privately outside the disposable stage with 0700/0600 permissions. A bounded
   final output tail is retained only after controlled paths are labelled and remaining private absolute paths

@@ -10,8 +10,9 @@ traces to its inputs by content hash. QualSight performs no automatic egress. Op
 reports, exports, and reproduction bundles may include deployment-local provenance; keep them on the
 controlled workstation until they pass disclosure review for the intended recipient.
 
-Two front doors exist and produce the same records: the **console** (`qualsight serve` →
-<http://127.0.0.1:8480>) and the **CLI** (`python -m qualsight.cli …`). This guide gives the CLI
+Two front doors exist and produce the same records: the **console** (the installed environment's
+`python -m qualsight.cli serve` command in [INSTALL.md](INSTALL.md) → <http://127.0.0.1:8480>) and the
+**CLI** (`python -m qualsight.cli …`). This guide gives the CLI
 form for every step because the CLI is scriptable and is what `scripts/docs_workflow_gate.py`
 executes verbatim: every fenced block tagged `sh gate` below is run, in order, by that gate on the
 registered subset fixture (16 LFW images / 10 protocol pairs) with a fresh data directory. The
