@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 
-POLICY = Path("resources/security/release-package-policy-v1.json")
+POLICY = Path("resources/security/release-package-policy-v2.json")
 PACKAGE_CONTENTS = Path("QUALSIGHT-PACKAGE-CONTENTS.json")
 SUMMARY = Path("resources/release-evidence/addon-acquisition-public-summary-v1.json")
 CHECKPOINTS = Path("resources/manifests/matcher-checkpoint-acquisition-v1.json")
@@ -47,7 +47,6 @@ REQUIRED_FILES = (
     Path("scripts/offline_gate.py"),
     Path("scripts/ofiq_v112_build.sh"),
     Path("scripts/observe_console.py"),
-    Path("scripts/run_release_beta_gate.py"),
     Path("scripts/validate_metric_registry.py"),
     Path("scripts/validate_comparison_studio.py"),
     Path("scripts/validate_evidence_warning_privacy.py"),
@@ -56,6 +55,7 @@ REQUIRED_FILES = (
     Path("scripts/validate_owner_purge_ui.py"),
     Path("scripts/validate_release_browser.py"),
     Path("scripts/validate_release_package.py"),
+    Path("scripts/validate_resource_registry.py"),
     Path("scripts/validate_stress_studio.py"),
     Path("scripts/validate_structured_evidence_navigation.py"),
     Path("scripts/validate_upload_working_sample.py"),
@@ -76,6 +76,14 @@ REQUIRED_EXCLUSIONS = {
     "docs/performance",
     "resources/authorizations",
     "resources/upstream",
+    "scripts/append_ledger_record.py",
+    "scripts/release.sh",
+    "scripts/repin_registry_identity.py",
+    "scripts/run_release_beta_gate.py",
+    "scripts/validate_atg_documents.py",
+    "scripts/validate_lfw_protocol_authority.py",
+    "scripts/validate_scrfd_release_provenance.py",
+    "scripts/validate_shared_crop_lineage.py",
     "tests",
 }
 REQUIRED_FORBIDDEN_SUFFIXES = {
@@ -160,7 +168,6 @@ EXPECTED_PROJECT_LOCATOR_FILES = {
     "resources/manifests/lfw-subset-fixture-v1.json",
     "resources/resource-registry.json",
     "scripts/build_ofiq_landmark_app.sh",
-    "scripts/validate_shared_crop_lineage.py",
 }
 EXPECTED_LOCATOR_JSON_FIELDS = {
     "resources/manifests/insightface-buffalo-l-release-provenance-v1.json": {
@@ -182,15 +189,7 @@ EXPECTED_LOCATOR_JSON_FIELDS = {
         "/resources/11/source/local_root",
     },
 }
-EXPECTED_LOCATOR_TEXT_SUFFIXES = {
-    "scripts/validate_scrfd_release_provenance.py": {
-        "/.insightface/models/buffalo_l.zip",
-        "/.insightface/models/buffalo_l/det_10g.onnx",
-    },
-    "scripts/validate_shared_crop_lineage.py": {
-        "/.insightface/models/buffalo_l/det_10g.onnx",
-    },
-}
+EXPECTED_LOCATOR_TEXT_SUFFIXES: dict[str, set[str]] = {}
 EXPECTED_OMITTED_EVIDENCE_IDENTITIES = {
     (
         "resources/upstream/adaface/README.d8114b3c.md",
@@ -231,7 +230,7 @@ def _validate_policy_minimum(policy: dict[str, Any]) -> None:
     forbidden_artifact_sha256s = policy.get("source_archive_forbidden_artifact_sha256s")
     if (
         policy.get("schema_version") != "1.0"
-        or policy.get("policy_id") != "qualsight-controlled-workstation-beta-release-v1"
+        or policy.get("policy_id") != "qualsight-controlled-workstation-beta-release-v2"
         or policy.get("source_archive_secret_scan") is not True
         or not REQUIRED_EXCLUSIONS.issubset(
             set(policy.get("source_archive_excluded_paths", ()))

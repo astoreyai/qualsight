@@ -8,7 +8,7 @@ external scores marked `EXTERNALLY_COMPUTED`) over frozen protocols,
 with every number recorded as an immutable, hash-addressed Run: verification (FMR/FNMR/ROC/DET/EER),
 quality→utility (ERC, AU-ERC, risk-coverage, quality-conditioned error, error models, threshold-policy
 analysis), cross-matcher and preprocessing contrasts, 1:N identification, controlled degradation,
-provenance-bearing figures, dashboards, reports, exports, and reproduction bundles. The beta-4 release-candidate
+provenance-bearing figures, dashboards, reports, exports, and reproduction bundles. The beta-5 release-candidate
 workflow is local and performs no automatic egress. Operator-downloaded reports, exports, and
 reproduction bundles remain governed files: they may contain deployment-local provenance and require
 disclosure review before any external transfer. Population 1:N, dataset degradation, and container
@@ -28,8 +28,9 @@ owner authorization permits local noncommercial research acquisition but never r
 acquisition of the identity-labeled LFW tree remains blocked; the three author-published, pair-only
 verification protocols are downloadable and carry no fabricated identity labels.
 
-**Status:** 0.1.0-beta.3 passed its release gate but failed the installed-package browser gate. The current
-tree targets 0.1.0-beta.4 and must pass the complete controlled-workstation release and installed-package
+**Status:** 0.1.0-beta.4 passed its release and installed offline gates but failed the installed-package
+browser gate at owner purge (validator 4/9). The immutable beta-4 package remains untagged. The current
+tree targets 0.1.0-beta.5 and must pass the complete controlled-workstation release and installed-package
 gates before that version is tagged. The target scope
 and provisional evidence are recorded in `docs/BETA_ACCEPTANCE.md`; no local beta result grants DHS transition,
 remote deployment, production, ATO, or mission-readiness authority.
@@ -53,8 +54,13 @@ The `setup` command is the explicit network-enabled acquisition step for the exa
 architecture sources. It verifies and caches those sources before the offline gate; scientific
 execution then consumes the verified cache with network access disabled.
 
-An extracted release archive additionally requires `QUALSIGHT_REGISTRY_PATH` to the reviewed,
-unprojected controlled-host registry. `scripts/install.sh --validate-package-only` checks the embedded
+An extracted release archive additionally requires `QUALSIGHT_REPOSITORY_ROOT` to the exact clean
+controlled Git commit from which the package was built and `QUALSIGHT_REGISTRY_PATH` to an absolute,
+non-symlink registry that is byte-identical to that commit's reviewed unprojected registry. The installer
+refuses ambiguous package/Git roots, commit or registry drift, and prints absolute start and verification
+commands that serve the package-built console through `QUALSIGHT_CONSOLE_ROOT`. Every installed
+environment-driven API or CLI start repeats the exact-commit, clean-tree, and registry-identity checks.
+`scripts/install.sh --validate-package-only` checks the embedded
 `QUALSIGHT-PACKAGE-CONTENTS.json`, the exact projected membership, hashes, sizes, safe modes, archive
 boundary, and toolchain without installing dependencies or claiming that external resources are present.
 The manifest must declare `0644` or `0755`; a hardened extraction umask may only remove group/world
@@ -81,7 +87,8 @@ relocatable cold-start package.
 ## Configuration
 
 The normal controlled-workstation start command needs no credential or remote-service environment
-variables. `QUALSIGHT_DATA_DIR`, `QUALSIGHT_REGISTRY_PATH`, `QUALSIGHT_SOURCE_CACHE_ROOT`, and
+variables. `QUALSIGHT_DATA_DIR`, `QUALSIGHT_REPOSITORY_ROOT`, `QUALSIGHT_REGISTRY_PATH`,
+`QUALSIGHT_CONSOLE_ROOT`, `QUALSIGHT_SOURCE_CACHE_ROOT`, and
 `QUALSIGHT_RUNTIME_RESOURCE_ID` may override their documented local defaults for an isolated governed
 installation. `QUALSIGHT_SOURCE_CACHE_ROOT` selects an existing absolute, non-symlinked directory of
 manifest-verified upstream source bytes; it does not authorize a download. `QUALSIGHT_NETWORK_GUARD`
@@ -93,7 +100,8 @@ this beta.
 Datasets, model checkpoints, the OFIQ runtime, and derived biometric data are registered by hash and used
 under recorded owner decisions for local noncommercial research. Release artifacts contain no source images,
 model checkpoints, embeddings, operational databases, runtime observations, or recorded result fixtures.
-Internal agent/session records and machine-specific performance records are also excluded. The source
+Internal agent/session records, checkout-only release/ATG entrypoints, and machine-specific performance
+records are also excluded. The source
 archive does retain public protocol identifiers, registered byte hashes, and distributable aggregate
 assurance metadata. The archive projects operator-home locators to the external prefix declared in its release policy, retains the
 remaining controlled-host bindings and public acquisition pins, and requires a separately reviewed full
@@ -102,7 +110,7 @@ Archive creation fails closed on prohibited biometric/model/data/native/screensh
 high-confidence credential indicators. Every projected regular file is also bound by path, SHA-256, byte
 length, and archive-declared safe mode in `QUALSIGHT-PACKAGE-CONTENTS.json`; release staging extracts the archive
 and validates it with the committed-tree validator and expected commit before publication. See `resources/authorizations/` and
-`resources/security/release-package-policy-v1.json`.
+`resources/security/release-package-policy-v2.json`.
 
 Scientific work is bounded and recoverable within the local beta. Direct matcher execution has a hard
 deadline in a terminable process. Quality batches, matcher matrices, external-score imports, direct-pair

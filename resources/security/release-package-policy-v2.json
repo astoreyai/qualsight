@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "policy_id": "qualsight-controlled-workstation-beta-release-v1",
+  "policy_id": "qualsight-controlled-workstation-beta-release-v2",
   "source_archive_excluded_paths": [
     "AGENTS.md",
     "ATG_LOOP.md",
@@ -14,6 +14,14 @@
     "docs/performance",
     "resources/authorizations",
     "resources/upstream",
+    "scripts/append_ledger_record.py",
+    "scripts/release.sh",
+    "scripts/repin_registry_identity.py",
+    "scripts/run_release_beta_gate.py",
+    "scripts/validate_atg_documents.py",
+    "scripts/validate_lfw_protocol_authority.py",
+    "scripts/validate_scrfd_release_provenance.py",
+    "scripts/validate_shared_crop_lineage.py",
     "tests"
   ],
   "source_archive_forbidden_suffixes": [
@@ -121,8 +129,7 @@
     "resources/manifests/lfw-official-protocol-authority-v1.json",
     "resources/manifests/lfw-subset-fixture-v1.json",
     "resources/resource-registry.json",
-    "scripts/build_ofiq_landmark_app.sh",
-    "scripts/validate_shared_crop_lineage.py"
+    "scripts/build_ofiq_landmark_app.sh"
   ],
   "source_archive_reference_uv_command": "uv",
   "source_archive_reference_uv_files": [
@@ -133,9 +140,7 @@
   "source_archive_controlled_locator_files": [
     "resources/manifests/insightface-buffalo-l-release-provenance-v1.json",
     "resources/release-evidence/addon-acquisition-public-summary-v1.json",
-    "resources/resource-registry.json",
-    "scripts/validate_scrfd_release_provenance.py",
-    "scripts/validate_shared_crop_lineage.py"
+    "resources/resource-registry.json"
   ],
   "source_archive_controlled_locator_json_fields": {
     "resources/manifests/insightface-buffalo-l-release-provenance-v1.json": [
@@ -157,20 +162,12 @@
       "/resources/11/source/local_root"
     ]
   },
-  "source_archive_controlled_locator_text_suffixes": {
-    "scripts/validate_scrfd_release_provenance.py": [
-      "/.insightface/models/buffalo_l.zip",
-      "/.insightface/models/buffalo_l/det_10g.onnx"
-    ],
-    "scripts/validate_shared_crop_lineage.py": [
-      "/.insightface/models/buffalo_l/det_10g.onnx"
-    ]
-  },
+  "source_archive_controlled_locator_text_suffixes": {},
   "source_archive_secret_scan": true,
   "excluded_content_classes": [
     "Private owner authorizations, internal agent instructions, execution plans, append-only ATG records, and runtime observations.",
     "Recorded real-result fixtures and machine-specific baselines that contain derived biometric measurements, local actor attribution, or deployment paths.",
     "Third-party source, license-evidence, executable, model, dataset, archive, and container bytes."
   ],
-  "included_metadata_boundary": "Application source, public protocol identifiers, add-on manifests, URL/hash/size acquisition pins, distributable aggregate assurance records, release controls, and a sanitized controlled-host registry remain included. Archive-time projections remove private evidence dependencies and operator usernames while preserving a runtime override through QUALSIGHT_REGISTRY_PATH. The package does not prove rights or runtime availability and is not portable or generally redistributable."
+  "included_metadata_boundary": "Application source, public protocol identifiers, add-on manifests, URL/hash/size acquisition pins, distributable aggregate assurance records, package install/self-validation controls, and a sanitized controlled-host registry remain included. Archive-time projections remove private evidence dependencies and operator usernames. Installed execution requires the exact recorded controlled Git deployment through QUALSIGHT_REPOSITORY_ROOT, a registry byte-identical to that commit's unprojected registry through QUALSIGHT_REGISTRY_PATH, and the installed console through QUALSIGHT_CONSOLE_ROOT. The package does not prove rights or runtime availability and is not portable or generally redistributable."
 }

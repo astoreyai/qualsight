@@ -21,7 +21,7 @@ from typing import Any
 from urllib.parse import quote_from_bytes
 
 
-POLICY_PATH = Path("resources/security/release-package-policy-v1.json")
+POLICY_PATH = Path("resources/security/release-package-policy-v2.json")
 PACKAGE_CONTENTS_PATH = PurePosixPath("QUALSIGHT-PACKAGE-CONTENTS.json")
 SUMMARY_PATH = PurePosixPath(
     "resources/release-evidence/addon-acquisition-public-summary-v1.json"

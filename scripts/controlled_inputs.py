@@ -12,10 +12,15 @@ LFW_RESOURCE_ID = "lfw-funneled-local-candidate"
 
 
 def lfw_tree_root(repository_root: Path) -> Path:
+    controlled_root = Path(
+        os.environ.get("QUALSIGHT_REPOSITORY_ROOT", str(repository_root))
+    ).resolve(strict=True)
+    if not controlled_root.is_dir():
+        raise RuntimeError("the controlled repository root is not a directory")
     registry_path = Path(
         os.environ.get(
             "QUALSIGHT_REGISTRY_PATH",
-            str(repository_root / "resources" / "resource-registry.json"),
+            str(controlled_root / "resources" / "resource-registry.json"),
         )
     ).resolve(strict=True)
     registry = json.loads(registry_path.read_text(encoding="utf-8"))

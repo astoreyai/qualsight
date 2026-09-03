@@ -213,7 +213,7 @@ def main() -> int:
     expected_console = console_index.read_bytes()
     expected_console_sha256 = hashlib.sha256(expected_console).hexdigest()
     env = dict(os.environ)
-    env.update({"QUALSIGHT_REPOSITORY_ROOT": str(repository_root), "QUALSIGHT_DATA_DIR": str(args.data_dir), "QUALSIGHT_SOURCE_CACHE_ROOT": str(source_cache_root), "QUALSIGHT_NETWORK_GUARD": "1", "QUALSIGHT_SETUP_NETWORK_DISABLED": "1", "PYTHONPATH": f"{source_root / 'backend' / 'src'}:{source_root}",
+    env.update({"QUALSIGHT_REPOSITORY_ROOT": str(repository_root), "QUALSIGHT_CONSOLE_ROOT": str(source_root), "QUALSIGHT_DATA_DIR": str(args.data_dir), "QUALSIGHT_SOURCE_CACHE_ROOT": str(source_cache_root), "QUALSIGHT_NETWORK_GUARD": "1", "QUALSIGHT_SETUP_NETWORK_DISABLED": "1", "PYTHONPATH": f"{source_root / 'backend' / 'src'}:{source_root}",
                 "QUALSIGHT_INPUT_RESOURCE_IDS": "ofiq-r-01-conformance-input,lfw-funneled-local-candidate"})
     registry_path = Path(
         env.get(

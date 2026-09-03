@@ -37,7 +37,7 @@ def build_manifest(
     workspace = json.loads((root / "package.json").read_text(encoding="utf-8"))
     frontend = json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8"))
     release_policy = json.loads(
-        (root / "resources" / "security" / "release-package-policy-v1.json").read_text(
+        (root / "resources" / "security" / "release-package-policy-v2.json").read_text(
             encoding="utf-8"
         )
     )
@@ -76,7 +76,7 @@ def build_manifest(
             "uv_lock_sha256": _sha256(root / "uv.lock"),
             "pnpm_lock_sha256": _sha256(root / "pnpm-lock.yaml"),
             "release_package_policy_sha256": _sha256(
-                root / "resources" / "security" / "release-package-policy-v1.json"
+                root / "resources" / "security" / "release-package-policy-v2.json"
             ),
         },
         "artifacts": sorted(records, key=lambda record: str(record["name"])),

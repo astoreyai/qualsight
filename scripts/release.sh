@@ -66,7 +66,7 @@ if ! "$RELEASE_PYTHON" "$BUILD_ROOT/scripts/run_release_beta_gate.py" \
 fi
 "$RELEASE_PYTHON" "$BUILD_ROOT/scripts/create_release_source_archive.py" \
   --root "$ROOT" --output "$SOURCE_ARCHIVE" --commit "$COMMIT" --prefix "$NAME" \
-  --policy "$BUILD_ROOT/resources/security/release-package-policy-v1.json"
+  --policy "$BUILD_ROOT/resources/security/release-package-policy-v2.json"
 PACKAGE_VALIDATION_ROOT="${STAGE}/package-validation"
 mkdir "$PACKAGE_VALIDATION_ROOT"
 tar --extract --gzip --file "$SOURCE_ARCHIVE" --directory "$PACKAGE_VALIDATION_ROOT" \
@@ -88,7 +88,7 @@ printf '%s\n' "$COMMIT" > "$COMMIT_FILE"
   "$(basename "$SBOM")" "$(basename "$VULNERABILITIES")" "$(basename "$BETA_GATE")" \
   "$(basename "$MANIFEST")" "$(basename "$COMMIT_FILE")" > "$(basename "$CHECKSUMS")")
 "$RELEASE_PYTHON" "$BUILD_ROOT/scripts/validate_release_package.py" \
-  --policy "$BUILD_ROOT/resources/security/release-package-policy-v1.json" \
+  --policy "$BUILD_ROOT/resources/security/release-package-policy-v2.json" \
   --sidecar "$SBOM" --sidecar "$VULNERABILITIES" --sidecar "$BETA_GATE" \
   --sidecar "$MANIFEST" --sidecar "$COMMIT_FILE" --sidecar "$CHECKSUMS"
 mv -T -n "$SET" "$FINAL_DIR"

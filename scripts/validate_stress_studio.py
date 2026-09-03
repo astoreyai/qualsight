@@ -21,6 +21,16 @@ import urllib.request
 from controlled_inputs import lfw_tree_root
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _controlled_repository_root() -> Path:
+    configured = os.environ.get("QUALSIGHT_REPOSITORY_ROOT")
+    root = (Path(configured) if configured is not None else ROOT).resolve(strict=True)
+    if not root.is_dir():
+        raise RuntimeError("the controlled repository root is not a directory")
+    return root
+
+
 API_PORT = 8480
 PREVIEW_PORT = 5193
 NODE_EXECUTABLE = shutil.which("node")
@@ -28,9 +38,12 @@ if NODE_EXECUTABLE is None:
     raise RuntimeError("the reviewed Node executable is not available on PATH")
 NODE_BIN = str(Path(NODE_EXECUTABLE).parent)
 RESEARCH_SCOPE = "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
-REAL_UPLOAD = lfw_tree_root(ROOT) / "Aaron_Peirsol/Aaron_Peirsol_0001.jpg"
+CONTROLLED_ROOT = _controlled_repository_root()
+REAL_UPLOAD = lfw_tree_root(CONTROLLED_ROOT) / "Aaron_Peirsol/Aaron_Peirsol_0001.jpg"
 REAL_RELATIVE_PATH = "Aaron_Peirsol/Aaron_Peirsol_0001.jpg"
-IMAGE_MANIFEST = ROOT / "resources" / "manifests" / "lfw-funneled-images-v1.jsonl"
+IMAGE_MANIFEST = (
+    CONTROLLED_ROOT / "resources" / "manifests" / "lfw-funneled-images-v1.jsonl"
+)
 PARAMETERS: dict[str, int | float] = {
     "jpeg": 20,
     "gaussian_blur": 5.0,

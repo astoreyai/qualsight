@@ -17,7 +17,8 @@ boundary and disclose internal or local derived biometric evidence.
 
 ## Decision
 
-On 2026-08-29, choose option 3. `resources/security/release-package-policy-v1.json` is the source-of-truth
+On 2026-08-29, choose option 3. Version 2 of the contract,
+`resources/security/release-package-policy-v2.json`, is the source-of-truth
 exclusion contract. `scripts/create_release_source_archive.py` applies it to the exact release commit,
 verifies the resulting tar member paths, rejects nonregular members and prohibited biometric/model/data/
 native/screenshot suffixes or credential indicators, and refuses overwrite. The release manifest records
@@ -33,9 +34,10 @@ as redistributable source.
 ## Consequences
 
 The source archive excludes the policy-listed agent/session files, all `atg/` records,
-`backend/tests/fixtures/`, and `docs/performance/`; the console archive contains only the compiled static
-console. Full repository governance, machine-specific performance evidence, and real-fixture tests require
-the controlled Git checkout, while install/runtime code remains present in the source archive. Adding or
+`backend/tests/fixtures/`, `docs/performance/`, and checkout-only release/ATG entrypoints; the console archive
+contains only the compiled static console. Full repository governance, release construction, machine-specific
+performance evidence, and real-fixture tests require the controlled Git checkout, while package install,
+self-validation, and runtime code remain present in the source archive. Adding or
 removing an exclusion requires a new policy version, a matching release-manifest change, a source-archive
 regression, and a new append-only ATG record. Exact deployment registry paths remain because current runtime
 resolution depends on them; this decision does not make the archive portable or authorize general

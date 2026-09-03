@@ -258,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
 
         print(json.dumps(restore_backup(args.backup, settings.data_dir), sort_keys=True))
         return 0
-    secure_data_tree(settings.data_dir, protected_roots=(settings.repository_root, Path.home()))
+    secure_data_tree(settings.data_dir, protected_roots=settings.protected_roots)
     if args.command == "serve":
         import uvicorn
 

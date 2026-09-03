@@ -732,7 +732,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     operations_logger = logging.getLogger("qualsight.operations")
 
     activate_private_umask()
-    secure_data_tree(settings.data_dir, protected_roots=(settings.repository_root, Path.home()))
+    secure_data_tree(settings.data_dir, protected_roots=settings.protected_roots)
 
     if settings.network_guard:
         install_network_guard()
@@ -5855,7 +5855,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         raise HTTPException(status_code=404, detail="API route is not available")
 
     # Shipped console: serve the built frontend from the same local origin when it exists (offline product; API routes take precedence).
-    dist = settings.repository_root / "frontend" / "dist"
+    dist = (settings.console_root or settings.repository_root) / "frontend" / "dist"
     if (dist / "index.html").exists():
         from fastapi.staticfiles import StaticFiles
 

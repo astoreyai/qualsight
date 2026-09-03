@@ -1,11 +1,31 @@
 # Changelog
 
-## 0.1.0-beta.4 (unreleased release candidate) — 2026-09-03
+## 0.1.0-beta.5 (unreleased release candidate) — 2026-09-03
+
+* Installed owner-purge and Stress Studio validation now resolve their immutable real-input manifests
+  through the controlled deployment repository. The installed regression uses the real release projector
+  and checked-in LFW authorities, and it succeeds without relying on an ambient registry override.
+  Beta 4 remains immutable because release and installed offline validation passed but installed browser
+  validation stopped at owner purge; beta 5 is the required no-clobber repair.
+* Installed source code, the separately built package console, and controlled scientific authority now
+  remain independently selectable without silent version drift. Installation rejects ambiguous package/Git
+  roots, binds the package to the exact clean controlled commit and byte-identical unprojected registry,
+  runs the full resource-registry validator before dependency mutation, and emits location-independent
+  commands. Every environment-driven installed API or CLI start repeats the commit, cleanliness, and
+  registry-byte checks; data-tree hardening protects the separately installed console root.
+* Release-package policy v2 removes checkout-only release construction, complete-gate, ATG append,
+  provenance-review, and registry-repin entrypoints instead of shipping commands that cannot operate inside
+  the projected archive. Real generated-archive regressions execute the installed validator imports and
+  installer authority checks.
+
+## 0.1.0-beta.4 (published candidate; not accepted) — 2026-09-03
 
 * Installed-package browser validation now reads the immutable LFW subset manifest from the controlled
   deployment repository, matching the existing controlled Git, registry, source-cache, and real-input
   boundaries. Beta 3 remains preserved because its package passed release and offline installation but
-  failed this browser validator; beta 4 is a no-clobber versioned repair.
+  failed this browser validator; beta 4 was a no-clobber versioned repair. Its release and installed
+  offline gates passed, but installed browser validation exposed the same split authority in owner purge
+  at validator 4/9, so beta 4 also remains preserved, untagged, and unaccepted.
 
 ## 0.1.0-beta.3 (published candidate; not accepted) — 2026-09-03
 

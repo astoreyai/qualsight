@@ -31,13 +31,14 @@ ROOT = Path(__file__).resolve().parent.parent
 
 RELEASE_SNAPSHOT_FILES = (
     "backend/pyproject.toml",
+    "backend/src/qualsight/api/settings.py",
     "backend/src/qualsight/datasets.py",
     "backend/src/qualsight/engines/ofiq/batch.py",
     "docs/INSTALL.md",
     "frontend/package.json",
     "package.json",
     "resources/release-evidence/addon-acquisition-public-summary-v1.json",
-    "resources/security/release-package-policy-v1.json",
+    "resources/security/release-package-policy-v2.json",
     "scripts/create_release_source_archive.py",
     "scripts/controlled_inputs.py",
     "scripts/audit_console.py",
@@ -97,6 +98,11 @@ def _release_snapshot(destination: Path) -> Path:
         target = repository / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+    superseded_policy = repository / "resources/security/release-package-policy-v1.json"
+    if superseded_policy.exists() and not (
+        ROOT / "resources/security/release-package-policy-v1.json"
+    ).exists():
+        superseded_policy.unlink()
     subprocess.run(["git", "init", "--quiet"], cwd=repository, check=True)
     subprocess.run(["git", "add", "."], cwd=repository, check=True)
     environment = {
@@ -311,6 +317,9 @@ class ReleaseMetadataTests(unittest.TestCase):
 
     def test_staged_browser_gate_receives_the_verified_deployment_source_cache(self) -> None:
         module = _load_script("run_release_beta_gate")
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip()
         with tempfile.TemporaryDirectory() as temporary:
             staged_root = Path(temporary)
             gates = module.gate_definitions(
@@ -318,6 +327,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 sys.executable,
                 work_root=staged_root / "work",
                 deployment_root=ROOT,
+                committed_source_commit=commit,
             )
         browser_gate = next(
             gate for gate in gates if gate.name == "browser-beta3-workflows"
@@ -328,6 +338,8 @@ class ReleaseMetadataTests(unittest.TestCase):
             str((ROOT / "var" / "upstream").resolve(strict=True)),
         )
         self.assertNotEqual(environment["QUALSIGHT_SOURCE_CACHE_ROOT"], str(staged_root))
+        self.assertEqual(environment["QUALSIGHT_COMMITTED_STAGE_ROOT"], str(staged_root))
+        self.assertEqual(environment["QUALSIGHT_COMMITTED_STAGE_COMMIT"], commit)
 
     def test_offline_gate_uses_the_explicit_verified_source_cache_root(self) -> None:
         module = _load_script("offline_gate")
@@ -398,7 +410,7 @@ class ReleaseMetadataTests(unittest.TestCase):
     def test_source_archive_excludes_internal_runtime_records_and_real_result_fixture(self) -> None:
         module = _load_script("create_release_source_archive")
         policy = json.loads(
-            (ROOT / "resources/security/release-package-policy-v1.json").read_text(
+            (ROOT / "resources/security/release-package-policy-v2.json").read_text(
                 encoding="utf-8"
             )
         )
@@ -425,17 +437,29 @@ class ReleaseMetadataTests(unittest.TestCase):
 
     def test_release_package_policy_excludes_private_and_nonportable_material(self) -> None:
         policy = json.loads(
-            (ROOT / "resources/security/release-package-policy-v1.json").read_text(
+            (ROOT / "resources/security/release-package-policy-v2.json").read_text(
                 encoding="utf-8"
             )
         )
         exclusions = set(policy["source_archive_excluded_paths"])
+        self.assertEqual(
+            policy["policy_id"],
+            "qualsight-controlled-workstation-beta-release-v2",
+        )
         self.assertTrue(
             {
                 "PLAN.md",
                 "resources/authorizations",
                 "resources/upstream",
                 "docs/BASELINE_2026-09-01_IMAGE_WORKFLOW.md",
+                "scripts/repin_registry_identity.py",
+                "scripts/append_ledger_record.py",
+                "scripts/release.sh",
+                "scripts/run_release_beta_gate.py",
+                "scripts/validate_atg_documents.py",
+                "scripts/validate_lfw_protocol_authority.py",
+                "scripts/validate_scrfd_release_provenance.py",
+                "scripts/validate_shared_crop_lineage.py",
             }.issubset(exclusions)
         )
         forbidden_suffixes = set(policy["source_archive_forbidden_suffixes"])
@@ -478,7 +502,6 @@ class ReleaseMetadataTests(unittest.TestCase):
                 "resources/manifests/lfw-subset-fixture-v1.json",
                 "resources/resource-registry.json",
                 "scripts/build_ofiq_landmark_app.sh",
-                "scripts/validate_shared_crop_lineage.py",
             },
         )
         builder_body = (ROOT / "scripts/create_release_source_archive.py").read_bytes()
@@ -551,24 +574,342 @@ class ReleaseMetadataTests(unittest.TestCase):
         install = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
         preflight_call = '"$PYTHON" scripts/validate_install_preflight.py'
         package_call = '"$PYTHON" scripts/validate_release_package.py --root "$ROOT"'
+        registry_call = '"$PYTHON" scripts/validate_resource_registry.py "$REGISTRY"'
         first_mutation = '"$UV" sync --frozen --directory backend'
         self.assertIn("--validate-package-only", install)
         self.assertLess(install.index(preflight_call), install.index(first_mutation))
         self.assertLess(install.index(package_call), install.index(first_mutation))
+        self.assertLess(install.index(registry_call), install.index(first_mutation))
         self.assertNotIn("validate_atg_documents.py", install)
         self.assertNotIn("python3 scripts/validate_", install)
         self.assertNotIn("python3 scripts/", install)
         self.assertIn('"$PNPM" install --frozen-lockfile', install)
         self.assertIn('"$PNPM" --dir frontend run build', install)
         self.assertIn(
-            'scripts/offline_gate.py --observation \\"$ROOT/var/offline-gate-install.json\\" '
-            '--data-dir \\"$ROOT/var\\"',
+            'CONTROLLED_ROOT="${QUALSIGHT_REPOSITORY_ROOT:-$ROOT}"',
+            install,
+        )
+        self.assertIn(
+            "this sanitized package requires QUALSIGHT_REPOSITORY_ROOT and "
+            "QUALSIGHT_REGISTRY_PATH",
+            install,
+        )
+        self.assertIn(
+            'PACKAGE_COMMIT="$("$PYTHON" -c',
+            install,
+        )
+        self.assertIn(
+            'CONTROLLED_COMMIT="$(git -C "$CONTROLLED_ROOT" rev-parse HEAD)"',
+            install,
+        )
+        self.assertIn(
+            'if [ "$PACKAGE_COMMIT" != "$CONTROLLED_COMMIT" ]; then',
+            install,
+        )
+        self.assertIn(
+            "QUALSIGHT_REPOSITORY_ROOT=$CONTROLLED_ROOT "
+            "QUALSIGHT_REGISTRY_PATH=$REGISTRY "
+            "QUALSIGHT_CONSOLE_ROOT=$ROOT",
+            install,
+        )
+        self.assertIn(
+            '$ROOT/scripts/offline_gate.py --observation \\"$ROOT/var/offline-gate-install.json\\" '
+            '--data-dir \\"$ROOT/var\\" --source-root \\"$ROOT\\" '
+            '--repository-root \\"$CONTROLLED_ROOT\\" '
+            '--console-index \\"$ROOT/frontend/dist/index.html\\" '
+            '--python \\"$ROOT/.venv/bin/python\\"',
             install,
         )
         self.assertIn(
             Path("scripts/validate_metric_registry.py"),
             package_validator.REQUIRED_FILES,
         )
+        self.assertIn(
+            Path("scripts/validate_resource_registry.py"),
+            package_validator.REQUIRED_FILES,
+        )
+        self.assertNotIn(
+            Path("scripts/run_release_beta_gate.py"),
+            package_validator.REQUIRED_FILES,
+        )
+
+    def test_installer_refuses_a_real_package_that_is_also_a_git_checkout(self) -> None:
+        module = _load_script("create_release_source_archive")
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_root = Path(temporary)
+            repository = _release_snapshot(temporary_root)
+            archive_path = temporary_root / "qualsight-source.tar.gz"
+            module.write_source_archive(
+                root=repository,
+                output=archive_path,
+                commit="HEAD",
+                prefix="qualsight-source-test",
+            )
+            extracted = temporary_root / "extracted"
+            extracted.mkdir()
+            subprocess.run(
+                ["tar", "-xzf", str(archive_path), "-C", str(extracted)],
+                check=True,
+            )
+            package_root = extracted / "qualsight-source-test"
+            subprocess.run(["git", "init", "--quiet"], cwd=package_root, check=True)
+
+            refused = subprocess.run(
+                ["bash", "scripts/install.sh", "--validate-package-only"],
+                cwd=package_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+            self.assertIn(
+                "installation refused: root contains both package manifest and Git checkout authority",
+                refused.stderr,
+            )
+
+    def test_installed_settings_revalidate_real_package_commit_and_registry(self) -> None:
+        module = _load_script("create_release_source_archive")
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_root = Path(temporary)
+            repository = _release_snapshot(temporary_root)
+            archive_path = temporary_root / "qualsight-source.tar.gz"
+            module.write_source_archive(
+                root=repository,
+                output=archive_path,
+                commit="HEAD",
+                prefix="qualsight-source-test",
+            )
+            extracted = temporary_root / "extracted"
+            extracted.mkdir()
+            subprocess.run(
+                ["tar", "-xzf", str(archive_path), "-C", str(extracted)],
+                check=True,
+            )
+            package_root = extracted / "qualsight-source-test"
+            registry = repository / "resources" / "resource-registry.json"
+            authority_environment = {
+                **os.environ,
+                "QUALSIGHT_REPOSITORY_ROOT": str(repository),
+                "QUALSIGHT_REGISTRY_PATH": str(registry),
+            }
+            authority_check = subprocess.run(
+                ["bash", "scripts/install.sh", "--validate-package-only"],
+                cwd=package_root,
+                env=authority_environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                authority_check.returncode,
+                0,
+                authority_check.stdout + authority_check.stderr,
+            )
+            self.assertIn("deployment authority passed", authority_check.stdout)
+
+            projected_environment = {
+                **authority_environment,
+                "QUALSIGHT_REGISTRY_PATH": str(
+                    package_root / "resources" / "resource-registry.json"
+                ),
+            }
+            projected_check = subprocess.run(
+                ["bash", "scripts/install.sh", "--validate-package-only"],
+                cwd=package_root,
+                env=projected_environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                projected_check.returncode,
+                2,
+                projected_check.stdout + projected_check.stderr,
+            )
+            self.assertIn(
+                "controlled-host registry differs from the controlled repository registry",
+                projected_check.stderr,
+            )
+
+            relative_environment = {
+                **authority_environment,
+                "QUALSIGHT_REGISTRY_PATH": "resources/resource-registry.json",
+            }
+            relative_check = subprocess.run(
+                ["bash", "scripts/install.sh", "--validate-package-only"],
+                cwd=package_root,
+                env=relative_environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                relative_check.returncode,
+                2,
+                relative_check.stdout + relative_check.stderr,
+            )
+            self.assertIn(
+                "QUALSIGHT_REGISTRY_PATH must be absolute",
+                relative_check.stderr,
+            )
+
+            console_root = temporary_root / "installed-console"
+            shutil.copytree(
+                ROOT / "frontend" / "dist",
+                console_root / "frontend" / "dist",
+            )
+            environment = {
+                **os.environ,
+                "PYTHONPATH": str(package_root / "backend" / "src"),
+                "QUALSIGHT_REPOSITORY_ROOT": str(repository),
+                "QUALSIGHT_REGISTRY_PATH": str(registry),
+                "QUALSIGHT_CONSOLE_ROOT": str(console_root),
+            }
+            command = [
+                sys.executable,
+                "-c",
+                (
+                    "from qualsight.api.settings import Settings; "
+                    "value = Settings.from_environment(); "
+                    "print(value.repository_root); print(value.registry_path)"
+                ),
+            ]
+            accepted = subprocess.run(
+                command,
+                cwd=package_root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+
+            copied_registry = temporary_root / "resource-registry.json"
+            shutil.copy2(registry, copied_registry)
+            copied_environment = {
+                **environment,
+                "QUALSIGHT_REGISTRY_PATH": str(copied_registry),
+            }
+            copied = subprocess.run(
+                command,
+                cwd=package_root,
+                env=copied_environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(copied.returncode, 0, copied.stdout + copied.stderr)
+
+            substituted_environment = {
+                **environment,
+                "QUALSIGHT_REGISTRY_PATH": str(
+                    package_root / "resources" / "resource-registry.json"
+                ),
+            }
+            substituted = subprocess.run(
+                command,
+                cwd=package_root,
+                env=substituted_environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(substituted.returncode, 0)
+            self.assertIn(
+                "installed package registry differs from the controlled repository registry",
+                substituted.stderr,
+            )
+
+            commit_environment = {
+                **os.environ,
+                "GIT_AUTHOR_NAME": "QualSight release regression",
+                "GIT_AUTHOR_EMAIL": "release-regression@localhost",
+                "GIT_COMMITTER_NAME": "QualSight release regression",
+                "GIT_COMMITTER_EMAIL": "release-regression@localhost",
+            }
+            subprocess.run(
+                ["git", "commit", "--quiet", "--allow-empty", "-m", "Advance controlled deployment"],
+                cwd=repository,
+                env=commit_environment,
+                check=True,
+            )
+            advanced = subprocess.run(
+                command,
+                cwd=package_root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(advanced.returncode, 0)
+            self.assertIn(
+                "installed package source commit differs from the controlled repository",
+                advanced.stderr,
+            )
+
+    def test_environment_start_accepts_only_a_byte_exact_committed_release_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_root = Path(temporary)
+            repository = _release_snapshot(temporary_root)
+            commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repository, text=True
+            ).strip()
+            stage_archive = temporary_root / "committed-stage.tar"
+            subprocess.run(
+                ["git", "archive", "--format=tar", "-o", str(stage_archive), commit],
+                cwd=repository,
+                check=True,
+            )
+            stage = temporary_root / "committed-stage"
+            stage.mkdir()
+            subprocess.run(
+                ["tar", "-xf", str(stage_archive), "-C", str(stage)],
+                check=True,
+            )
+            environment = {
+                **os.environ,
+                "PYTHONPATH": str(stage / "backend" / "src"),
+                "QUALSIGHT_REPOSITORY_ROOT": str(repository),
+                "QUALSIGHT_REGISTRY_PATH": str(
+                    repository / "resources" / "resource-registry.json"
+                ),
+                "QUALSIGHT_COMMITTED_STAGE_ROOT": str(stage),
+                "QUALSIGHT_COMMITTED_STAGE_COMMIT": commit,
+            }
+            command = [
+                sys.executable,
+                "-c",
+                "from qualsight.api.settings import Settings; print(Settings.from_environment().repository_root)",
+            ]
+            accepted = subprocess.run(
+                command,
+                cwd=stage,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+
+            changed_stage = temporary_root / "changed-stage"
+            shutil.copytree(stage, changed_stage)
+            shutil.copy2(
+                repository / "README.md", changed_stage / "docs" / "INSTALL.md"
+            )
+            changed_environment = {
+                **environment,
+                "PYTHONPATH": str(changed_stage / "backend" / "src"),
+                "QUALSIGHT_COMMITTED_STAGE_ROOT": str(changed_stage),
+            }
+            refused = subprocess.run(
+                command,
+                cwd=changed_stage,
+                env=changed_environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(refused.returncode, 0)
 
     def test_extracted_archive_self_validates_and_preserves_fail_closed_acquisition(self) -> None:
         module = _load_script("create_release_source_archive")
@@ -758,7 +1099,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             for source_path in package_root.rglob("*"):
                 if not source_path.is_file() or source_path.relative_to(
                     package_root
-                ).as_posix() == "resources/security/release-package-policy-v1.json":
+                ).as_posix() == "resources/security/release-package-policy-v2.json":
                     continue
                 source_body = source_path.read_bytes()
                 self.assertNotIn(b"/mnt/", source_body, source_path)
@@ -926,7 +1267,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             self.assertEqual(len(observed["dataset_pin"]), 64)
             self.assertEqual(len(observed["source_pin"]), 64)
 
-            policy_relative_path = "resources/security/release-package-policy-v1.json"
+            policy_relative_path = "resources/security/release-package-policy-v2.json"
             controlled_home = str(Path.home().resolve()).encode("utf-8")
             private_home_markers = (
                 controlled_home,
@@ -1127,7 +1468,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                         output=Path(temporary) / "forbidden.tar.gz",
                         commit="HEAD",
                         prefix="qualsight-source-test",
-                        policy_path=ROOT / "resources/security/release-package-policy-v1.json",
+                        policy_path=ROOT / "resources/security/release-package-policy-v2.json",
                     )
 
     def test_source_archive_rejects_real_biometric_bytes_in_an_included_path(self) -> None:
@@ -1168,7 +1509,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                     output=archive_path,
                     commit="HEAD",
                     prefix="qualsight-source-test",
-                    policy_path=ROOT / "resources/security/release-package-policy-v1.json",
+                    policy_path=ROOT / "resources/security/release-package-policy-v2.json",
                 )
             self.assertFalse(archive_path.exists())
 
@@ -1213,14 +1554,14 @@ class ReleaseMetadataTests(unittest.TestCase):
                         output=archive_path,
                         commit="HEAD",
                         prefix="qualsight-source-test",
-                        policy_path=ROOT / "resources/security/release-package-policy-v1.json",
+                        policy_path=ROOT / "resources/security/release-package-policy-v2.json",
                     )
                 self.assertFalse(archive_path.exists())
 
     def test_source_boundary_rejects_base64_of_full_real_private_paths(self) -> None:
         module = _load_script("create_release_source_archive")
         policy = json.loads(
-            (ROOT / "resources/security/release-package-policy-v1.json").read_text(
+            (ROOT / "resources/security/release-package-policy-v2.json").read_text(
                 encoding="utf-8"
             )
         )
@@ -1251,7 +1592,7 @@ class ReleaseMetadataTests(unittest.TestCase):
     ) -> None:
         module = _load_script("create_release_source_archive")
         policy = json.loads(
-            (ROOT / "resources/security/release-package-policy-v1.json").read_text(
+            (ROOT / "resources/security/release-package-policy-v2.json").read_text(
                 encoding="utf-8"
             )
         )
@@ -1344,13 +1685,13 @@ class ReleaseMetadataTests(unittest.TestCase):
                     output=archive_path,
                     commit="HEAD",
                     prefix="qualsight-source-test",
-                    policy_path=ROOT / "resources/security/release-package-policy-v1.json",
+                    policy_path=ROOT / "resources/security/release-package-policy-v2.json",
                 )
             self.assertFalse(archive_path.exists())
 
     def test_release_policy_binds_every_registered_runtime_model_and_config_identity(self) -> None:
         policy = json.loads(
-            (ROOT / "resources/security/release-package-policy-v1.json").read_text(
+            (ROOT / "resources/security/release-package-policy-v2.json").read_text(
                 encoding="utf-8"
             )
         )
@@ -1396,7 +1737,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                     output=archive_path,
                     commit="HEAD",
                     prefix="qualsight-source-test",
-                    policy_path=ROOT / "resources/security/release-package-policy-v1.json",
+                    policy_path=ROOT / "resources/security/release-package-policy-v2.json",
                 )
             self.assertFalse(archive_path.exists())
 
@@ -2022,7 +2363,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                     ).read_bytes()
                 },
                 projector._load_policy(
-                    ROOT / "resources" / "security" / "release-package-policy-v1.json"
+                    ROOT / "resources" / "security" / "release-package-policy-v2.json"
                 ),
             )
             installed_manifest.write_bytes(projected[manifest_relative])
@@ -2057,9 +2398,100 @@ class ReleaseMetadataTests(unittest.TestCase):
                 else:
                     os.environ[variable] = previous
                 if previous_registry is None:
-                    del os.environ[registry_variable]
+                    os.environ.pop(registry_variable, None)
                 else:
                     os.environ[registry_variable] = previous_registry
+
+    def test_installed_browser_scientific_authorities_use_the_controlled_root(
+        self,
+    ) -> None:
+        authorities = (
+            (
+                "validate_owner_purge_ui",
+                "INVALID_MEDIA",
+                PurePosixPath(
+                    "resources/manifests/lfw-subset-fixture-v1.json"
+                ),
+            ),
+            (
+                "validate_stress_studio",
+                "IMAGE_MANIFEST",
+                PurePosixPath(
+                    "resources/manifests/lfw-funneled-images-v1.jsonl"
+                ),
+            ),
+            (
+                "validate_utility_overlay",
+                "METRIC_REGISTRY",
+                PurePosixPath("metrics/metric-registry.json"),
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_root = Path(temporary)
+            repository = _release_snapshot(temporary_root)
+            archive_path = temporary_root / "qualsight-source.tar.gz"
+            projector = _load_script("create_release_source_archive")
+            projector.write_source_archive(
+                root=repository,
+                output=archive_path,
+                commit="HEAD",
+                prefix="qualsight-installed-authority-test",
+            )
+            extracted = temporary_root / "extracted"
+            extracted.mkdir()
+            subprocess.run(
+                ["tar", "-xzf", str(archive_path), "-C", str(extracted)],
+                check=True,
+            )
+            installed_root = extracted / "qualsight-installed-authority-test"
+            installed_scripts = installed_root / "scripts"
+            environment = {
+                **os.environ,
+                "PYTHONPATH": str(installed_scripts),
+                "QUALSIGHT_REPOSITORY_ROOT": str(ROOT.resolve()),
+                "QUALSIGHT_REGISTRY_PATH": str(
+                    (ROOT / "resources" / "resource-registry.json").resolve()
+                ),
+            }
+            expression = textwrap.dedent(
+                f"""
+                import importlib
+                import json
+                from pathlib import Path
+                from controlled_inputs import lfw_tree_root
+
+                authorities = {[(name, attribute) for name, attribute, _ in authorities]!r}
+                observed = {{
+                    "lfw_root": str(lfw_tree_root(Path.cwd())),
+                    "authorities": {{
+                        name: str(getattr(importlib.import_module(name), attribute))
+                        for name, attribute in authorities
+                    }},
+                }}
+                print(json.dumps(observed, sort_keys=True))
+                """
+            )
+            imported = subprocess.run(
+                [sys.executable, "-c", expression],
+                cwd=installed_root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(imported.returncode, 0, imported.stdout + imported.stderr)
+            observed = json.loads(imported.stdout)
+            self.assertEqual(
+                Path(observed["lfw_root"]),
+                _load_script("controlled_inputs").lfw_tree_root(ROOT),
+            )
+            self.assertEqual(
+                observed["authorities"],
+                {
+                    script_name: str((ROOT / relative).resolve(strict=True))
+                    for script_name, _, relative in authorities
+                },
+            )
 
     def test_structured_evidence_browser_uses_the_controlled_database_root(
         self,
@@ -2105,6 +2537,15 @@ class ReleaseMetadataTests(unittest.TestCase):
                 self.assertEqual(
                     module._controlled_repository_root(),
                     ROOT.resolve(),
+                )
+                main_source = inspect.getsource(module.main)
+                self.assertNotIn(
+                    '(ROOT / "resources" / "resource-registry.json")',
+                    main_source,
+                )
+                self.assertIn(
+                    '(repository_root / "resources" / "resource-registry.json")',
+                    main_source,
                 )
             finally:
                 if previous is None:
@@ -2392,6 +2833,10 @@ class ReleaseMetadataTests(unittest.TestCase):
         )
         environment = dict(offline.environment)
         self.assertEqual(environment["QUALSIGHT_REPOSITORY_ROOT"], str(ROOT.resolve()))
+        self.assertIn(
+            '"QUALSIGHT_CONSOLE_ROOT": str(source_root)',
+            inspect.getsource(_load_script("offline_gate").main),
+        )
 
     def test_release_gate_validates_documentation_evidence_as_documentation(self) -> None:
         gate = _load_script("run_release_beta_gate")
@@ -2450,7 +2895,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         vite_ref = components[("javascript", "vite", "7.3.6")]["bom-ref"]
         esbuild_ref = components[("javascript", "esbuild", "0.28.2")]["bom-ref"]
         pip_audit_ref = components[("python", "pip-audit", "2.10.0")]["bom-ref"]
-        build_ref = components[("build", "QualSight release toolchain", "0.1.0b4")]["bom-ref"]
+        build_ref = components[("build", "QualSight release toolchain", "0.1.0b5")]["bom-ref"]
         self.assertIn(pydantic_ref, dependency_graph[fastapi_ref])
         self.assertIn(esbuild_ref, dependency_graph[vite_ref])
         self.assertIn(pip_audit_ref, dependency_graph[build_ref])
@@ -2627,7 +3072,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("includes the reviewed Conan lock/profile/closure", install_script)
         self.assertIn("--build-root set to a new absolute external directory", install_script)
         self.assertNotIn("remains blocked without a reviewed Conan lock", install_script)
-        self.assertNotIn("validate_resource_registry.py", install_script)
+        self.assertIn("validate_resource_registry.py", install_script)
         self.assertNotIn("qualsight.cli setup", install_script)
         self.assertNotIn("the OFIQ v1.1.2 tag/model archives", install_script)
         self.assertNotIn("GCC 12 toolchain for the OFIQ build", install_script)
@@ -2661,7 +3106,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             module.write_manifest(
                 root=ROOT,
                 output=output,
-                version="0.1.0b4",
+                version="0.1.0b5",
                 commit=expected_commit,
                 tree=expected_tree,
                 artifacts=artifacts,
@@ -2676,7 +3121,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             self.assertIn(".jpg", value["source_archive_policy"]["forbidden_suffixes"])
             self.assertIn(".pth", value["source_archive_policy"]["forbidden_suffixes"])
             release_policy = json.loads(
-                (ROOT / "resources/security/release-package-policy-v1.json").read_text(
+                (ROOT / "resources/security/release-package-policy-v2.json").read_text(
                     encoding="utf-8"
                 )
             )
@@ -2688,7 +3133,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 module.write_manifest(
                     root=ROOT,
                     output=output,
-                    version="0.1.0b4",
+                    version="0.1.0b5",
                     commit=expected_commit,
                     tree=expected_tree,
                     artifacts=artifacts,
@@ -2699,7 +3144,7 @@ class ReleaseBoundaryHardeningRealTests(unittest.TestCase):
     def setUp(self) -> None:
         self.module = _load_script("validate_release_package")
         self.policy = json.loads(
-            (ROOT / "resources/security/release-package-policy-v1.json").read_text(
+            (ROOT / "resources/security/release-package-policy-v2.json").read_text(
                 encoding="utf-8"
             )
         )
@@ -2810,7 +3255,7 @@ class ReleaseBoundaryHardeningRealTests(unittest.TestCase):
         self.assertEqual(len(sidecars), 6)
         result = self.module.validate_release_sidecars(
             sidecars,
-            policy_path=ROOT / "resources/security/release-package-policy-v1.json",
+            policy_path=ROOT / "resources/security/release-package-policy-v2.json",
         )
         self.assertEqual(result["regular_files"], 6)
 
@@ -2831,7 +3276,7 @@ class ReleaseBoundaryHardeningRealTests(unittest.TestCase):
                 self.module.validate_release_sidecars(
                     [unsafe],
                     policy_path=ROOT
-                    / "resources/security/release-package-policy-v1.json",
+                    / "resources/security/release-package-policy-v2.json",
                 )
             shutil.copy2(sidecars[0], unsafe)
             unsafe.write_bytes(
@@ -2844,7 +3289,7 @@ class ReleaseBoundaryHardeningRealTests(unittest.TestCase):
                 self.module.validate_release_sidecars(
                     [unsafe],
                     policy_path=ROOT
-                    / "resources/security/release-package-policy-v1.json",
+                    / "resources/security/release-package-policy-v2.json",
                 )
 
     def test_extracted_validator_requires_the_exact_registered_restricted_identities(
@@ -2946,7 +3391,7 @@ class ReleaseBoundaryHardeningRealTests(unittest.TestCase):
         release = (ROOT / "scripts/release.sh").read_text(encoding="utf-8")
         validation = (
             'scripts/validate_release_package.py" \\\n'
-            '  --policy "$BUILD_ROOT/resources/security/release-package-policy-v1.json" \\\n'
+            '  --policy "$BUILD_ROOT/resources/security/release-package-policy-v2.json" \\\n'
             '  --sidecar "$SBOM"'
         )
         checksums = '"$(basename "$MANIFEST")" "$(basename "$COMMIT_FILE")" > "$(basename "$CHECKSUMS")")'

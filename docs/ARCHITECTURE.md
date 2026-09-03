@@ -20,7 +20,17 @@ FastAPI control plane on 127.0.0.1
                 +-- Arrow / Parquet / DuckDB analytical artifacts
 ```
 
-The built React console is served from the FastAPI origin in the installed product. The development validator may use a separate local Vite preview, but it still calls the loopback API. The API holds a kernel-enforced exclusive lease on its data directory for the process lifetime. A second mutating process is refused; the beta does not coordinate concurrent writers across multiple server processes.
+The built React console is served from the FastAPI origin in the installed product. Installed execution
+separates three explicit roots: `QUALSIGHT_CONSOLE_ROOT` selects the package-built console,
+`PYTHONPATH` and the installed interpreter select package code, and `QUALSIGHT_REPOSITORY_ROOT` selects
+the unprojected scientific and provenance authority. The installer and every environment-driven installed
+start require that controlled Git root to be clean and at the package's recorded source commit, and require
+the selected registry bytes to equal that commit's canonical unprojected registry. This prevents
+code/version/provenance drift across the split. The development validator may use a separate local Vite
+preview, but it still calls the loopback
+API. The API holds a kernel-enforced exclusive lease on its data directory for the process lifetime. A
+second mutating process is refused; the beta does not coordinate concurrent writers across multiple
+server processes.
 
 ## Control plane and compute boundary
 
@@ -56,7 +66,7 @@ Connections is a policy surface, not a generic connector. This beta has zero adm
 
 ## Packaging boundary
 
-The source package installs the Python control plane and built console. Reviewed native runtimes, model checkpoints, and rights-controlled datasets remain external governed dependencies and are acquired or located through the registered workstation paths. The package is fail-closed when those dependencies are missing or drifted. It is not represented as a relocatable cold-start package.
+The source package installs the Python control plane and built console. Reviewed native runtimes, model checkpoints, and rights-controlled datasets remain external governed dependencies and are acquired or located through the registered workstation paths. The installed package serves its own console while resolving scientific authority from the exact clean controlled commit recorded in its package manifest; an ambiguous root, mismatched commit, tracked drift, or registry-byte mismatch is refused before dependency mutation and again at environment-driven startup. The package is fail-closed when those dependencies are missing or drifted. It is not represented as a relocatable cold-start package.
 
 ## Broader deployment
 

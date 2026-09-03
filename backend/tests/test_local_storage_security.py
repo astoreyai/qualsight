@@ -15,6 +15,9 @@ import threading
 import unittest
 from unittest import mock
 
+from fastapi.testclient import TestClient
+
+from qualsight.api.app import create_app
 from qualsight.api.store import RunStore
 from qualsight.api.settings import Settings
 from qualsight.security.local_storage import (
@@ -162,6 +165,100 @@ class LocalStorageSecurityTests(unittest.TestCase):
                 os.environ.pop("QUALSIGHT_NETWORK_GUARD", None)
             else:
                 os.environ["QUALSIGHT_NETWORK_GUARD"] = previous
+
+    def test_environment_selects_the_installed_real_console_independently(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        installed_root = self.parent / "installed-release"
+        shutil.copytree(
+            repository_root / "frontend" / "dist",
+            installed_root / "frontend" / "dist",
+        )
+        variable = "QUALSIGHT_CONSOLE_ROOT"
+        previous = os.environ.get(variable)
+        os.environ[variable] = str(installed_root)
+        try:
+            settings = Settings.from_environment(repository_root=repository_root)
+            self.assertEqual(settings.console_root, installed_root.resolve())
+            settings = Settings(
+                repository_root=settings.repository_root,
+                registry_path=settings.registry_path,
+                data_dir=self.data_dir,
+                runtime_resource_id=settings.runtime_resource_id,
+                input_resource_ids=settings.input_resource_ids,
+                console_root=settings.console_root,
+                network_guard=False,
+            )
+            with TestClient(
+                create_app(settings), base_url="http://127.0.0.1"
+            ) as client:
+                response = client.get("/")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                response.content,
+                (installed_root / "frontend" / "dist" / "index.html").read_bytes(),
+            )
+        finally:
+            if previous is None:
+                os.environ.pop(variable, None)
+            else:
+                os.environ[variable] = previous
+
+    def test_api_and_cli_refuse_a_data_root_that_contains_the_installed_console(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        installed_root = self.parent / "installed-release"
+        shutil.copytree(
+            repository_root / "frontend" / "dist",
+            installed_root / "frontend" / "dist",
+        )
+        registry = repository_root / "resources" / "resource-registry.json"
+        settings = Settings(
+            repository_root=repository_root,
+            registry_path=registry,
+            data_dir=installed_root,
+            runtime_resource_id="ofiq-v1-1-2-cmake-runtime-candidate",
+            input_resource_ids=("ofiq-upstream-test-images",),
+            console_root=installed_root,
+            network_guard=False,
+        )
+        with self.assertRaisesRegex(
+            LocalStorageSecurityError,
+            "refusing application data tree that is or contains protected path",
+        ):
+            create_app(settings)
+
+        environment = {
+            **os.environ,
+            "PYTHONPATH": str(repository_root / "backend" / "src"),
+            "QUALSIGHT_REPOSITORY_ROOT": str(repository_root),
+            "QUALSIGHT_REGISTRY_PATH": str(registry),
+            "QUALSIGHT_CONSOLE_ROOT": str(installed_root),
+            "QUALSIGHT_DATA_DIR": str(installed_root),
+            "QUALSIGHT_NETWORK_GUARD": "false",
+        }
+        refused = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "qualsight.cli",
+                "project-create",
+                "--name",
+                REAL_PHOTO.stem,
+                "--description",
+                f"Local storage protection check using {REAL_PHOTO.name}",
+                "--scope",
+                "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1",
+            ],
+            cwd=repository_root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn(
+            "refusing application data tree that is or contains protected path",
+            refused.stderr,
+        )
 
     def test_native_execution_timeout_requires_a_finite_positive_value(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]

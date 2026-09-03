@@ -20,6 +20,16 @@ import urllib.request
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _controlled_repository_root() -> Path:
+    configured = os.environ.get("QUALSIGHT_REPOSITORY_ROOT")
+    root = (Path(configured) if configured is not None else ROOT).resolve(strict=True)
+    if not root.is_dir():
+        raise RuntimeError("the controlled repository root is not a directory")
+    return root
+
+
 API_PORT = 8480
 PREVIEW_PORT = 5200
 NODE_EXECUTABLE = shutil.which("node")
@@ -27,6 +37,7 @@ if NODE_EXECUTABLE is None:
     raise RuntimeError("the reviewed Node executable is not available on PATH")
 NODE_BIN = str(Path(NODE_EXECUTABLE).parent)
 RESEARCH_SCOPE = "QUALSIGHT_LOCAL_NONCOMMERCIAL_RESEARCH_V1"
+METRIC_REGISTRY = _controlled_repository_root() / "metrics" / "metric-registry.json"
 LFW_RESOURCE_ID = "lfw-funneled-local-candidate"
 MATCHERS = (
     "adaface-ir101-local-candidate",
@@ -196,8 +207,8 @@ def main() -> int:
         "kind": "QUALSIGHT_UTILITY_OVERLAY_REAL_VALIDATION",
         "data_dir": str(data_dir),
         "metric_registry": {
-            "path": str(ROOT / "metrics" / "metric-registry.json"),
-            "sha256": hashlib.sha256((ROOT / "metrics" / "metric-registry.json").read_bytes()).hexdigest(),
+            "path": str(METRIC_REGISTRY),
+            "sha256": hashlib.sha256(METRIC_REGISTRY.read_bytes()).hexdigest(),
         },
         "passed": False,
     }

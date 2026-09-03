@@ -44,9 +44,11 @@ The command requires the repository at the deployment root recorded by the contr
 deployment-local registry artifacts to be present. A fresh clone elsewhere is expected to stop at
 registry validation; that refusal is an integrity control, not a successful portable installation.
 
-`install.sh` performs, in order: toolchain check → `uv sync --frozen` (backend wheels by lock hash)
-→ `pnpm install --frozen-lockfile` and the console build → byte-validation of the registered OFIQ
-v1.1.2 runtime, with an explicit stop if that runtime is absent or drifted → metric-registry validation.
+`install.sh` performs, in order: root classification → toolchain and package-boundary checks → exact
+package/controlled-commit and registry-byte binding → full resource-registry validation → `uv sync
+--frozen` (backend wheels by lock hash) → `pnpm install --frozen-lockfile` and the console build →
+byte-validation of the registered OFIQ v1.1.2 runtime, with an explicit stop if that runtime is absent or
+drifted → metric-registry validation.
 It stops at the first failure. ATG governance validation runs only in the clean controlled checkout and
 committed-tree release gate before source-archive projection. The installer does not download matcher,
 detector, or dataset
@@ -82,7 +84,7 @@ the current registry contract.
 
 ## Release archive
 
-`bash scripts/release.sh` accepts only a clean committed tree, extracts that commit to a private staging
+From the controlled Git checkout only, `bash scripts/release.sh` accepts a clean committed tree, extracts that commit to a private staging
 directory, performs frozen all-group Python and integrity-checked pnpm installs there, rebuilds the console
 from those committed bytes,
 and creates source and console archives plus a deterministic CycloneDX 1.5 inventory. The inventory
@@ -97,13 +99,18 @@ Before publication, the SBOM, vulnerability report, beta-gate record, manifest, 
 checksum file are scanned for secrets and raw or encoded private build paths.
 A nonblocking release lock and one atomic no-clobber directory rename publish the complete set beneath
 `dist/qualsight-<version>/`; an existing versioned directory is never overwritten. The source archive is
-derived from the exact commit but excludes the internal session/ATG records, machine-specific performance
-records, and recorded real-result fixtures listed by
-`resources/security/release-package-policy-v1.json`, so those internal and derived records do not enter the
+derived from the exact commit but excludes the internal session/ATG records, checkout-only release/ATG
+entrypoints, machine-specific performance records, and recorded real-result fixtures listed by
+`resources/security/release-package-policy-v2.json`, so those internal and derived records do not enter the
 package. The archive projects operator-home locators to the external prefix declared in its release policy and retains only the
 allowlisted controlled-host bindings and public acquisition pins. Because that projected registry is not
-runtime authority, installation from the archive requires `QUALSIGHT_REGISTRY_PATH` to the reviewed
-unprojected registry. The source archive is therefore a controlled-host package, not portable or generally
+runtime authority, installation from the archive requires `QUALSIGHT_REPOSITORY_ROOT` to the exact clean
+controlled Git commit recorded by `QUALSIGHT-PACKAGE-CONTENTS.json` and `QUALSIGHT_REGISTRY_PATH` to an
+absolute, non-symlink registry byte-identical to that commit's reviewed unprojected registry. Package and
+Git authority at one root is refused as ambiguous. `QUALSIGHT_CONSOLE_ROOT` selects the installed console
+independently so the API does not fall back to a different checkout's build. Environment-driven CLI and API
+startup repeat the exact-commit, tracked-cleanliness, and registry-byte checks before using scientific
+authority. The source archive is therefore a controlled-host package, not portable or generally
 redistributable. The archive contains no
 biometric images, embeddings, model checkpoints,
 detector, or native OFIQ bytes: archive creation and extracted-package validation both fail closed on
@@ -131,6 +138,23 @@ the caller's validated `QUALSIGHT_REPOSITORY_ROOT`; it does not reinterpret depl
 relative to the disposable stage.
 
 ## Start and verify offline operation
+
+For an extracted package, export the already-reviewed deployment authorities, retain the extracted root,
+and let the installer verify that the package and controlled checkout name the same commit:
+
+```sh
+PACKAGE_ROOT="$PWD"
+export QUALSIGHT_REPOSITORY_ROOT QUALSIGHT_REGISTRY_PATH
+bash scripts/install.sh
+env QUALSIGHT_CONSOLE_ROOT="$PACKAGE_ROOT" \
+  "$PACKAGE_ROOT/.venv/bin/python" "$PACKAGE_ROOT/scripts/offline_gate.py" \
+  --observation "$PACKAGE_ROOT/var/offline-gate-install.json" \
+  --data-dir "$PACKAGE_ROOT/var" \
+  --source-root "$PACKAGE_ROOT" \
+  --repository-root "$QUALSIGHT_REPOSITORY_ROOT" \
+  --console-index "$PACKAGE_ROOT/frontend/dist/index.html" \
+  --python "$PACKAGE_ROOT/.venv/bin/python"
+```
 
 After the explicit `qualsight setup` command has verified and cached every pinned architecture source,
 and with no QualSight server running, execute the offline gate. The gate requires an observation
@@ -171,23 +195,31 @@ when the built console, registered real inputs, Node 26.7.0, or Chromium runtime
 | Variable | Meaning | Default |
 |---|---|---|
 | `QUALSIGHT_DATA_DIR` | SQLite store, jobs, matrix, analyses, figures, reports, bundles, exports, upstream sources | `var/` in the repository |
+| `QUALSIGHT_REPOSITORY_ROOT` | exact controlled Git deployment containing unprojected scientific authority | application source root |
+| `QUALSIGHT_CONSOLE_ROOT` | application root whose built `frontend/dist/index.html` is served | controlled repository root |
 | `QUALSIGHT_ACTOR` | attributed single user for every audited action | `local-user:<login>` |
 | `QUALSIGHT_NETWORK_GUARD` | `0` explicitly permits non-loopback sockets; all other values refuse them | on |
 | `QUALSIGHT_MATCHER_DEVICE` | force the frozen matcher device (`cuda` / `cpu`); unset = CUDA when ≥ 1.5 GiB is free, else CPU (recorded per Run) | unset |
 | `QUALSIGHT_INPUT_RESOURCE_IDS` | registered input resources the engine may read | conformance image + LFW |
-| `QUALSIGHT_REGISTRY_PATH` | resource registry | `resources/resource-registry.json` |
+| `QUALSIGHT_REGISTRY_PATH` | reviewed unprojected resource registry | controlled repository `resources/resource-registry.json` |
 | `QUALSIGHT_SOURCE_CACHE_ROOT` | existing absolute, non-symlinked directory holding manifest-verified upstream matcher source bytes; never grants network access | repository `var/upstream` |
 
 ## Controlled-checkout tests
 
-The release source archive intentionally excludes `tests/` and `backend/tests/`; these commands apply
-only to the clean controlled Git checkout that produced the archive. Validate an extracted package with
+The release source archive intentionally excludes `tests/`, `backend/tests/`, the release constructor,
+the complete release-gate runner, and the ATG ledger appender; these commands apply only to the clean
+controlled Git checkout that produced the archive. Validate an extracted package with
 the package, install, offline-workflow, and browser-workflow gates described above. The non-mutating
 package/toolchain check is:
 
 ```sh
 bash scripts/install.sh --validate-package-only
 ```
+
+Without deployment authority variables, that command validates only package bytes and the pinned
+toolchain. With both authority variables exported, it also validates package-to-commit and registry-byte
+identity. It never claims that the external resources are present; normal installation runs the full
+resource-registry validator before dependency mutation.
 
 ```sh
 .venv/bin/python -m unittest discover -s tests -q                                     # governance, registries, protocol authority

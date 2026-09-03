@@ -2,7 +2,7 @@
 
 **Graph version:** v1.6  
 **Date:** August 17, 2026  
-**State:** The beta DAG is complete — every whole capability QS-A00 through QS-H74 (41 nodes; Phase 2 under owner decision 28, QS-C21 under decision 29) is accepted; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-D31.R0, and QS-H74.RELEASE.R1 are accepted; beta-3 release child QS-H74.RELEASE.R2 failed installed-browser validation and beta-4 repair child QS-H74.RELEASE.R3 awaits clean release and installed-package gates; refinement parent QS-A02.LFW is accepted; QS-H74 (beta end-to-end acceptance) executed the section-57 chain offline on 2026-08-18; only the post-beta branch remains outside the DAG
+**State:** The beta DAG is complete — every whole capability QS-A00 through QS-H74 (41 nodes; Phase 2 under owner decision 28, QS-C21 under decision 29) is accepted; current evidence children QS-A02.R7, QS-A02.LFW.R0, QS-A02.LFW.P0, QS-A02.SCRFD.P0, QS-A03.R1, QS-A04.R1, QS-A04.R2, QS-A06.R1O, QS-A06.R2, QS-B12.LFW.FULL, QS-C22.CROP.R0, QS-C22.MATRIX.LFW, QS-D31.R0, and QS-H74.RELEASE.R1 are accepted; beta-3 release child QS-H74.RELEASE.R2 and beta-4 repair child QS-H74.RELEASE.R3 failed installed-browser validation, while beta-5 repair child QS-H74.RELEASE.R4 awaits clean release and installed-package gates; refinement parent QS-A02.LFW is accepted; QS-H74 (beta end-to-end acceptance) executed the section-57 chain offline on 2026-08-18; only the post-beta branch remains outside the DAG
 **Loop controller:** [ATG_LOOP.md](./ATG_LOOP.md)  
 **Canonical product requirements:** [PRD.md](./PRD.md)  
 **Evidence-only companion:** [PLAN.md](./PLAN.md)
@@ -1193,6 +1193,23 @@ isolated installation, installed offline/browser, controlled beta-2 rollback, re
 **Acceptance boundary:** identical to R2 except for the installed-package manifest-authority repair and
 the explicit no-clobber beta-4 identity. It does not expand data, model, connection, deployment, rights,
 identity-truth, or DHS authority.
+
+**State:** FAILED at installed browser validator 4/9 after the release, package inspection, installation,
+and installed offline gate passed. The preserved beta-4 package is not accepted or tagged.
+
+### QS-H74.RELEASE.R4 — Beta release 0.1.0-beta.5 (systemic manifest-authority repair child)
+
+**Safe gate:** preserve beta 3 and beta 4; bind owner-purge and Stress Studio immutable real-input
+manifests to the controlled deployment repository; pass an installed-style regression produced by the
+real release projector without an ambient registry override; bump all three component versions and frozen
+locks; then repeat R2's complete clean release, package inspection, isolated installation, installed
+offline/browser against the clean canonical controlled deployment at `/mnt/projects/ofiqgui` and the
+package commit, controlled beta-2 rollback in an isolated canonical-path namespace, restoration, and
+tag gates.
+
+**Acceptance boundary:** identical to R3 except for the remaining installed browser manifest-authority
+repair and the explicit no-clobber beta-5 identity. It does not expand data, model, connection,
+deployment, rights, identity-truth, or DHS authority.
 
 **State:** READY. It becomes ACCEPTED only after every safe-gate step above passes from one clean commit.
 

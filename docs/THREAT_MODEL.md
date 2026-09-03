@@ -74,4 +74,10 @@ archive declaration are refused. Production source maps are disabled; console by
 archiving. These controls detect accidental or malicious
 byte changes only when the verifier obtains the checksum file through a trusted channel; they do not
 provide signer identity or nonrepudiation. The package remains bound to a controlled single-user
-workstation because the scientific registry contains deployment-local absolute paths.
+workstation because the scientific registry contains deployment-local absolute paths. Extracted-package
+installation additionally refuses ambiguous package/Git roots and requires its manifest source commit to
+equal the clean controlled Git deployment. The selected registry must be an absolute, non-symlink regular
+file whose bytes equal that commit's canonical unprojected registry. Environment-driven API and CLI starts
+repeat those commit, cleanliness, and registry checks. Runtime serves the package console through a
+separately validated absolute console root, and data-directory hardening protects both the scientific root
+and that console root from permission traversal.

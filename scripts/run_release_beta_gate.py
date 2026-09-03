@@ -53,6 +53,7 @@ def gate_definitions(
     python: str,
     work_root: Path | None = None,
     deployment_root: Path | None = None,
+    committed_source_commit: str | None = None,
 ) -> tuple[GateDefinition, ...]:
     root = root.resolve(strict=True)
     deployment_root = (deployment_root or root).resolve(strict=True)
@@ -77,6 +78,14 @@ def gate_definitions(
     backend_environment = (
         ("PYTHONPATH", f"{root / 'backend' / 'src'}:{root}"),
         *deployment_environment,
+        *(
+            (
+                ("QUALSIGHT_COMMITTED_STAGE_ROOT", str(root)),
+                ("QUALSIGHT_COMMITTED_STAGE_COMMIT", committed_source_commit),
+            )
+            if committed_source_commit is not None
+            else ()
+        ),
     )
     validators = (
         (
@@ -563,6 +572,7 @@ def run_beta_gate(
             str(interpreter),
             temporary,
             deployment_root,
+            committed_source_commit=commit,
         )
         for gate in definitions:
             environment = {

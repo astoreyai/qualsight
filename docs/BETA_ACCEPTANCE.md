@@ -1,4 +1,4 @@
-# QualSight 0.1.0-beta.4 — release-candidate acceptance record
+# QualSight 0.1.0-beta.5 — release-candidate acceptance record
 
 This record combines historical accepted evidence with focused beta-3 development evidence. It is not
 final package authority until the frozen committed-tree release gate, installed-package gate, and rollback
@@ -273,6 +273,25 @@ LFW subset manifest as deployment authority, producing `immutable LFW subset man
 The beta-4 repair resolves that immutable manifest through the controlled repository root and adds an
 installed-package regression. Beta 3 remains preserved as failed installed-package evidence; it is not
 overwritten or described as accepted.
+
+Beta 4 was then published from commit `87f121cdc0e420465be4eba7f15a16e07e7854d7` with all 15 release
+gates passing, 7/7 payload checksums, and release-set SHA-256
+`8037db03d505716feb4bd06750426590e6e15f3b0fe37252bb136465c4a61013`. Trusted extraction and
+installation passed, and the installed offline workflow passed all 28 steps with observation SHA-256
+`0d8e264f0461fccef6cea574e9d587fdf37ad592f326a90230b88f75092bcdb6`. Installed browser validation
+passed Comparison Studio, warning/privacy, and Manage system, then stopped at owner purge (validator 4/9):
+that validator still bound the package-projected LFW subset manifest instead of the controlled repository
+authority. The beta-5 repair binds both remaining browser manifest consumers, owner purge and Stress
+Studio, plus Utility's Metric Registry to the controlled repository; the shared LFW resolver now honors
+that root even without a separate registry override. Real installed-projection regressions cover each
+authority. Installed code and the console remain package-selected through the installed interpreter and
+`QUALSIGHT_CONSOLE_ROOT`, while scientific authority is accepted only from the exact clean controlled Git
+commit recorded by the package, with registry bytes checked against that commit during install and every
+environment-driven start. Checkout-only release construction, complete release-gate, ATG append,
+provenance-review, and registry-repin scripts are excluded by the version-2 package policy rather than
+shipped in a nonfunctional form. Beta 4 remains preserved,
+untagged, and unaccepted; beta 5 must repeat the complete release, installation, browser, and rollback gates
+before acceptance.
 
 ## Research extensions outside QS-H74 beta acceptance
 

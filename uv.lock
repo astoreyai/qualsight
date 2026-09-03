@@ -1025,7 +1025,7 @@ wheels = [
 
 [[package]]
 name = "qualsight-backend"
-version = "0.1.0b4"
+version = "0.1.0b5"
 source = { virtual = "backend" }
 dependencies = [
     { name = "duckdb" },

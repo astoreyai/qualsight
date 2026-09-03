@@ -53,7 +53,13 @@ def main() -> int:
         print("no `sh gate` blocks in the user guide", file=sys.stderr)
         return 2
     repository_root = _controlled_repository_root()
-    registry = json.loads((ROOT / "resources" / "resource-registry.json").read_text(encoding="utf-8"))
+    registry_path = Path(
+        os.environ.get(
+            "QUALSIGHT_REGISTRY_PATH",
+            str(repository_root / "resources" / "resource-registry.json"),
+        )
+    ).resolve(strict=True)
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
     r01 = next(a["path"] for e in registry["resources"] if e["resource_id"] == "ofiq-r-01-conformance-input" for a in e["artifacts"] if a["role"] == "DATA")
     data_dir = Path(tempfile.mkdtemp(prefix="qualsight-docs-gate-"))
     work = data_dir / "work"
