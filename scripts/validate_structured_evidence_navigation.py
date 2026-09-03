@@ -26,7 +26,17 @@ from validate_comparison_studio import _json_request, _port_is_free, _stop, _wai
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_DATABASE = ROOT / "var" / "qualsight.sqlite3"
+
+
+def _controlled_repository_root() -> Path:
+    configured = os.environ.get("QUALSIGHT_REPOSITORY_ROOT")
+    root = (Path(configured) if configured is not None else ROOT).resolve(strict=True)
+    if not root.is_dir():
+        raise RuntimeError("the controlled repository root is not a directory")
+    return root
+
+
+SOURCE_DATABASE = _controlled_repository_root() / "var" / "qualsight.sqlite3"
 API_PORT = 8480
 PREVIEW_PORT = 5198
 NODE_EXECUTABLE = shutil.which("node")
@@ -152,7 +162,9 @@ def _environment(data_dir: Path) -> dict[str, str]:
     return {
         **os.environ,
         "PATH": f"{NODE_BIN}:{os.environ.get('PATH', '')}",
-        "QUALSIGHT_REPOSITORY_ROOT": str(ROOT),
+        "QUALSIGHT_REPOSITORY_ROOT": os.environ.get(
+            "QUALSIGHT_REPOSITORY_ROOT", str(ROOT)
+        ),
         "QUALSIGHT_DATA_DIR": str(data_dir),
     }
 

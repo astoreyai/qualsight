@@ -96,7 +96,9 @@ def main() -> int:
         data_dir = Path(temp_dir)
 
     env = dict(os.environ)
-    env["QUALSIGHT_REPOSITORY_ROOT"] = str(ROOT)
+    env["QUALSIGHT_REPOSITORY_ROOT"] = os.environ.get(
+        "QUALSIGHT_REPOSITORY_ROOT", str(ROOT)
+    )
     env["QUALSIGHT_DATA_DIR"] = str(data_dir)
     env["PATH"] = f"{NODE_BIN}:{env.get('PATH', '')}"
     uv = "/home/aaron/.local/bin/uv"

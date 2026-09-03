@@ -374,7 +374,9 @@ def main() -> int:
     environment = {
         **os.environ,
         "PATH": f"{NODE_BIN}:{os.environ.get('PATH', '')}",
-        "QUALSIGHT_REPOSITORY_ROOT": str(ROOT),
+        "QUALSIGHT_REPOSITORY_ROOT": os.environ.get(
+            "QUALSIGHT_REPOSITORY_ROOT", str(ROOT)
+        ),
         "QUALSIGHT_DATA_DIR": str(data_dir),
     }
     api = subprocess.Popen(

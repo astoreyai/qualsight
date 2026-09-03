@@ -57,6 +57,14 @@ def _uv_binary() -> str:
     return executable
 
 
+def _controlled_repository_root() -> Path:
+    configured = os.environ.get("QUALSIGHT_REPOSITORY_ROOT")
+    root = (Path(configured) if configured is not None else ROOT).resolve(strict=True)
+    if not root.is_dir():
+        raise RuntimeError("the controlled repository root is not a directory")
+    return root
+
+
 def _assert_frontend_contract() -> None:
     source = (ROOT / "frontend" / "src" / "EvidenceDetail.tsx").read_text(encoding="utf-8")
     api_source = (ROOT / "frontend" / "src" / "api.ts").read_text(encoding="utf-8")
@@ -103,7 +111,9 @@ def _environment(data_dir: Path) -> dict[str, str]:
     return {
         **os.environ,
         "PATH": f"{NODE_BIN}:{os.environ.get('PATH', '')}",
-        "QUALSIGHT_REPOSITORY_ROOT": str(ROOT),
+        "QUALSIGHT_REPOSITORY_ROOT": os.environ.get(
+            "QUALSIGHT_REPOSITORY_ROOT", str(ROOT)
+        ),
         "QUALSIGHT_DATA_DIR": str(data_dir),
     }
 
@@ -148,7 +158,9 @@ def _start_api(data_dir: Path, source_root: Path | None = None) -> subprocess.Po
         cwd=ROOT / "backend" if source_root is not None else ROOT,
         env={
             **_environment(data_dir),
-            "QUALSIGHT_REPOSITORY_ROOT": str(ROOT),
+            "QUALSIGHT_REPOSITORY_ROOT": os.environ.get(
+                "QUALSIGHT_REPOSITORY_ROOT", str(ROOT)
+            ),
             "PYTHONPATH": f"{(source_root or ROOT) / 'backend' / 'src'}:{ROOT}",
         },
         stdout=subprocess.PIPE,
@@ -235,7 +247,7 @@ def _extract_legacy_producer(target: Path) -> dict[str, str]:
     archive = target.parent / f"{target.name}.tar"
     subprocess.run(
         ["git", "archive", "--format=tar", "-o", str(archive), LEGACY_PRODUCER_COMMIT],
-        cwd=ROOT,
+        cwd=_controlled_repository_root(),
         check=True,
     )
     target.mkdir(mode=0o700)

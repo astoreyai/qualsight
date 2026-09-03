@@ -4,6 +4,7 @@ import ast
 import base64
 import hashlib
 import importlib.util
+import inspect
 import io
 import json
 import os
@@ -1931,6 +1932,80 @@ class ReleaseMetadataTests(unittest.TestCase):
                     module = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(module)
                     self.assertEqual(module.PROJECT_ROOT, ROOT.resolve())
+            finally:
+                if previous is None:
+                    del os.environ[variable]
+                else:
+                    os.environ[variable] = previous
+
+    def test_browser_release_chain_preserves_the_controlled_repository_root(self) -> None:
+        browser_scripts = (
+            "validate_release_browser.py",
+            "validate_comparison_studio.py",
+            "validate_evidence_warning_privacy.py",
+            "validate_manage_system.py",
+            "validate_owner_purge_ui.py",
+            "validate_stress_studio.py",
+            "validate_structured_evidence_navigation.py",
+            "validate_upload_working_sample.py",
+            "validate_utility_overlay.py",
+            "observe_console.py",
+        )
+        for name in browser_scripts:
+            with self.subTest(name=name):
+                source = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+                self.assertNotIn(
+                    '"QUALSIGHT_REPOSITORY_ROOT": str(ROOT)',
+                    source,
+                )
+                self.assertNotIn(
+                    '"QUALSIGHT_REPOSITORY_ROOT": str(root)',
+                    source,
+                )
+                self.assertNotIn(
+                    'env["QUALSIGHT_REPOSITORY_ROOT"] = str(ROOT)',
+                    source,
+                )
+                self.assertRegex(
+                    source,
+                    r'os\.environ\.get\(\s*"QUALSIGHT_REPOSITORY_ROOT",\s*str\(',
+                )
+
+    def test_staged_privacy_browser_validator_uses_the_controlled_git_root(
+        self,
+    ) -> None:
+        variable = "QUALSIGHT_REPOSITORY_ROOT"
+        previous = os.environ.get(variable)
+        os.environ[variable] = str(ROOT.resolve())
+        try:
+            module = _load_script("validate_evidence_warning_privacy")
+            self.assertEqual(
+                module._controlled_repository_root(),
+                ROOT.resolve(),
+            )
+            source = inspect.getsource(module._extract_legacy_producer)
+            self.assertNotIn("cwd=ROOT,", source)
+            self.assertIn("cwd=_controlled_repository_root(),", source)
+        finally:
+            if previous is None:
+                del os.environ[variable]
+            else:
+                os.environ[variable] = previous
+
+    def test_structured_evidence_browser_uses_the_controlled_database_root(
+        self,
+    ) -> None:
+        variable = "QUALSIGHT_REPOSITORY_ROOT"
+        previous = os.environ.get(variable)
+        with tempfile.TemporaryDirectory() as temporary:
+            controlled_root = Path(temporary).resolve()
+            os.environ[variable] = str(controlled_root)
+            try:
+                module = _load_script("validate_structured_evidence_navigation")
+                self.assertEqual(
+                    module.SOURCE_DATABASE,
+                    controlled_root / "var" / "qualsight.sqlite3",
+                )
             finally:
                 if previous is None:
                     del os.environ[variable]

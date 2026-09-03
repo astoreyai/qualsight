@@ -230,6 +230,26 @@ aggregate passed 9/9 with SHA-256
 These are development-tree closure results. Final committed-package, installed-package, rollback, tag,
 and remote identities remain pending and are not implied by this section.
 
+The next clean-commit attempt at `0540066c5618612ab587f8b7a72d0cd2005d3a70` again passed gates
+1–14 and failed the browser gate before package publication. The private gate record has SHA-256
+`4bb05e4c6cca7216978a9d6c3bb5f31d9b43f4a7a594590edb2e3fbbc5fcc21e`. Its 33-byte stdout identity
+proved that validator 1 failed. A retained exact clean stage reproduced the cause: the staged browser chain
+overwrote `QUALSIGHT_REPOSITORY_ROOT`, so the API compared the controlled deployment registry with a
+disposable-stage authorization path and refused startup. The first clean-stage observation failed with
+SHA-256 `8bace4fbb213bfd15cf725e82e8726d454cf3444af4caac32d3bd9c80c6cfb46`.
+
+The browser aggregate and all nine validators now preserve an already-governed deployment root. Two additional
+staged assumptions were then exposed and repaired: the warning/privacy validator runs its pinned historical
+`git archive` against the controlled Git repository, and structured-evidence navigation snapshots the real
+controlled database rather than looking for excluded `var/` state inside the source archive. Three focused
+root-contract tests were observed failing before repair and pass 3/3 afterward. The formerly failing clean-stage
+Comparison Studio workflow passes with four ready matchers, three real LFW uploads, and four comparisons
+(SHA-256 `948e5f6255a46fdb261dc0baf898bf6c557011fa42d832e1bee4fbb91c783dce`). The complete separated-root
+browser aggregate passes 9/9 at SHA-256
+`a4e0eabde9b97347be077ce92c95e1c056734c384cb3e3473cd107c516f3627e`; its final 32-step console
+observation has SHA-256 `86fa59ead978725b5da23178a769fe3cd2e46e6509ee0948860a5207664fbe55`.
+These are staged repair results, not final package acceptance. A new clean committed-tree release remains required.
+
 ## Research extensions outside QS-H74 beta acceptance
 
 1:N identification, controlled degradation, and container execution were implemented and locally

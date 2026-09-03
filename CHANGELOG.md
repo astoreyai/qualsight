@@ -69,6 +69,10 @@
   are removed; failure diagnostics never enter the versioned release package. The staged documentation gate now
   preserves the controlled deployment repository root instead of rebasing deployment authorization paths onto
   its disposable Git-archive root.
+* The complete browser release chain now preserves the controlled deployment repository root while executing
+  staged code. Browser validators no longer rebase registry authorizations, legacy Git evidence, or the populated
+  read-only evidence database onto the disposable source archive. Structured-evidence validation continues to use
+  SQLite online backup into isolated state and never opens the controlled database for mutation.
 * Upstream matcher architecture acquisition is now an explicit `qualsight setup` step. The offline
   gate imports only exact manifest-verified cached sources into its fresh private data directory, sets
   the setup network scope to disabled, and requires zero authorized or refused external connections.

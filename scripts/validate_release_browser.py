@@ -82,7 +82,9 @@ def validate_browser_workflows(
     environment = {
         **os.environ,
         "PYTHONPATH": f"{root / 'backend' / 'src'}:{root}",
-        "QUALSIGHT_REPOSITORY_ROOT": str(root),
+        "QUALSIGHT_REPOSITORY_ROOT": os.environ.get(
+            "QUALSIGHT_REPOSITORY_ROOT", str(root)
+        ),
     }
     results: list[dict[str, Any]] = []
     for name in BROWSER_VALIDATORS:
