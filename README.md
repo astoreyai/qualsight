@@ -8,7 +8,7 @@ external scores marked `EXTERNALLY_COMPUTED`) over frozen protocols,
 with every number recorded as an immutable, hash-addressed Run: verification (FMR/FNMR/ROC/DET/EER),
 quality→utility (ERC, AU-ERC, risk-coverage, quality-conditioned error, error models, threshold-policy
 analysis), cross-matcher and preprocessing contrasts, 1:N identification, controlled degradation,
-provenance-bearing figures, dashboards, reports, exports, and reproduction bundles. The beta-5 release-candidate
+provenance-bearing figures, dashboards, reports, exports, and reproduction bundles. The beta-6 release-candidate
 workflow is local and performs no automatic egress. Operator-downloaded reports, exports, and
 reproduction bundles remain governed files: they may contain deployment-local provenance and require
 disclosure review before any external transfer. Population 1:N, dataset degradation, and container
@@ -28,9 +28,10 @@ owner authorization permits local noncommercial research acquisition but never r
 acquisition of the identity-labeled LFW tree remains blocked; the three author-published, pair-only
 verification protocols are downloadable and carry no fabricated identity labels.
 
-**Status:** 0.1.0-beta.4 passed its release and installed offline gates but failed the installed-package
-browser gate at owner purge (validator 4/9). The immutable beta-4 package remains untagged. The current
-tree targets 0.1.0-beta.5 and must pass the complete controlled-workstation release and installed-package
+**Status:** 0.1.0-beta.5 passed its release, package, installed offline, and installed browser gates, but
+workstation activation exposed repeated no-op schema-8 snapshots. The immutable beta-5 package remains
+untagged. The current tree targets 0.1.0-beta.6 and must pass the complete controlled-workstation release,
+installed-package, rollback, and activation
 gates before that version is tagged. The target scope
 and provisional evidence are recorded in `docs/BETA_ACCEPTANCE.md`; no local beta result grants DHS transition,
 remote deployment, production, ATO, or mission-readiness authority.

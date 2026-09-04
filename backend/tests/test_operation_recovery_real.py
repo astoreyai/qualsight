@@ -210,6 +210,36 @@ class OperationRecoveryRealTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def test_reopening_fully_migrated_real_store_does_not_create_noop_snapshot(self) -> None:
+        database = self._downgrade_real_operation_rows_to_v4()
+        migrated = RunStore(database)
+        migrated.close()
+
+        self.assertEqual(
+            list(
+                database.parent.glob(
+                    f"{database.name}.pre-migration-v8-to-v8*.snapshot.sqlite3"
+                )
+            ),
+            [],
+        )
+
+        reopened = RunStore(database)
+        try:
+            self.assertIsNotNone(reopened.project(self.project_id))
+            self.assertIsNotNone(reopened.dataset(self.dataset_id))
+        finally:
+            reopened.close()
+
+        self.assertEqual(
+            list(
+                database.parent.glob(
+                    f"{database.name}.pre-migration-v8-to-v8*.snapshot.sqlite3"
+                )
+            ),
+            [],
+        )
+
     def test_failed_v4_migration_restores_the_verified_preflight_snapshot(self) -> None:
         request = {
             "dataset_id": self.dataset_id,

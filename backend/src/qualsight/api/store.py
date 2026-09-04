@@ -513,6 +513,25 @@ def _evidence(text: str) -> str:
 
 
 def _current_schema_is_complete(connection: sqlite3.Connection) -> bool:
+    migrated_column_shapes = {
+        ("matcher_leaves", "expected_leaf_count"): (
+            ("INTEGER", 1, None, 0),
+            ("INTEGER", 1, "6", 0),
+        ),
+        ("operations", "attempt"): (
+            ("INTEGER", 1, None, 0),
+            ("INTEGER", 1, "1", 0),
+        ),
+        ("operations", "request_id"): (
+            ("TEXT", 1, None, 0),
+            ("TEXT", 0, None, 0),
+        ),
+        ("operations", "result_id"): (
+            ("TEXT", 1, None, 0),
+            ("TEXT", 0, None, 0),
+        ),
+    }
+
     expected = sqlite3.connect(":memory:")
     try:
         expected.executescript(SCHEMA)
@@ -532,18 +551,64 @@ def _current_schema_is_complete(connection: sqlite3.Connection) -> bool:
                 return False
             quoted_name = str(name).replace('"', '""')
             if object_type == "table":
-                if connection.execute(f'PRAGMA table_info("{quoted_name}")').fetchall() != expected.execute(
-                    f'PRAGMA table_info("{quoted_name}")'
-                ).fetchall():
+                expected_columns = {
+                    str(row[1]): (str(row[2]), int(row[3]), row[4], int(row[5]))
+                    for row in expected.execute(
+                        f'PRAGMA table_info("{quoted_name}")'
+                    ).fetchall()
+                }
+                actual_columns = {
+                    str(row[1]): (str(row[2]), int(row[3]), row[4], int(row[5]))
+                    for row in connection.execute(
+                        f'PRAGMA table_info("{quoted_name}")'
+                    ).fetchall()
+                }
+                if actual_columns.keys() != expected_columns.keys():
                     return False
-                if connection.execute(f'PRAGMA foreign_key_list("{quoted_name}")').fetchall() != expected.execute(
-                    f'PRAGMA foreign_key_list("{quoted_name}")'
-                ).fetchall():
+                for column_name, expected_shape in expected_columns.items():
+                    actual_shape = actual_columns[column_name]
+                    if actual_shape == expected_shape:
+                        continue
+                    if migrated_column_shapes.get(
+                        (str(name), column_name)
+                    ) != (expected_shape, actual_shape):
+                        return False
+                    if expected_shape[1] == 1 and actual_shape[1] == 0:
+                        quoted_column = column_name.replace('"', '""')
+                        if connection.execute(
+                            f'SELECT 1 FROM "{quoted_name}" '
+                            f'WHERE "{quoted_column}" IS NULL LIMIT 1'
+                        ).fetchone() is not None:
+                            return False
+                actual_foreign_keys = sorted(
+                    tuple(row[2:])
+                    for row in connection.execute(
+                        f'PRAGMA foreign_key_list("{quoted_name}")'
+                    ).fetchall()
+                )
+                expected_foreign_keys = sorted(
+                    tuple(row[2:])
+                    for row in expected.execute(
+                        f'PRAGMA foreign_key_list("{quoted_name}")'
+                    ).fetchall()
+                )
+                if actual_foreign_keys != expected_foreign_keys:
                     return False
-            elif connection.execute(f'PRAGMA index_xinfo("{quoted_name}")').fetchall() != expected.execute(
-                f'PRAGMA index_xinfo("{quoted_name}")'
-            ).fetchall():
-                return False
+            else:
+                actual_index = [
+                    (int(row[0]), row[2], int(row[3]), row[4], int(row[5]))
+                    for row in connection.execute(
+                        f'PRAGMA index_xinfo("{quoted_name}")'
+                    ).fetchall()
+                ]
+                expected_index = [
+                    (int(row[0]), row[2], int(row[3]), row[4], int(row[5]))
+                    for row in expected.execute(
+                        f'PRAGMA index_xinfo("{quoted_name}")'
+                    ).fetchall()
+                ]
+                if actual_index != expected_index:
+                    return False
         return True
     finally:
         expected.close()

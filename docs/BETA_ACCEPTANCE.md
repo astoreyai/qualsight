@@ -1,6 +1,6 @@
-# QualSight 0.1.0-beta.5 — release-candidate acceptance record
+# QualSight 0.1.0-beta.6 — release-candidate acceptance record
 
-This record combines historical accepted evidence with focused beta-5 development evidence. It is not
+This record combines historical accepted evidence with focused beta-6 development evidence. It is not
 final package authority until the frozen committed-tree release gate, installed-package gate, and rollback
 check complete. Every row below names its evidence. Identifiers are content hashes recorded in the
 append-only `atg/ledger.jsonl` and in the persistent store on the reference workstation;
@@ -330,8 +330,33 @@ children leaked by an otherwise successful or crashing gate. The focused real-pr
 independent adversarial process-topology review reports no remaining blocker. The first 109-test root run exposed
 one incomplete ATG output binding after V67; 108 tests passed and only governance failed. Append-only successor
 V68 restored the complete 288-path binding without rewriting V67, and the full root suite then passed 109/109 in
-101.819 seconds. These are pre-release repair results; the clean committed release, installation, installed
-offline/browser validation, rollback, tag, and push remain required before beta-5 acceptance.
+101.819 seconds.
+
+## 2026-09-03 beta-5 package success and workstation-activation failure
+
+The clean beta-5 candidate at `f8764e5f79bf6246ad8e42c7d7b5258fa0380d72` completed all 15 release
+gates and produced the eight-file package at `dist/qualsight-0.1.0b5`; package inspection verified all seven
+payload hashes and bound its gate record and manifest to commit `f8764e5f79bf6246ad8e42c7d7b5258fa0380d72`
+and tree `d39c37d787b61d823cce4c8c6af84709a49d5fea`. The versioned installation completed its 28-step offline
+gate and all nine installed-browser validators; the aggregate evidence SHA-256 is
+`c7541a90aa0f7aecf357fb4a685be73094b9fe1f3ed4625dc62524790b2f817f`.
+
+An isolated canonical-path rollback then opened a copy of the real schema-5 store under beta 2, preserving
+its complete logical dump, six projects, 12 datasets, 68,108 samples, 76 runs, 188 artifacts, and artifact
+identity hash. Beta 5 migrated that same copy to schema 8, preserved those records, and created a byte-identical
+pre-migration snapshot. Live activation was still rejected: opening the already complete 269,500,416-byte
+schema-8 workstation store created another version-8-to-version-8 snapshot. The service was stopped, the
+activation symlink was removed, and the newly created snapshot was moved intact into the private validation
+evidence directory; the live database's logical dump and record counts remained unchanged.
+
+The cause is confirmed by SQLite metadata from the real migrated store: migration-added columns and indexes
+have legitimate physical ordinal, default, or nullability representations that differ from a fresh schema,
+although the ordered migration ledger and semantic table, foreign-key, index, and stored-value contracts agree.
+The beta-6 repair retains decision 009's fail-closed snapshot policy but applies ADR 012's semantic comparison.
+The new registered-LFW regression failed before the repair by creating a no-op snapshot, then passed after it;
+the incomplete-target-ledger snapshot/restore and version-4 migration tests also passed, for 3/3 focused tests
+in 28.232 seconds. Full clean beta-6 release, installation, installed offline/browser validation, rollback,
+activation, tag, and push remain required before acceptance.
 
 ## Research extensions outside QS-H74 beta acceptance
 

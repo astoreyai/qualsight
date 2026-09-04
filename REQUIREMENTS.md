@@ -149,7 +149,7 @@ Conditional requirements are added to the applicable phase gate only when activa
 
 ## Controlled beta release boundary
 
-The `0.1.0-beta.5` release authority is limited to one trusted researcher operating one
+The `0.1.0-beta.6` release authority is limited to one trusted researcher operating one
 Clarkson-controlled workstation. The beta-required controls are the accepted QS-A10 through QS-H74
 gates, the exact committed dependency locks and resource registry, loopback-only service binding,
 single-process data-directory ownership, private managed storage, explicit and hash-verified add-on

@@ -3618,7 +3618,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         vite_ref = components[("javascript", "vite", "7.3.6")]["bom-ref"]
         esbuild_ref = components[("javascript", "esbuild", "0.28.2")]["bom-ref"]
         pip_audit_ref = components[("python", "pip-audit", "2.10.0")]["bom-ref"]
-        build_ref = components[("build", "QualSight release toolchain", "0.1.0b5")]["bom-ref"]
+        build_ref = components[("build", "QualSight release toolchain", "0.1.0b6")]["bom-ref"]
         self.assertIn(pydantic_ref, dependency_graph[fastapi_ref])
         self.assertIn(esbuild_ref, dependency_graph[vite_ref])
         self.assertIn(pip_audit_ref, dependency_graph[build_ref])
@@ -3829,7 +3829,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             module.write_manifest(
                 root=ROOT,
                 output=output,
-                version="0.1.0b5",
+                version="0.1.0b6",
                 commit=expected_commit,
                 tree=expected_tree,
                 artifacts=artifacts,
@@ -3856,7 +3856,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 module.write_manifest(
                     root=ROOT,
                     output=output,
-                    version="0.1.0b5",
+                    version="0.1.0b6",
                     commit=expected_commit,
                     tree=expected_tree,
                     artifacts=artifacts,

@@ -1,6 +1,18 @@
 # Changelog
 
-## 0.1.0-beta.5 (unreleased release candidate) — 2026-09-03
+## 0.1.0-beta.6 (unreleased release candidate) — 2026-09-03
+
+* Schema completeness now compares required SQLite structures semantically instead of treating
+  migration-dependent column and index ordinals as corruption. Exact migration-ledger validation remains,
+  and the four known migration-produced column shapes are accepted only with their required stored-value
+  checks. A real registered-LFW recovery regression proves that reopening a fully migrated schema-8 store
+  does not create a no-op snapshot, while incomplete current-version repair retains its snapshot-and-restore
+  boundary.
+* Beta 5 remains immutable and untagged: it passed the release, package, installed offline, installed browser,
+  and isolated beta-2 rollback gates, but live workstation activation created a new 269,500,416-byte
+  version-8-to-version-8 snapshot on every reopen. Beta 6 is the required no-clobber repair.
+
+## 0.1.0-beta.5 (published candidate; not accepted) — 2026-09-03
 
 * Installed owner-purge and Stress Studio validation now resolve their immutable real-input manifests
   through the controlled deployment repository. The installed regression uses the real release projector
